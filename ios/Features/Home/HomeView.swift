@@ -194,7 +194,14 @@ struct HomeView: View {
             } else {
                 ForEach(displayedRecipes) { item in
                     NavigationLink {
-                        RecipeView(recipe: item.recipe, availableIngredients: Set(ingredientKeywords))
+                        RecipeView(
+                            recipe: item.recipe,
+                            availableIngredients: Set(ingredientKeywords),
+                            inventoryService: inventoryService,
+                            onInventoryChanged: {
+                                await loadInitialData()
+                            }
+                        )
                     } label: {
                         RecipeCardView(recipe: item.recipe, score: item.score)
                     }

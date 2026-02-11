@@ -4,8 +4,26 @@ import UIKit
 struct RecipeView: View {
     let recipe: Recipe
     let availableIngredients: Set<String>
+    let inventoryService: any InventoryServiceProtocol
+    let onInventoryChanged: () async -> Void
 
-    @State private var copyStatus: String?
+    @State private var statusText: String?
+    @State private var pendingWriteOffPlan: RecipeWriteOffPlan?
+    @State private var showWriteOffConfirmation = false
+    @State private var isPreparingWriteOff = false
+    @State private var isApplyingWriteOff = false
+
+    init(
+        recipe: Recipe,
+        availableIngredients: Set<String>,
+        inventoryService: any InventoryServiceProtocol,
+        onInventoryChanged: @escaping () async -> Void = {}
+    ) {
+        self.recipe = recipe
+        self.availableIngredients = availableIngredients
+        self.inventoryService = inventoryService
+        self.onInventoryChanged = onInventoryChanged
+    }
 
     var body: some View {
         ScrollView {
@@ -71,11 +89,14 @@ struct RecipeView: View {
                 }
                 .buttonStyle(.borderedProminent)
 
-                Button("Готовлю") {}
-                    .buttonStyle(.bordered)
+                Button(isPreparingWriteOff ? "Подготовка..." : (isApplyingWriteOff ? "Списание..." : "Готовлю")) {
+                    Task { await prepareWriteOffPlan() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(isPreparingWriteOff || isApplyingWriteOff)
 
-                if let copyStatus {
-                    Text(copyStatus)
+                if let statusText {
+                    Text(statusText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -84,6 +105,20 @@ struct RecipeView: View {
         }
         .navigationTitle("Рецепт")
         .navigationBarTitleDisplayMode(.inline)
+        .alert(
+            "Списать ингредиенты?",
+            isPresented: $showWriteOffConfirmation,
+            presenting: pendingWriteOffPlan
+        ) { plan in
+            Button(isApplyingWriteOff ? "Списываем..." : "Списать", role: .destructive) {
+                Task { await applyWriteOff(plan: plan) }
+            }
+            .disabled(isApplyingWriteOff)
+
+            Button("Отмена", role: .cancel) {}
+        } message: { plan in
+            Text(plan.summaryText)
+        }
     }
 
     private func copyMissingIngredients() {
@@ -92,12 +127,54 @@ struct RecipeView: View {
         }
 
         guard !missing.isEmpty else {
-            copyStatus = "Все ингредиенты есть дома."
+            statusText = "Все ингредиенты есть дома."
             return
         }
 
         UIPasteboard.general.string = missing.joined(separator: "\n")
-        copyStatus = "Список недостающих ингредиентов скопирован."
+        statusText = "Список недостающих ингредиентов скопирован."
+    }
+
+    private func prepareWriteOffPlan() async {
+        guard !isPreparingWriteOff && !isApplyingWriteOff else { return }
+        isPreparingWriteOff = true
+        defer { isPreparingWriteOff = false }
+
+        do {
+            let plan = try await BuildRecipeWriteOffPlanUseCase(inventoryService: inventoryService)
+                .execute(recipe: recipe)
+
+            guard !plan.entries.isEmpty else {
+                statusText = "Не удалось найти подходящие партии для списания."
+                pendingWriteOffPlan = nil
+                showWriteOffConfirmation = false
+                return
+            }
+
+            pendingWriteOffPlan = plan
+            showWriteOffConfirmation = true
+        } catch {
+            statusText = "Не удалось подготовить списание: \(error.localizedDescription)"
+        }
+    }
+
+    private func applyWriteOff(plan: RecipeWriteOffPlan) async {
+        guard !isApplyingWriteOff else { return }
+        isApplyingWriteOff = true
+        defer { isApplyingWriteOff = false }
+
+        do {
+            let result = try await ApplyRecipeWriteOffUseCase(inventoryService: inventoryService)
+                .execute(plan: plan)
+
+            let removed = result.removedBatches
+            let updated = result.updatedBatches
+            statusText = "Списание выполнено. Партии удалены: \(removed), обновлены: \(updated)."
+            pendingWriteOffPlan = nil
+            await onInventoryChanged()
+        } catch {
+            statusText = "Ошибка списания: \(error.localizedDescription)"
+        }
     }
 
     private func nutritionSummary(_ nutrition: Nutrition) -> String {

@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -80,7 +80,7 @@
 		B51AF4CF8DE1A13541AB75E9 /* DTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DTOs.swift; sourceTree = "<group>"; };
 		BB31437970EA4A642B4B64F2 /* InventoryUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryUseCases.swift; sourceTree = "<group>"; };
 		BCF41A6A8F64AD1998B0E6F9 /* EditBatchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditBatchView.swift; sourceTree = "<group>"; };
-		C3BB0E58BEF9C4C604DC9ABF /* InventoryAI.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = InventoryAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C3BB0E58BEF9C4C604DC9ABF /* InventoryAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InventoryAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D736BCB78CFB0DF36BB3C039 /* OnboardingFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowView.swift; sourceTree = "<group>"; };
 		D81FE1F026C8229593EFAE63 /* InventoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryView.swift; sourceTree = "<group>"; };
 		EACE4E9DB65A807AA6BFE756 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -334,7 +334,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					22EC9C40084D5CE7F537038F = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -352,7 +351,6 @@
 			packageReferences = (
 				6DFAB34ACC8E8BAADCF85531 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 			);
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -477,6 +475,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_AllowInsecureLookupEndpoints = NO;
 				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;
@@ -520,6 +519,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_AllowInsecureLookupEndpoints = NO;
 				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;

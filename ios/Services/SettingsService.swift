@@ -37,6 +37,7 @@ protocol SettingsServiceProtocol {
     func setOnboardingCompleted() async throws
     func requestNotificationAuthorization() async throws -> Bool
     func exportLocalData() async throws -> URL
+    func importLocalData(from fileURL: URL, replaceExisting: Bool) async throws
     func deleteAllLocalData(resetOnboarding: Bool) async throws
 }
 
@@ -135,6 +136,61 @@ actor SettingsService: SettingsServiceProtocol {
         let fileURL = directory.appendingPathComponent(filename)
         try data.write(to: fileURL, options: .atomic)
         return fileURL
+    }
+
+    func importLocalData(from fileURL: URL, replaceExisting: Bool = true) async throws {
+        guard let inventoryRepository else {
+            throw SettingsServiceError.inventoryUnavailable
+        }
+
+        let accessGranted = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessGranted {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let data = try Data(contentsOf: fileURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(LocalDataExportSnapshot.self, from: data)
+        let normalizedSettings = snapshot.settings.normalized()
+
+        if replaceExisting {
+            let batches = try inventoryRepository.listBatches(productId: nil)
+            if let notificationScheduler {
+                for batch in batches {
+                    try await notificationScheduler.cancelExpiryNotifications(batchId: batch.id)
+                }
+            }
+            center?.removeAllPendingNotificationRequests()
+            center?.removeAllDeliveredNotifications()
+            try inventoryRepository.deleteAllInventoryData()
+        }
+
+        for product in snapshot.products {
+            try inventoryRepository.upsertProduct(product)
+        }
+
+        for batch in snapshot.batches {
+            do {
+                try inventoryRepository.addBatch(batch)
+            } catch {
+                try inventoryRepository.updateBatch(batch)
+            }
+        }
+
+        for priceEntry in snapshot.priceEntries {
+            try inventoryRepository.savePriceEntry(priceEntry)
+        }
+
+        for event in snapshot.inventoryEvents {
+            try inventoryRepository.saveInventoryEvent(event)
+        }
+
+        try repository.saveSettings(normalizedSettings)
+        try repository.setOnboardingCompleted(true)
+        try await rescheduleAllExpiryNotifications(settings: normalizedSettings)
     }
 
     func deleteAllLocalData(resetOnboarding: Bool = true) async throws {

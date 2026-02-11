@@ -168,6 +168,57 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertFalse(onboardingCompleted)
         XCTAssertEqual(settings, .default)
     }
+
+    func testImportLocalDataRestoresSnapshot() async throws {
+        let sourceQueue = try AppDatabase.makeInMemoryQueue()
+        let sourceInventoryRepository = InventoryRepository(dbQueue: sourceQueue)
+        let sourceSettingsRepository = SettingsRepository(dbQueue: sourceQueue)
+        let exportsDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("InventoryCoreImport-\(UUID().uuidString)", isDirectory: true)
+
+        let sourceService = SettingsService(
+            repository: sourceSettingsRepository,
+            inventoryRepository: sourceInventoryRepository,
+            exportsDirectoryURL: exportsDirectory
+        )
+
+        let sourceProduct = Product(
+            barcode: "4601234567890",
+            name: "Кефир",
+            brand: "Тест",
+            category: "Молочные продукты"
+        )
+        try sourceInventoryRepository.upsertProduct(sourceProduct)
+        try sourceInventoryRepository.addBatch(
+            Batch(
+                productId: sourceProduct.id,
+                location: .fridge,
+                quantity: 3,
+                unit: .pcs,
+                expiryDate: Calendar.current.date(byAdding: .day, value: 4, to: Date())
+            )
+        )
+
+        let exportURL = try await sourceService.exportLocalData()
+
+        let targetQueue = try AppDatabase.makeInMemoryQueue()
+        let targetInventoryRepository = InventoryRepository(dbQueue: targetQueue)
+        let targetSettingsRepository = SettingsRepository(dbQueue: targetQueue)
+        let targetService = SettingsService(
+            repository: targetSettingsRepository,
+            inventoryRepository: targetInventoryRepository
+        )
+
+        try await targetService.importLocalData(from: exportURL, replaceExisting: true)
+
+        let importedProducts = try targetInventoryRepository.listProducts(location: nil, search: nil)
+        let importedBatches = try targetInventoryRepository.listBatches(productId: nil)
+
+        XCTAssertEqual(importedProducts.count, 1)
+        XCTAssertEqual(importedProducts.first?.name, "Кефир")
+        XCTAssertEqual(importedBatches.count, 1)
+        XCTAssertEqual(importedBatches.first?.quantity ?? 0, 3, accuracy: 0.001)
+    }
 }
 
 private actor NotificationSchedulerSpy: NotificationScheduling {

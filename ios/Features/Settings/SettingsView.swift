@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     let settingsService: any SettingsServiceProtocol
@@ -17,11 +18,13 @@ struct SettingsView: View {
 
     @State private var isSaving = false
     @State private var isExporting = false
+    @State private var isImporting = false
     @State private var isDeleting = false
     @State private var errorMessage: String?
     @State private var statusMessage: String?
     @State private var exportedFileURL: URL?
     @State private var showDeleteConfirmation = false
+    @State private var showImportPicker = false
 
     private let calendar = Calendar.current
 
@@ -75,7 +78,12 @@ struct SettingsView: View {
                 Button(isExporting ? "Экспортируем..." : "Экспортировать JSON") {
                     Task { await exportData() }
                 }
-                .disabled(isExporting || isDeleting)
+                .disabled(isExporting || isImporting || isDeleting)
+
+                Button(isImporting ? "Импортируем..." : "Импортировать JSON") {
+                    showImportPicker = true
+                }
+                .disabled(isExporting || isImporting || isDeleting)
 
                 if let exportedFileURL {
                     ShareLink(item: exportedFileURL) {
@@ -86,7 +94,7 @@ struct SettingsView: View {
                 Button(isDeleting ? "Удаляем..." : "Удалить локальные данные", role: .destructive) {
                     showDeleteConfirmation = true
                 }
-                .disabled(isExporting || isDeleting)
+                .disabled(isExporting || isImporting || isDeleting)
             }
 
             if let statusMessage {
@@ -105,7 +113,7 @@ struct SettingsView: View {
             "Удалить все локальные данные?",
             isPresented: $showDeleteConfirmation,
             titleVisibility: .visible
-        ) {
+        ) { 
             Button("Удалить всё", role: .destructive) {
                 Task { await deleteLocalData() }
             }
@@ -117,6 +125,19 @@ struct SettingsView: View {
             Button("Ок", role: .cancel) {}
         } message: {
             Text(errorMessage ?? "Неизвестная ошибка")
+        }
+        .fileImporter(
+            isPresented: $showImportPicker,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let fileURL = urls.first else { return }
+                Task { await importData(from: fileURL) }
+            case .failure(let error):
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -206,6 +227,21 @@ struct SettingsView: View {
             let fileURL = try await settingsService.exportLocalData()
             exportedFileURL = fileURL
             statusMessage = "Экспорт сохранён: \(fileURL.lastPathComponent)"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func importData(from fileURL: URL) async {
+        guard !isImporting else { return }
+        isImporting = true
+        defer { isImporting = false }
+
+        do {
+            try await settingsService.importLocalData(from: fileURL, replaceExisting: true)
+            exportedFileURL = nil
+            await load()
+            statusMessage = "Импорт завершён: \(fileURL.lastPathComponent)"
         } catch {
             errorMessage = error.localizedDescription
         }
