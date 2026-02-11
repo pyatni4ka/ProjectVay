@@ -101,16 +101,16 @@ final class HealthKitService {
 
     func fetchTodayConsumedNutrition() async throws -> Nutrition {
         #if canImport(HealthKit)
-        async let kcal = todayCumulativeValue(for: .dietaryEnergyConsumed, unit: .kilocalorie())
-        async let protein = todayCumulativeValue(for: .dietaryProtein, unit: .gram())
-        async let fat = todayCumulativeValue(for: .dietaryFatTotal, unit: .gram())
-        async let carbs = todayCumulativeValue(for: .dietaryCarbohydrates, unit: .gram())
+        let kcal = try await todayCumulativeValue(for: .dietaryEnergyConsumed, unit: .kilocalorie())
+        let protein = try await todayCumulativeValue(for: .dietaryProtein, unit: .gram())
+        let fat = try await todayCumulativeValue(for: .dietaryFatTotal, unit: .gram())
+        let carbs = try await todayCumulativeValue(for: .dietaryCarbohydrates, unit: .gram())
 
         return Nutrition(
-            kcal: try await kcal,
-            protein: try await protein,
-            fat: try await fat,
-            carbs: try await carbs
+            kcal: kcal,
+            protein: protein,
+            fat: fat,
+            carbs: carbs
         )
         #else
         return .empty

@@ -306,7 +306,7 @@ struct Recipe: Identifiable, Codable, Equatable {
     var servings: Int?
     var cuisine: String?
     var tags: [String]
-    var nutrition: Nutrition?
+    var nutrition: Nutrition? = nil
 }
 
 struct MealEntry: Identifiable, Codable, Equatable {

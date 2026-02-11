@@ -33,17 +33,23 @@ struct MealPlanView: View {
 
         var title: String {
             switch self {
-            case .breakfast: return "Завтрак"
-            case .lunch: return "Обед"
-            case .dinner: return "Ужин"
+            case .breakfast:
+                return "Завтрак"
+            case .lunch:
+                return "Обед"
+            case .dinner:
+                return "Ужин"
             }
         }
 
         var remainingMealsCount: Int {
             switch self {
-            case .breakfast: return 3
-            case .lunch: return 2
-            case .dinner: return 1
+            case .breakfast:
+                return 3
+            case .lunch:
+                return 2
+            case .dinner:
+                return 1
             }
         }
 
@@ -151,9 +157,8 @@ struct MealPlanView: View {
     @ViewBuilder
     private var nextMealRecommendationsSection: some View {
         if !nextMealRecommendations.isEmpty {
-            let topRecommendations = Array(nextMealRecommendations.prefix(5))
             Section("Рекомендации на \(nextMealSlot.title.lowercased())") {
-                ForEach(topRecommendations, id: \.recipe.id) { item in
+                ForEach(Array(nextMealRecommendations.prefix(5)), id: \.recipe.id) { item in
                     recommendationRow(item)
                 }
             }

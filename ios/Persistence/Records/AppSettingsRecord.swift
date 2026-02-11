@@ -13,6 +13,9 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var storesJSON: String
     var dislikedListJSON: String
     var avoidBones: Bool
+    var breakfastMinute: Int
+    var lunchMinute: Int
+    var dinnerMinute: Int
     var onboardingCompleted: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -25,6 +28,9 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case storesJSON = "stores_json"
         case dislikedListJSON = "disliked_list_json"
         case avoidBones = "avoid_bones"
+        case breakfastMinute = "breakfast_minute"
+        case lunchMinute = "lunch_minute"
+        case dinnerMinute = "dinner_minute"
         case onboardingCompleted = "onboarding_completed"
     }
 }
@@ -43,6 +49,9 @@ extension AppSettingsRecord {
         storesJSON = try Self.encodeJSON(normalized.stores.map(\.rawValue))
         dislikedListJSON = try Self.encodeJSON(normalized.dislikedList)
         avoidBones = normalized.avoidBones
+        breakfastMinute = normalized.mealSchedule.breakfastMinute
+        lunchMinute = normalized.mealSchedule.lunchMinute
+        dinnerMinute = normalized.mealSchedule.dinnerMinute
         self.onboardingCompleted = onboardingCompleted
     }
 
@@ -60,7 +69,12 @@ extension AppSettingsRecord {
             budgetWeek: budgetWeekMinor.map(Decimal.fromMinorUnits),
             stores: parsedStores,
             dislikedList: parsedDisliked,
-            avoidBones: avoidBones
+            avoidBones: avoidBones,
+            mealSchedule: .init(
+                breakfastMinute: breakfastMinute,
+                lunchMinute: lunchMinute,
+                dinnerMinute: dinnerMinute
+            )
         ).normalized()
     }
 

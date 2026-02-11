@@ -9,6 +9,7 @@ struct ProductDetailView: View {
     @State private var product: Product?
     @State private var batches: [Batch] = []
     @State private var priceHistory: [PriceEntry] = []
+    @State private var inventoryEvents: [InventoryEvent] = []
     @State private var isPresentingAddBatch = false
     @State private var errorMessage: String?
 
@@ -119,6 +120,28 @@ struct ProductDetailView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .font(.subheadline)
+                        }
+                    }
+                }
+
+                Section("История изменений") {
+                    if inventoryEvents.isEmpty {
+                        Text("История пока пустая")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(inventoryEvents.prefix(20)) { event in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(eventTitle(event.type))
+                                    .font(.subheadline)
+                                Text(event.timestamp.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let note = event.note, !note.isEmpty {
+                                    Text(note)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                 }
@@ -247,10 +270,12 @@ struct ProductDetailView: View {
 
             let batches = try await inventoryService.listBatches(productId: productID)
             let history = try await inventoryService.listPriceHistory(productId: productID)
+            let events = try await inventoryService.listEvents(productId: productID)
 
             self.product = product
             self.batches = batches
             self.priceHistory = history
+            self.inventoryEvents = events
             editableName = product.name
             editableBrand = product.brand ?? ""
             editableCategory = product.category
@@ -258,6 +283,21 @@ struct ProductDetailView: View {
             editableBones = product.mayContainBones
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func eventTitle(_ type: InventoryEvent.EventType) -> String {
+        switch type {
+        case .add:
+            return "Добавление"
+        case .remove:
+            return "Списание"
+        case .adjust:
+            return "Корректировка"
+        case .open:
+            return "Открыто"
+        case .close:
+            return "Закрыто"
         }
     }
 }

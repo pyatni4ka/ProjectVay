@@ -11,7 +11,14 @@ struct RootTabView: View {
 
     var body: some View {
         TabView(selection: $coordinator.selectedTab) {
-            NavigationStack { HomeView(inventoryService: inventoryService) }
+            NavigationStack {
+                HomeView(
+                    inventoryService: inventoryService,
+                    settingsService: settingsService,
+                    healthKitService: healthKitService,
+                    recipeServiceClient: recipeServiceClient
+                )
+            }
                 .tabItem { Label("Что приготовить", systemImage: "sparkles") }
                 .tag(RootTab.home)
 
@@ -35,7 +42,7 @@ struct RootTabView: View {
                 .tabItem { Label("План", systemImage: "calendar") }
                 .tag(RootTab.mealPlan)
 
-            NavigationStack { ProgressView() }
+            NavigationStack { ProgressView(healthKitService: healthKitService) }
                 .tabItem { Label("Прогресс", systemImage: "chart.line.uptrend.xyaxis") }
                 .tag(RootTab.progress)
 

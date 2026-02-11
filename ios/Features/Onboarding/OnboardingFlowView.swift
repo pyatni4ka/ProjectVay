@@ -6,6 +6,9 @@ struct OnboardingFlowView: View {
 
     @State private var quietStartDate = DateComponents.from(minutes: AppSettings.default.quietStartMinute).asDate
     @State private var quietEndDate = DateComponents.from(minutes: AppSettings.default.quietEndMinute).asDate
+    @State private var breakfastDate = DateComponents.from(minutes: AppSettings.default.mealSchedule.breakfastMinute).asDate
+    @State private var lunchDate = DateComponents.from(minutes: AppSettings.default.mealSchedule.lunchMinute).asDate
+    @State private var dinnerDate = DateComponents.from(minutes: AppSettings.default.mealSchedule.dinnerMinute).asDate
     @State private var expiryDaysText = "5,3,1"
     @State private var budgetDayText = "800"
     @State private var budgetWeekText = ""
@@ -40,6 +43,12 @@ struct OnboardingFlowView: View {
             Section("Тихие часы") {
                 DatePicker("Начало", selection: $quietStartDate, displayedComponents: [.hourAndMinute])
                 DatePicker("Конец", selection: $quietEndDate, displayedComponents: [.hourAndMinute])
+            }
+
+            Section("Время приёмов пищи") {
+                DatePicker("Завтрак", selection: $breakfastDate, displayedComponents: [.hourAndMinute])
+                DatePicker("Обед", selection: $lunchDate, displayedComponents: [.hourAndMinute])
+                DatePicker("Ужин", selection: $dinnerDate, displayedComponents: [.hourAndMinute])
             }
 
             Section("Уведомления о сроке") {
@@ -113,6 +122,9 @@ struct OnboardingFlowView: View {
             let settings = try await settingsService.loadSettings()
             quietStartDate = DateComponents.from(minutes: settings.quietStartMinute).asDate
             quietEndDate = DateComponents.from(minutes: settings.quietEndMinute).asDate
+            breakfastDate = DateComponents.from(minutes: settings.mealSchedule.breakfastMinute).asDate
+            lunchDate = DateComponents.from(minutes: settings.mealSchedule.lunchMinute).asDate
+            dinnerDate = DateComponents.from(minutes: settings.mealSchedule.dinnerMinute).asDate
             expiryDaysText = settings.expiryAlertsDays.map(String.init).joined(separator: ",")
             budgetDayText = settings.budgetDay.formattedSimple
             budgetWeekText = settings.budgetWeek?.formattedSimple ?? ""
@@ -155,7 +167,12 @@ struct OnboardingFlowView: View {
             budgetWeek: budgetWeek,
             stores: selectedStores.isEmpty ? AppSettings.default.stores : Array(selectedStores),
             dislikedList: disliked,
-            avoidBones: avoidBones
+            avoidBones: avoidBones,
+            mealSchedule: .init(
+                breakfastMinute: minuteOfDay(breakfastDate),
+                lunchMinute: minuteOfDay(lunchDate),
+                dinnerMinute: minuteOfDay(dinnerDate)
+            )
         ).normalized()
 
         isSaving = true

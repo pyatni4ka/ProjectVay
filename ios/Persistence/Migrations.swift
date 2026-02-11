@@ -94,6 +94,14 @@ enum AppMigrations {
             try db.create(index: "idx_internal_code_mappings_product", on: "internal_code_mappings", columns: ["product_id"])
         }
 
+        migrator.registerMigration("v3_meal_schedule") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "breakfast_minute", .integer).notNull().defaults(to: 8 * 60)
+                table.add(column: "lunch_minute", .integer).notNull().defaults(to: 13 * 60)
+                table.add(column: "dinner_minute", .integer).notNull().defaults(to: 19 * 60)
+            }
+        }
+
         return migrator
     }
 }
