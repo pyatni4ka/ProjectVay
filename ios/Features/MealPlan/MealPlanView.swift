@@ -91,132 +91,18 @@ struct MealPlanView: View {
     @State private var remainingTodayNutrition = Nutrition(kcal: 2200, protein: 140, fat: 70, carbs: 220)
     @State private var nextMealTargetNutrition = Nutrition(kcal: 730, protein: 47, fat: 23, carbs: 73)
     @State private var nextMealSlot: MealSlot = .breakfast
-    @State private var remainingMealsCount = 3
     @State private var nextMealRecommendations: [RecommendResponse.RankedRecipe] = []
     @State private var healthStatusMessage: String?
     @State private var hasRequestedHealthAccess = false
 
     var body: some View {
         List {
-            Section {
-                Picker("Период", selection: $selectedRange) {
-                    ForEach(PlanRange.allCases) { range in
-                        Text(range.title).tag(range)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            Section("КБЖУ (Apple Health / Yazio)") {
-                HStack {
-                    Text("Цель на день")
-                    Spacer()
-                    Text(nutritionSummary(dayTargetNutrition))
-                }
-
-                HStack {
-                    Text("Съедено сегодня")
-                    Spacer()
-                    Text(nutritionSummary(consumedTodayNutrition))
-                }
-
-                HStack {
-                    Text("Остаток на сегодня")
-                    Spacer()
-                    Text(nutritionSummary(remainingTodayNutrition))
-                }
-
-                HStack {
-                    Text("Таргет на \(nextMealSlot.title.lowercased())")
-                    Spacer()
-                    Text(nutritionSummary(nextMealTargetNutrition))
-                }
-
-                if let healthStatusMessage {
-                    Text(healthStatusMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if !nextMealRecommendations.isEmpty {
-                Section("Рекомендации на \(nextMealSlot.title.lowercased())") {
-                    ForEach(nextMealRecommendations.prefix(5), id: \.recipe.id) { item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.recipe.title)
-                                .font(.headline)
-                            Text(nutritionSummary(item.recipe.nutrition ?? .empty))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Скор: \(item.score.formatted(.number.precision(.fractionLength(2))))")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-
-            if isLoading {
-                Section {
-                    HStack {
-                        ProgressView()
-                        Text("Генерируем план...")
-                    }
-                }
-            }
-
-            if let mealPlan {
-                ForEach(mealPlan.days) { day in
-                    Section(day.date) {
-                        ForEach(day.entries) { entry in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("\(mealTypeTitle(entry.mealType)): \(entry.recipe.title)")
-                                    .font(.headline)
-                                Text("\(entry.kcal.formatted(.number.precision(.fractionLength(0)))) ккал · ~\(entry.estimatedCost.formatted(.number.precision(.fractionLength(0)))) ₽")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        if !day.missingIngredients.isEmpty {
-                            Text("Не хватает: \(day.missingIngredients.joined(separator: ", "))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if !mealPlan.shoppingList.isEmpty {
-                    Section("Покупки") {
-                        ForEach(mealPlan.shoppingList, id: \.self) { item in
-                            Text(item)
-                        }
-                    }
-                }
-
-                Section("Итоги") {
-                    Text("Оценка стоимости: \(mealPlan.estimatedTotalCost.formatted(.number.precision(.fractionLength(0)))) ₽")
-                    if let lastGeneratedAt {
-                        Text("Обновлено: \(lastGeneratedAt.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if !mealPlan.warnings.isEmpty {
-                        ForEach(mealPlan.warnings, id: \.self) { warning in
-                            Text(warning)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-            }
-
-            if let errorMessage {
-                Section("Статус") {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                }
-            }
+            periodSection
+            nutritionSection
+            nextMealRecommendationsSection
+            loadingSection
+            mealPlanSections
+            errorSection
         }
         .navigationTitle("План питания")
         .toolbar {
@@ -236,6 +122,148 @@ struct MealPlanView: View {
             Task {
                 await generatePlan()
             }
+        }
+    }
+
+    private var periodSection: some View {
+        Section {
+            Picker("Период", selection: $selectedRange) {
+                ForEach(PlanRange.allCases) { range in
+                    Text(range.title).tag(range)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private var nutritionSection: some View {
+        Section("КБЖУ (Apple Health / Yazio)") {
+            nutritionRow(title: "Цель на день", nutrition: dayTargetNutrition)
+            nutritionRow(title: "Съедено сегодня", nutrition: consumedTodayNutrition)
+            nutritionRow(title: "Остаток на сегодня", nutrition: remainingTodayNutrition)
+            nutritionRow(title: "Таргет на \(nextMealSlot.title.lowercased())", nutrition: nextMealTargetNutrition)
+
+            if let healthStatusMessage {
+                Text(healthStatusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var nextMealRecommendationsSection: some View {
+        if !nextMealRecommendations.isEmpty {
+            let topRecommendations = Array(nextMealRecommendations.prefix(5).enumerated())
+            Section("Рекомендации на \(nextMealSlot.title.lowercased())") {
+                if topRecommendations.indices.contains(0) {
+                    recommendationRow(topRecommendations[0].element)
+                }
+                if topRecommendations.indices.contains(1) {
+                    recommendationRow(topRecommendations[1].element)
+                }
+                if topRecommendations.indices.contains(2) {
+                    recommendationRow(topRecommendations[2].element)
+                }
+                if topRecommendations.indices.contains(3) {
+                    recommendationRow(topRecommendations[3].element)
+                }
+                if topRecommendations.indices.contains(4) {
+                    recommendationRow(topRecommendations[4].element)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var loadingSection: some View {
+        if isLoading {
+            Section {
+                HStack {
+                    ProgressView()
+                    Text("Генерируем план...")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mealPlanSections: some View {
+        if let mealPlan {
+            ForEach(mealPlan.days) { day in
+                Section(day.date) {
+                    ForEach(day.entries) { entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(mealTypeTitle(entry.mealType)): \(entry.recipe.title)")
+                                .font(.headline)
+                            Text("\(entry.kcal.formatted(.number.precision(.fractionLength(0)))) ккал · ~\(entry.estimatedCost.formatted(.number.precision(.fractionLength(0)))) ₽")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if !day.missingIngredients.isEmpty {
+                        Text("Не хватает: \(day.missingIngredients.joined(separator: ", "))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if !mealPlan.shoppingList.isEmpty {
+                Section("Покупки") {
+                    ForEach(mealPlan.shoppingList, id: \.self) { item in
+                        Text(item)
+                    }
+                }
+            }
+
+            Section("Итоги") {
+                Text("Оценка стоимости: \(mealPlan.estimatedTotalCost.formatted(.number.precision(.fractionLength(0)))) ₽")
+                if let lastGeneratedAt {
+                    Text("Обновлено: \(lastGeneratedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if !mealPlan.warnings.isEmpty {
+                    ForEach(mealPlan.warnings, id: \.self) { warning in
+                        Text(warning)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var errorSection: some View {
+        if let errorMessage {
+            Section("Статус") {
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func nutritionRow(title: String, nutrition: Nutrition) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(nutritionSummary(nutrition))
+        }
+    }
+
+    private func recommendationRow(_ item: RecommendResponse.RankedRecipe) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(item.recipe.title)
+                .font(.headline)
+            Text(nutritionSummary(item.recipe.nutrition ?? .empty))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Скор: \(item.score.formatted(.number.precision(.fractionLength(2))))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -264,7 +292,6 @@ struct MealPlanView: View {
             remainingTodayNutrition = nutritionSnapshot.remainingToday
             nextMealTargetNutrition = nutritionSnapshot.nextMealTarget
             nextMealSlot = nutritionSnapshot.nextMealSlot
-            remainingMealsCount = nutritionSnapshot.remainingMealsCount
             healthStatusMessage = nutritionSnapshot.statusMessage
 
             let productsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })

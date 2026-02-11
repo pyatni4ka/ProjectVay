@@ -149,15 +149,17 @@ ProjectVay/
 
 ### iOS meal plan flow
 1. `MealPlanView` собирает данные из локального инвентаря и настроек (`budget/disliked/avoidBones`).
-2. Подтягивает калории из Apple Health (`dietaryEnergyConsumed`), куда они попадают из Yazio.
-3. Вычисляет адаптивную дневную цель:
-   - для режима `День` уменьшает цель на уже потреблённые калории;
-   - для режима `Неделя` использует базовую дневную цель.
+2. Подтягивает КБЖУ из Apple Health (`dietaryEnergyConsumed`, `dietaryProtein`, `dietaryFatTotal`, `dietaryCarbohydrates`), куда данные попадают из Yazio.
+3. Вычисляет адаптивные цели:
+   - базовый дневной КБЖУ-таргет;
+   - остаток КБЖУ на день по факту потребления;
+   - целевой КБЖУ на следующий приём пищи (остаток / количество оставшихся приёмов).
 4. Формирует payload для `/api/v1/meal-plan/generate`:
    - список доступных ингредиентов,
    - список expiring-ингредиентов,
-   - цель по калориям и бюджет.
-5. Отображает план по дням, missing ingredients, shopping list, estimated total cost и warnings.
+   - адаптивный КБЖУ-таргет и бюджет.
+5. Дополнительно вызывает `/api/v1/recipes/recommend` для блока “Рекомендации на следующий приём” с целевым КБЖУ следующего приёма.
+6. Отображает план по дням, missing ingredients, shopping list, estimated total cost, warnings и отдельный блок рекомендаций на следующий приём.
 
 ## 5) Уведомления сроков (quiet hours)
 
