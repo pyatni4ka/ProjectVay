@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
+# Node
+node_modules/
+backend/node_modules/
+
+# Logs
+*.log
