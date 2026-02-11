@@ -105,11 +105,54 @@ Response `200`:
 ```json
 {
   "sources": ["food.ru", "eda.ru", "allrecipes.com"],
-  "cacheSize": 42
+  "cacheSize": 42,
+  "persistentCacheSize": 128,
+  "persistentCacheEnabled": true
 }
 ```
 
-## 5) GET /barcode/lookup (optional)
+## 5) POST /meal-plan/generate
+Генерация плана питания на день/неделю (3 приёма пищи).
+
+Request:
+```json
+{
+  "days": 7,
+  "ingredientKeywords": ["яйца", "молоко", "курица"],
+  "expiringSoonKeywords": ["молоко"],
+  "targets": {"kcal": 2200, "protein": 150, "fat": 70, "carbs": 220},
+  "beveragesKcal": 120,
+  "budget": {"perDay": 900},
+  "exclude": ["кускус"],
+  "avoidBones": true,
+  "cuisine": ["русская"]
+}
+```
+
+Response `200`:
+```json
+{
+  "days": [
+    {
+      "date": "2026-02-12",
+      "entries": [
+        {"mealType": "breakfast", "score": 0.91, "kcal": 380, "estimatedCost": 180, "recipe": {"id": "r_omelet", "title": "Омлет с помидорами"}}
+      ],
+      "totals": {"kcal": 1260, "estimatedCost": 540},
+      "targets": {"kcal": 2080, "perMealKcal": 693.33},
+      "missingIngredients": ["помидоры"]
+    }
+  ],
+  "shoppingList": ["помидоры"],
+  "estimatedTotalCost": 3780,
+  "warnings": ["Учтён калораж напитков: 120 ккал/день."]
+}
+```
+
+Ошибки:
+- `400 invalid_meal_plan_payload`
+
+## 6) GET /barcode/lookup (optional)
 Прокси-lookup для barcode провайдеров.
 
 Query:
@@ -134,3 +177,4 @@ Response:
 - Блокируются `localhost`, loopback и private network диапазоны.
 - Источник должен входить в whitelist доменов (`RECIPE_SOURCE_WHITELIST`).
 - На endpoint действует in-memory rate limit (окно и лимит настраиваются env-переменными).
+- Для recipe-кэша используется persistent SQLite (`RECIPE_CACHE_DB_PATH`) + TTL (`RECIPE_CACHE_TTL_SECONDS`).

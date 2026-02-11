@@ -1,4 +1,4 @@
-# Архитектура проекта (после Этапов 1 + 2 hardening + базового 3)
+# Архитектура проекта (после Этапов 1 + 2 hardening + расширенного 3)
 
 ## 1) Структура модулей
 
@@ -46,7 +46,7 @@ ProjectVay/
 │   ├── src/
 │   │   ├── api/routes.ts
 │   │   ├── config/recipeSources.ts
-│   │   ├── services/{recipeScraper,recipeIndex,sourcePolicy,cacheStore,recommendation}.ts
+│   │   ├── services/{recipeScraper,recipeIndex,sourcePolicy,cacheStore,persistentRecipeCache,recommendation,mealPlan}.ts
 │   │   └── types/contracts.ts
 │   └── test/
 └── docs/
@@ -92,12 +92,17 @@ ProjectVay/
 1. `OnboardingFlowView` запрашивает уведомления.
 2. Пользователь настраивает quiet hours, шаблон дней, бюджет, магазины, дизлайки.
 3. `SettingsService` сохраняет нормализованные настройки и флаг `onboarding_completed`.
+4. После сохранения настроек `SettingsService` автоматически перепланирует expiry-уведомления для всех актуальных партий с датой срока.
 
 ### Инвентарь
 1. `AddProductView` создаёт `Product` и первичную `Batch`.
 2. `InventoryService` сохраняет данные через `InventoryRepository`.
 3. `InventoryService` пишет `InventoryEvent`.
 4. `NotificationScheduler` ставит уведомления для партий с `expiryDate`.
+5. `InventoryView` поддерживает быстрый swipe-action `Списать` по партии.
+6. `ProductDetailView` поддерживает:
+   - swipe-actions по партиям (`Открыть/Закрыть`, `Списать`);
+   - добавление цены по магазину с немедленным обновлением истории.
 
 ### Редактирование партии
 1. `EditBatchView` меняет срок/количество/локацию.
@@ -125,11 +130,24 @@ ProjectVay/
    - применяет rate limiting;
    - берёт recipe из кэша или скачивает HTML и парсит JSON-LD schema.org;
    - отклоняет рецепт без изображения/ингредиентов/шагов.
-2. Успешно распарсенный рецепт:
-   - попадает в `CacheStore` (TTL + ограничение размера);
-   - индексируется в `RecipeIndex`.
-3. `GET /api/v1/recipes/search` ищет по объединённому индексу (seed + fetched).
-4. `POST /api/v1/recipes/recommend` ранжирует текущий индекс.
+2. Кэш:
+   - L1: `CacheStore` (in-memory TTL + ограничение размера);
+   - L2: `PersistentRecipeCache` (SQLite через `node:sqlite`, TTL и bootstrap индекса после рестарта).
+3. Успешно распарсенный рецепт индексируется в `RecipeIndex`.
+4. `GET /api/v1/recipes/search` ищет по объединённому индексу (seed + fetched).
+5. `POST /api/v1/recipes/recommend` ранжирует текущий индекс.
+6. `POST /api/v1/meal-plan/generate` строит план на 1..7 дней:
+   - 3 приёма пищи/день (завтрак/обед/ужин),
+   - учитывает цели, бюджет, исключения, expiring/in-stock сигналы,
+   - возвращает shopping list и ориентировочную стоимость.
+
+### iOS meal plan flow
+1. `MealPlanView` собирает данные из локального инвентаря и настроек (`budget/disliked/avoidBones`).
+2. Формирует payload для `/api/v1/meal-plan/generate`:
+   - список доступных ингредиентов,
+   - список expiring-ингредиентов,
+   - цель по калориям и бюджет.
+3. Отображает план по дням, missing ingredients, shopping list, estimated total cost и warnings.
 
 ## 5) Уведомления сроков (quiet hours)
 
@@ -155,6 +173,6 @@ ProjectVay/
 ## 7) Что остаётся следующими этапами
 
 - калибровка lookup-провайдеров на реальных ключах/API-квотах;
-- расширенный recipe ranking + генерация meal plan;
+- автосписание ингредиентов после шага «Готовлю» и автогенерация списка покупок из фактического meal-flow;
 - полноценная интеграция HealthKit-графиков прогресса;
-- persistent cache/index backend (SQLite/Postgres вместо in-memory).
+- миграция backend-кэша на Postgres при необходимости scale-out.

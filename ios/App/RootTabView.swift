@@ -6,6 +6,7 @@ struct RootTabView: View {
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
     let barcodeLookupService: BarcodeLookupService
+    let recipeServiceClient: RecipeServiceClient?
 
     var body: some View {
         TabView(selection: $coordinator.selectedTab) {
@@ -22,7 +23,13 @@ struct RootTabView: View {
                 .tabItem { Label("Инвентарь", systemImage: "refrigerator") }
                 .tag(RootTab.inventory)
 
-            NavigationStack { MealPlanView() }
+            NavigationStack {
+                MealPlanView(
+                    inventoryService: inventoryService,
+                    settingsService: settingsService,
+                    recipeServiceClient: recipeServiceClient
+                )
+            }
                 .tabItem { Label("План", systemImage: "calendar") }
                 .tag(RootTab.mealPlan)
 

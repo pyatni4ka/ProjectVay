@@ -17,6 +17,8 @@ struct ProductDetailView: View {
     @State private var editableCategory = ""
     @State private var editableDisliked = false
     @State private var editableBones = false
+    @State private var newPriceText = ""
+    @State private var newPriceStore: Store = .pyaterochka
 
     var body: some View {
         List {
@@ -63,6 +65,16 @@ struct ProductDetailView: View {
                                     .foregroundStyle(.secondary)
                                 }
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(batch.isOpened ? "Закрыть" : "Открыть") {
+                                    Task { await toggleBatchOpened(batch) }
+                                }
+                                .tint(.blue)
+
+                                Button("Списать", role: .destructive) {
+                                    Task { await removeBatch(batch) }
+                                }
+                            }
                         }
                     }
 
@@ -72,6 +84,28 @@ struct ProductDetailView: View {
                 }
 
                 Section("Цены") {
+                    if let latest = priceHistory.first {
+                        HStack {
+                            Text("Последняя цена")
+                            Spacer()
+                            Text("\(latest.price.formattedPriceRub) ₽ • \(latest.store.title)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Picker("Магазин", selection: $newPriceStore) {
+                        ForEach(Store.allCases) { store in
+                            Text(store.title).tag(store)
+                        }
+                    }
+
+                    TextField("Новая цена, ₽", text: $newPriceText)
+                        .keyboardType(.decimalPad)
+
+                    Button("Добавить цену") {
+                        Task { await addPriceEntry() }
+                    }
+
                     if priceHistory.isEmpty {
                         Text("История цен пустая")
                             .foregroundStyle(.secondary)
@@ -155,6 +189,50 @@ struct ProductDetailView: View {
         do {
             try await inventoryService.deleteProduct(id: productID)
             dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func toggleBatchOpened(_ batch: Batch) async {
+        do {
+            var updated = batch
+            updated.isOpened.toggle()
+            _ = try await inventoryService.updateBatch(updated)
+            await loadData()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func removeBatch(_ batch: Batch) async {
+        do {
+            try await inventoryService.removeBatch(id: batch.id)
+            await loadData()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func addPriceEntry() async {
+        guard
+            let product,
+            let value = Decimal(string: newPriceText.replacingOccurrences(of: ",", with: ".")),
+            value >= 0
+        else {
+            errorMessage = "Введите корректную цену"
+            return
+        }
+
+        do {
+            let entry = PriceEntry(
+                productId: product.id,
+                store: newPriceStore,
+                price: value
+            )
+            try await inventoryService.savePriceEntry(entry)
+            newPriceText = ""
+            await loadData()
         } catch {
             errorMessage = error.localizedDescription
         }

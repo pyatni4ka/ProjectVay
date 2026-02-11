@@ -47,6 +47,8 @@ targets:
         INFOPLIST_KEY_EnableRFLookup: NO
         INFOPLIST_KEY_EnableOpenFoodFactsLookup: YES
         INFOPLIST_KEY_AllowInsecureLookupEndpoints: NO
+        INFOPLIST_KEY_RecipeServiceBaseURL: "http://127.0.0.1:8080"
+        INFOPLIST_KEY_AllowInsecureRecipeServiceURL: YES
         INFOPLIST_KEY_LookupTimeoutSeconds: "3.0"
         INFOPLIST_KEY_LookupRetryCount: "2"
         INFOPLIST_KEY_LookupRetryDelayMilliseconds: "350"

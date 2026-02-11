@@ -5,6 +5,8 @@ struct AppConfig {
     let enableRFProvider: Bool
     let enableOpenFoodFacts: Bool
     let allowInsecureLookupEndpoints: Bool
+    let recipeServiceBaseURL: URL?
+    let allowInsecureRecipeServiceURL: Bool
     let eanDBApiKey: String?
     let rfLookupBaseURL: URL?
     let lookupPolicy: BarcodeLookupPolicy
@@ -32,6 +34,11 @@ struct AppConfig {
             fallback: false
         )
 
+        let allowInsecureRecipeServiceURL = boolValue(
+            env["ALLOW_INSECURE_RECIPE_SERVICE_URL"] ?? stringValue(info["AllowInsecureRecipeServiceURL"]),
+            fallback: true
+        )
+
         let eanDBApiKey = nonEmpty(
             env["EAN_DB_API_KEY"] ?? stringValue(info["EANDBApiKey"])
         )
@@ -39,6 +46,11 @@ struct AppConfig {
         let rfLookupBaseURL = sanitizeLookupBaseURL(
             env["RF_LOOKUP_BASE_URL"] ?? stringValue(info["BarcodeProxyBaseURL"])
         , allowInsecure: allowInsecureLookupEndpoints)
+
+        let recipeServiceBaseURL = sanitizeLookupBaseURL(
+            env["RECIPE_SERVICE_BASE_URL"] ?? stringValue(info["RecipeServiceBaseURL"]) ?? "http://127.0.0.1:8080",
+            allowInsecure: allowInsecureRecipeServiceURL
+        )
 
         let timeoutSeconds = doubleValue(
             env["LOOKUP_TIMEOUT_SECONDS"] ?? stringValue(info["LookupTimeoutSeconds"]),
@@ -80,6 +92,8 @@ struct AppConfig {
             enableRFProvider: enableRFProvider,
             enableOpenFoodFacts: enableOpenFoodFacts,
             allowInsecureLookupEndpoints: allowInsecureLookupEndpoints,
+            recipeServiceBaseURL: recipeServiceBaseURL,
+            allowInsecureRecipeServiceURL: allowInsecureRecipeServiceURL,
             eanDBApiKey: eanDBApiKey,
             rfLookupBaseURL: rfLookupBaseURL,
             lookupPolicy: BarcodeLookupPolicy(

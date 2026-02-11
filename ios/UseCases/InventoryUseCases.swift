@@ -10,6 +10,7 @@ struct ProductWithBatches: Identifiable {
 struct InventorySnapshot {
     let products: [ProductWithBatches]
     let expiringSoon: [Batch]
+    let productByID: [UUID: Product]
 }
 
 struct LoadInventorySnapshotUseCase {
@@ -17,6 +18,7 @@ struct LoadInventorySnapshotUseCase {
 
     func execute(location: InventoryLocation?, search: String?) async throws -> InventorySnapshot {
         let products = try await inventoryService.listProducts(location: location, search: search)
+        let allProducts = try await inventoryService.listProducts(location: nil, search: nil)
 
         var productWithBatches: [ProductWithBatches] = []
         for product in products {
@@ -25,7 +27,11 @@ struct LoadInventorySnapshotUseCase {
         }
 
         let expiring = try await inventoryService.expiringBatches(horizonDays: 5)
-        return InventorySnapshot(products: productWithBatches, expiringSoon: expiring)
+        return InventorySnapshot(
+            products: productWithBatches,
+            expiringSoon: expiring,
+            productByID: Dictionary(uniqueKeysWithValues: allProducts.map { ($0.id, $0) })
+        )
     }
 }
 

@@ -6,6 +6,7 @@ struct AppDependencies {
     let settingsService: SettingsService
     let scannerService: ScannerService
     let barcodeLookupService: BarcodeLookupService
+    let recipeServiceClient: RecipeServiceClient?
 
     static func makeLive() throws -> AppDependencies {
         let config = AppConfig.live()
@@ -20,7 +21,12 @@ struct AppDependencies {
             notificationScheduler: notificationScheduler
         )
 
-        let settingsService = SettingsService(repository: settingsRepository)
+        let settingsService = SettingsService(
+            repository: settingsRepository,
+            inventoryRepository: inventoryRepository,
+            notificationScheduler: notificationScheduler,
+            center: .current()
+        )
         let scannerService = ScannerService()
 
         var providers: [any BarcodeLookupProvider] = []
@@ -41,11 +47,16 @@ struct AppDependencies {
             policy: config.lookupPolicy
         )
 
+        let recipeServiceClient = config.recipeServiceBaseURL.map {
+            RecipeServiceClient(baseURL: $0)
+        }
+
         return AppDependencies(
             inventoryService: inventoryService,
             settingsService: settingsService,
             scannerService: scannerService,
-            barcodeLookupService: barcodeLookupService
+            barcodeLookupService: barcodeLookupService,
+            recipeServiceClient: recipeServiceClient
         )
     }
 }

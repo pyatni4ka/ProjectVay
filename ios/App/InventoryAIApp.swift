@@ -25,7 +25,8 @@ struct InventoryAIApp: App {
                         RootTabView(
                             inventoryService: dependencies.inventoryService,
                             settingsService: dependencies.settingsService,
-                            barcodeLookupService: dependencies.barcodeLookupService
+                            barcodeLookupService: dependencies.barcodeLookupService,
+                            recipeServiceClient: dependencies.recipeServiceClient
                         )
                     } else {
                         NavigationStack {

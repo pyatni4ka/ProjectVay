@@ -1,16 +1,23 @@
 import { Router } from "express";
 import { defaultRecipeSourceWhitelist, recipeSourceWhitelistFromEnv } from "../config/recipeSources.js";
 import { mockRecipes } from "../data/mockRecipes.js";
+import { generateMealPlan } from "../services/mealPlan.js";
 import { rankRecipes } from "../services/recommendation.js";
 import { CacheStore } from "../services/cacheStore.js";
+import { PersistentRecipeCache } from "../services/persistentRecipeCache.js";
 import { fetchAndParseRecipe, RecipeScraperError } from "../services/recipeScraper.js";
 import { RecipeIndex } from "../services/recipeIndex.js";
 import { isURLAllowedByWhitelist, parseRecipeURL } from "../services/sourcePolicy.js";
-import type { RecommendPayload, Recipe } from "../types/contracts.js";
+import type { MealPlanRequest, RecommendPayload, Recipe } from "../types/contracts.js";
 
 const router = Router();
-const recipeCache = new CacheStore<Recipe>(1000 * 60 * 60 * 24 * 7, 10_000);
+const recipeCacheTTLSeconds = Number(process.env.RECIPE_CACHE_TTL_SECONDS ?? 60 * 60 * 24 * 7);
+const recipeCache = new CacheStore<Recipe>(recipeCacheTTLSeconds * 1000, 10_000);
+const persistentRecipeCache = makePersistentRecipeCache();
 const recipeIndex = new RecipeIndex(mockRecipes);
+for (const recipe of persistentRecipeCache?.listActive(10_000) ?? []) {
+  recipeIndex.upsert(recipe);
+}
 const sourceWhitelist = recipeSourceWhitelistFromEnv(process.env.RECIPE_SOURCE_WHITELIST, defaultRecipeSourceWhitelist);
 
 const fetchRateLimitState = new Map<string, { count: number; resetAt: number }>();
@@ -61,12 +68,20 @@ router.post("/recipes/fetch", async (req, res, next) => {
       return res.json(cached);
     }
 
+    const persisted = persistentRecipeCache?.get(normalizedURL);
+    if (persisted) {
+      recipeCache.set(normalizedURL, persisted);
+      recipeIndex.upsert(persisted);
+      return res.json(persisted);
+    }
+
     const parsed = await fetchAndParseRecipe(normalizedURL);
     if (!parsed.imageURL) {
       return res.status(422).json({ error: "Recipe has no image" });
     }
 
     recipeCache.set(normalizedURL, parsed);
+    persistentRecipeCache?.set(normalizedURL, parsed);
     recipeIndex.upsert(parsed);
     return res.json(parsed);
   } catch (error) {
@@ -94,8 +109,20 @@ router.post("/recipes/fetch", async (req, res, next) => {
 router.get("/recipes/sources", (_req, res) => {
   res.json({
     sources: sourceWhitelist,
-    cacheSize: recipeCache.size()
+    cacheSize: recipeCache.size(),
+    persistentCacheSize: persistentRecipeCache?.size() ?? 0,
+    persistentCacheEnabled: Boolean(persistentRecipeCache)
   });
+});
+
+router.post("/meal-plan/generate", (req, res) => {
+  const payload = normalizeMealPlanPayload(req.body);
+  if (!payload) {
+    return res.status(400).json({ error: "invalid_meal_plan_payload" });
+  }
+
+  const plan = generateMealPlan(recipeIndex.all(), payload);
+  res.json(plan);
 });
 
 router.get("/barcode/lookup", (req, res) => {
@@ -148,4 +175,87 @@ function consumeFetchRateLimit(key: string): boolean {
   existing.count += 1;
   fetchRateLimitState.set(key, existing);
   return true;
+}
+
+function makePersistentRecipeCache(): PersistentRecipeCache | null {
+  const dbPath = process.env.RECIPE_CACHE_DB_PATH ?? "data/recipe-cache.sqlite";
+  try {
+    return new PersistentRecipeCache({
+      dbPath,
+      ttlSeconds: recipeCacheTTLSeconds
+    });
+  } catch (error) {
+    console.error("[recipe-cache] failed to init persistent cache", error);
+    return null;
+  }
+}
+
+function normalizeMealPlanPayload(body: unknown): MealPlanRequest | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+
+  const ingredientKeywords = toStringArray(body.ingredientKeywords);
+  const expiringSoonKeywords = toStringArray(body.expiringSoonKeywords);
+  if (ingredientKeywords.length === 0 && expiringSoonKeywords.length === 0) {
+    return null;
+  }
+
+  const targets = isRecord(body.targets) ? body.targets : {};
+
+  return {
+    days: toOptionalNumber(body.days),
+    ingredientKeywords,
+    expiringSoonKeywords,
+    targets: {
+      kcal: toOptionalNumber(targets.kcal),
+      protein: toOptionalNumber(targets.protein),
+      fat: toOptionalNumber(targets.fat),
+      carbs: toOptionalNumber(targets.carbs)
+    },
+    beveragesKcal: toOptionalNumber(body.beveragesKcal),
+    budget: isRecord(body.budget)
+      ? {
+          perDay: toOptionalNumber(body.budget.perDay),
+          perMeal: toOptionalNumber(body.budget.perMeal)
+        }
+      : undefined,
+    exclude: toOptionalStringArray(body.exclude),
+    avoidBones: typeof body.avoidBones === "boolean" ? body.avoidBones : undefined,
+    cuisine: toOptionalStringArray(body.cuisine)
+  };
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function toOptionalStringArray(value: unknown): string[] | undefined {
+  const array = toStringArray(value);
+  return array.length > 0 ? array : undefined;
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

@@ -479,6 +479,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_AllowInsecureLookupEndpoints = NO;
+				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;
 				INFOPLIST_KEY_BarcodeProxyBaseURL = "";
 				INFOPLIST_KEY_CFBundleDisplayName = "Домашний Инвентарь";
 				INFOPLIST_KEY_EANDBApiKey = "";
@@ -494,6 +495,7 @@
 				INFOPLIST_KEY_LookupRetryDelayMilliseconds = 350;
 				INFOPLIST_KEY_LookupTimeoutSeconds = 3.0;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Камера нужна для сканирования штрихкодов продуктов.";
+				INFOPLIST_KEY_RecipeServiceBaseURL = "http://127.0.0.1:8080";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
@@ -520,6 +522,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_AllowInsecureLookupEndpoints = NO;
+				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;
 				INFOPLIST_KEY_BarcodeProxyBaseURL = "";
 				INFOPLIST_KEY_CFBundleDisplayName = "Домашний Инвентарь";
 				INFOPLIST_KEY_EANDBApiKey = "";
@@ -535,6 +538,7 @@
 				INFOPLIST_KEY_LookupRetryDelayMilliseconds = 350;
 				INFOPLIST_KEY_LookupTimeoutSeconds = 3.0;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Камера нужна для сканирования штрихкодов продуктов.";
+				INFOPLIST_KEY_RecipeServiceBaseURL = "http://127.0.0.1:8080";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
