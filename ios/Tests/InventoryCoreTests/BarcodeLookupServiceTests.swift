@@ -333,6 +333,8 @@ private final class MockInventoryService: InventoryServiceProtocol {
 
     func recordEvent(_ event: InventoryEvent) async throws {}
 
+    func listEvents(productId: UUID?) async throws -> [InventoryEvent] { [] }
+
     func expiringBatches(horizonDays: Int) async throws -> [Batch] { [] }
 
     func bindInternalCode(_ code: String, productId: UUID, parsedWeightGrams: Double?) async throws {}

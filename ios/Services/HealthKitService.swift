@@ -4,6 +4,12 @@ import HealthKit
 #endif
 
 final class HealthKitService {
+    struct SamplePoint: Identifiable, Equatable {
+        var id: Date { date }
+        let date: Date
+        let value: Double
+    }
+
     struct UserMetrics {
         var heightCM: Double?
         var weightKG: Double?
@@ -132,7 +138,74 @@ final class HealthKitService {
         return Int(adjusted.rounded())
     }
 
+    func fetchWeightHistory(days: Int = 30) async throws -> [SamplePoint] {
+        #if canImport(HealthKit)
+        return try await quantityHistory(
+            identifier: .bodyMass,
+            unit: .gramUnit(with: .kilo),
+            days: days
+        )
+        #else
+        return []
+        #endif
+    }
+
+    func fetchBodyFatHistory(days: Int = 30) async throws -> [SamplePoint] {
+        #if canImport(HealthKit)
+        return try await quantityHistory(
+            identifier: .bodyFatPercentage,
+            unit: .percent(),
+            days: days
+        )
+        #else
+        return []
+        #endif
+    }
+
     #if canImport(HealthKit)
+    private func quantityHistory(
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        days: Int
+    ) async throws -> [SamplePoint] {
+        guard let type = HKObjectType.quantityType(forIdentifier: identifier) else {
+            return []
+        }
+
+        let calendar = Calendar.current
+        let safeDays = max(1, min(days, 365))
+        let end = Date()
+        let start = calendar.date(byAdding: .day, value: -safeDays, to: end) ?? end
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[SamplePoint], Error>) in
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sort]
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                let points = (samples as? [HKQuantitySample] ?? [])
+                    .map {
+                        SamplePoint(
+                            date: $0.endDate,
+                            value: $0.quantity.doubleValue(for: unit)
+                        )
+                    }
+
+                continuation.resume(returning: points)
+            }
+
+            store.execute(query)
+        }
+    }
+
     private func todayCumulativeValue(for identifier: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double? {
         guard let type = HKObjectType.quantityType(forIdentifier: identifier) else {
             return nil
