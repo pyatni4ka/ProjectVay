@@ -8,11 +8,14 @@ import { PersistentRecipeCache } from "../services/persistentRecipeCache.js";
 import { fetchAndParseRecipe, RecipeScraperError } from "../services/recipeScraper.js";
 import { RecipeIndex } from "../services/recipeIndex.js";
 import { isURLAllowedByWhitelist, parseRecipeURL } from "../services/sourcePolicy.js";
+import { lookupBarcode, type BarcodeLookupResult } from "../services/barcodeLookup.js";
 import type { MealPlanRequest, RecommendPayload, Recipe } from "../types/contracts.js";
 
 const router = Router();
 const recipeCacheTTLSeconds = Number(process.env.RECIPE_CACHE_TTL_SECONDS ?? 60 * 60 * 24 * 7);
 const recipeCache = new CacheStore<Recipe>(recipeCacheTTLSeconds * 1000, 10_000);
+const barcodeLookupCacheTTLSeconds = Number(process.env.BARCODE_LOOKUP_CACHE_TTL_SECONDS ?? 60 * 60 * 24);
+const barcodeLookupCache = new CacheStore<BarcodeLookupResult>(barcodeLookupCacheTTLSeconds * 1000, 25_000);
 const persistentRecipeCache = makePersistentRecipeCache();
 const recipeIndex = new RecipeIndex(mockRecipes);
 for (const recipe of persistentRecipeCache?.listActive(10_000) ?? []) {
@@ -23,6 +26,9 @@ const sourceWhitelist = recipeSourceWhitelistFromEnv(process.env.RECIPE_SOURCE_W
 const fetchRateLimitState = new Map<string, { count: number; resetAt: number }>();
 const FETCH_RATE_LIMIT_WINDOW_MS = Number(process.env.RECIPE_FETCH_RATE_WINDOW_MS ?? 60_000);
 const FETCH_RATE_LIMIT_MAX = Number(process.env.RECIPE_FETCH_RATE_MAX ?? 30);
+const barcodeRateLimitState = new Map<string, { count: number; resetAt: number }>();
+const BARCODE_RATE_LIMIT_WINDOW_MS = Number(process.env.BARCODE_LOOKUP_RATE_WINDOW_MS ?? 60_000);
+const BARCODE_RATE_LIMIT_MAX = Number(process.env.BARCODE_LOOKUP_RATE_MAX ?? 120);
 
 router.get("/recipes/search", (req, res) => {
   const q = String(req.query.q ?? "");
@@ -44,7 +50,7 @@ router.post("/recipes/recommend", (req, res) => {
 router.post("/recipes/fetch", async (req, res, next) => {
   try {
     const rateLimitKey = requestRateLimitKey(req);
-    if (!consumeFetchRateLimit(rateLimitKey)) {
+    if (!consumeRateLimit(fetchRateLimitState, rateLimitKey, FETCH_RATE_LIMIT_MAX, FETCH_RATE_LIMIT_WINDOW_MS)) {
       return res.status(429).json({ error: "rate_limited", retryInSeconds: Math.ceil(FETCH_RATE_LIMIT_WINDOW_MS / 1000) });
     }
 
@@ -125,25 +131,37 @@ router.post("/meal-plan/generate", (req, res) => {
   res.json(plan);
 });
 
-router.get("/barcode/lookup", (req, res) => {
+router.get("/barcode/lookup", async (req, res) => {
   const code = String(req.query.code ?? "");
   if (!code) {
     return res.status(400).json({ error: "code is required" });
   }
 
-  const found = code === "4601234567890";
-  res.json({
-    found,
-    provider: found ? "mock-rf-provider" : null,
-    product: found
-      ? {
-          barcode: code,
-          name: "Молоко 2.5%",
-          brand: "Пример",
-          category: "Молочные продукты"
-        }
-      : null
+  const normalizedCode = code.trim();
+  if (!normalizedCode) {
+    return res.status(400).json({ error: "code is required" });
+  }
+
+  const rateLimitKey = requestRateLimitKey(req);
+  if (!consumeRateLimit(barcodeRateLimitState, rateLimitKey, BARCODE_RATE_LIMIT_MAX, BARCODE_RATE_LIMIT_WINDOW_MS)) {
+    return res.status(429).json({ error: "rate_limited", retryInSeconds: Math.ceil(BARCODE_RATE_LIMIT_WINDOW_MS / 1000) });
+  }
+
+  const cached = barcodeLookupCache.get(normalizedCode);
+  if (cached) {
+    return res.json(cached);
+  }
+
+  const result = await lookupBarcode({
+    code: normalizedCode,
+    eanDBApiKey: process.env.EAN_DB_API_KEY,
+    eanDBApiURL: process.env.EAN_DB_API_URL,
+    enableOpenFoodFacts: parseBoolean(process.env.BARCODE_ENABLE_OPEN_FOOD_FACTS, true),
+    timeoutMs: Number(process.env.BARCODE_LOOKUP_TIMEOUT_MS ?? 3_000)
   });
+
+  barcodeLookupCache.set(normalizedCode, result);
+  return res.json(result);
 });
 
 export default router;
@@ -156,24 +174,29 @@ function requestRateLimitKey(req: { ip?: string; headers: Record<string, unknown
   return req.ip ?? "unknown";
 }
 
-function consumeFetchRateLimit(key: string): boolean {
-  if (FETCH_RATE_LIMIT_MAX <= 0) {
+function consumeRateLimit(
+  state: Map<string, { count: number; resetAt: number }>,
+  key: string,
+  maxPerWindow: number,
+  windowMs: number
+): boolean {
+  if (maxPerWindow <= 0) {
     return true;
   }
 
   const now = Date.now();
-  const existing = fetchRateLimitState.get(key);
+  const existing = state.get(key);
   if (!existing || existing.resetAt <= now) {
-    fetchRateLimitState.set(key, { count: 1, resetAt: now + FETCH_RATE_LIMIT_WINDOW_MS });
+    state.set(key, { count: 1, resetAt: now + windowMs });
     return true;
   }
 
-  if (existing.count >= FETCH_RATE_LIMIT_MAX) {
+  if (existing.count >= maxPerWindow) {
     return false;
   }
 
   existing.count += 1;
-  fetchRateLimitState.set(key, existing);
+  state.set(key, existing);
   return true;
 }
 
@@ -258,4 +281,19 @@ function toOptionalNumber(value: unknown): number | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
 }

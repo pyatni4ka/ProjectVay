@@ -13,7 +13,12 @@ struct SettingsView: View {
     @State private var selectedStores = Set(AppSettings.default.stores)
 
     @State private var isSaving = false
+    @State private var isExporting = false
+    @State private var isDeleting = false
     @State private var errorMessage: String?
+    @State private var statusMessage: String?
+    @State private var exportedFileURL: URL?
+    @State private var showDeleteConfirmation = false
 
     private let calendar = Calendar.current
 
@@ -58,13 +63,46 @@ struct SettingsView: View {
             }
 
             Section("Данные") {
-                Button("Экспорт данных") {}
-                Button("Удалить локальные данные", role: .destructive) {}
+                Button(isExporting ? "Экспортируем..." : "Экспортировать JSON") {
+                    Task { await exportData() }
+                }
+                .disabled(isExporting || isDeleting)
+
+                if let exportedFileURL {
+                    ShareLink(item: exportedFileURL) {
+                        Label("Поделиться экспортом", systemImage: "square.and.arrow.up")
+                    }
+                }
+
+                Button(isDeleting ? "Удаляем..." : "Удалить локальные данные", role: .destructive) {
+                    showDeleteConfirmation = true
+                }
+                .disabled(isExporting || isDeleting)
+            }
+
+            if let statusMessage {
+                Section("Статус") {
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .navigationTitle("Настройки")
         .task {
             await load()
+        }
+        .confirmationDialog(
+            "Удалить все локальные данные?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Удалить всё", role: .destructive) {
+                Task { await deleteLocalData() }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Будут удалены товары, партии, цены и история. Настройки сбросятся к значениям по умолчанию.")
         }
         .alert("Ошибка", isPresented: Binding(get: { errorMessage != nil }, set: { _ in errorMessage = nil })) {
             Button("Ок", role: .cancel) {}
@@ -136,6 +174,36 @@ struct SettingsView: View {
 
         do {
             _ = try await settingsService.saveSettings(settings)
+            statusMessage = "Настройки сохранены"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func exportData() async {
+        guard !isExporting else { return }
+        isExporting = true
+        defer { isExporting = false }
+
+        do {
+            let fileURL = try await settingsService.exportLocalData()
+            exportedFileURL = fileURL
+            statusMessage = "Экспорт сохранён: \(fileURL.lastPathComponent)"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteLocalData() async {
+        guard !isDeleting else { return }
+        isDeleting = true
+        defer { isDeleting = false }
+
+        do {
+            try await settingsService.deleteAllLocalData(resetOnboarding: true)
+            exportedFileURL = nil
+            await load()
+            statusMessage = "Локальные данные удалены"
         } catch {
             errorMessage = error.localizedDescription
         }

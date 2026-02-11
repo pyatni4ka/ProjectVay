@@ -203,6 +203,35 @@ struct InventoryEvent: Identifiable, Codable, Equatable {
 }
 
 struct AppSettings: Codable, Equatable {
+    struct MealSchedule: Codable, Equatable {
+        var breakfastMinute: Int
+        var lunchMinute: Int
+        var dinnerMinute: Int
+
+        static let `default` = MealSchedule(
+            breakfastMinute: 8 * 60,
+            lunchMinute: 13 * 60,
+            dinnerMinute: 19 * 60
+        )
+
+        func normalized() -> MealSchedule {
+            let breakfast = AppSettings.clampMinute(breakfastMinute)
+            let lunch = AppSettings.clampMinute(lunchMinute)
+            let dinner = AppSettings.clampMinute(dinnerMinute)
+
+            let minimumGap = 60
+            if breakfast + minimumGap >= lunch || lunch + minimumGap >= dinner {
+                return .default
+            }
+
+            return MealSchedule(
+                breakfastMinute: breakfast,
+                lunchMinute: lunch,
+                dinnerMinute: dinner
+            )
+        }
+    }
+
     var quietStartMinute: Int
     var quietEndMinute: Int
     var expiryAlertsDays: [Int]
@@ -211,6 +240,7 @@ struct AppSettings: Codable, Equatable {
     var stores: [Store]
     var dislikedList: [String]
     var avoidBones: Bool
+    var mealSchedule: MealSchedule = .default
 
     static let defaultStores: [Store] = [.pyaterochka, .yandexLavka, .chizhik, .auchan]
 
@@ -222,7 +252,8 @@ struct AppSettings: Codable, Equatable {
         budgetWeek: nil,
         stores: defaultStores,
         dislikedList: ["кускус"],
-        avoidBones: true
+        avoidBones: true,
+        mealSchedule: .default
     )
 
     func normalized() -> AppSettings {
@@ -248,7 +279,8 @@ struct AppSettings: Codable, Equatable {
             budgetWeek: budgetWeek.map { max(0, $0).rounded(scale: 2) },
             stores: normalizedStores,
             dislikedList: normalizedDisliked,
-            avoidBones: avoidBones
+            avoidBones: avoidBones,
+            mealSchedule: mealSchedule.normalized()
         )
     }
 
@@ -274,6 +306,7 @@ struct Recipe: Identifiable, Codable, Equatable {
     var servings: Int?
     var cuisine: String?
     var tags: [String]
+    var nutrition: Nutrition?
 }
 
 struct MealEntry: Identifiable, Codable, Equatable {

@@ -22,6 +22,7 @@ protocol InventoryServiceProtocol {
     func listPriceHistory(productId: UUID) async throws -> [PriceEntry]
 
     func recordEvent(_ event: InventoryEvent) async throws
+    func listEvents(productId: UUID?) async throws -> [InventoryEvent]
     func expiringBatches(horizonDays: Int) async throws -> [Batch]
     func bindInternalCode(_ code: String, productId: UUID, parsedWeightGrams: Double?) async throws
     func internalCodeMapping(for code: String) async throws -> InternalCodeMapping?
@@ -164,6 +165,10 @@ final class InventoryService: InventoryServiceProtocol {
 
     func recordEvent(_ event: InventoryEvent) async throws {
         try repository.saveInventoryEvent(event)
+    }
+
+    func listEvents(productId: UUID?) async throws -> [InventoryEvent] {
+        try repository.listInventoryEvents(productId: productId)
     }
 
     func expiringBatches(horizonDays: Int) async throws -> [Batch] {

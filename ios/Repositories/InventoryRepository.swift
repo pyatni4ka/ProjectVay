@@ -19,8 +19,10 @@ protocol InventoryRepositoryProtocol: Sendable {
     func listPriceHistory(productId: UUID) throws -> [PriceEntry]
 
     func saveInventoryEvent(_ event: InventoryEvent) throws
+    func listInventoryEvents(productId: UUID?) throws -> [InventoryEvent]
     func upsertInternalCodeMapping(_ mapping: InternalCodeMapping) throws
     func fetchInternalCodeMapping(code: String) throws -> InternalCodeMapping?
+    func deleteAllInventoryData() throws
 }
 
 final class InventoryRepository: InventoryRepositoryProtocol {
@@ -194,6 +196,26 @@ final class InventoryRepository: InventoryRepositoryProtocol {
         }
     }
 
+    func listInventoryEvents(productId: UUID?) throws -> [InventoryEvent] {
+        try dbQueue.read { db in
+            let records: [InventoryEventRecord]
+            if let productId {
+                records = try InventoryEventRecord.fetchAll(
+                    db,
+                    sql: "SELECT * FROM inventory_events WHERE product_id = ? ORDER BY timestamp DESC",
+                    arguments: [productId.uuidString]
+                )
+            } else {
+                records = try InventoryEventRecord.fetchAll(
+                    db,
+                    sql: "SELECT * FROM inventory_events ORDER BY timestamp DESC"
+                )
+            }
+
+            return records.map { $0.asDomain() }
+        }
+    }
+
     func upsertInternalCodeMapping(_ mapping: InternalCodeMapping) throws {
         try dbQueue.write { db in
             var record = InternalCodeMappingRecord(mapping: mapping)
@@ -204,6 +226,16 @@ final class InventoryRepository: InventoryRepositoryProtocol {
     func fetchInternalCodeMapping(code: String) throws -> InternalCodeMapping? {
         try dbQueue.read { db in
             try InternalCodeMappingRecord.fetchOne(db, key: code)?.asDomain()
+        }
+    }
+
+    func deleteAllInventoryData() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM internal_code_mappings")
+            try db.execute(sql: "DELETE FROM inventory_events")
+            try db.execute(sql: "DELETE FROM price_entries")
+            try db.execute(sql: "DELETE FROM batches")
+            try db.execute(sql: "DELETE FROM products")
         }
     }
 }
