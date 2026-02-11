@@ -26,6 +26,56 @@ struct MealPlanView: View {
         }
     }
 
+    private enum MealSlot: String {
+        case breakfast
+        case lunch
+        case dinner
+
+        var title: String {
+            switch self {
+            case .breakfast:
+                return "Завтрак"
+            case .lunch:
+                return "Обед"
+            case .dinner:
+                return "Ужин"
+            }
+        }
+
+        var remainingMealsCount: Int {
+            switch self {
+            case .breakfast:
+                return 3
+            case .lunch:
+                return 2
+            case .dinner:
+                return 1
+            }
+        }
+
+        static func next(for date: Date) -> MealSlot {
+            let hour = Calendar.current.component(.hour, from: date)
+            if hour < 11 {
+                return .breakfast
+            }
+            if hour < 17 {
+                return .lunch
+            }
+            return .dinner
+        }
+    }
+
+    private struct NutritionSnapshot {
+        let baselineDayTarget: Nutrition
+        let planDayTarget: Nutrition
+        let consumedToday: Nutrition
+        let remainingToday: Nutrition
+        let nextMealTarget: Nutrition
+        let nextMealSlot: MealSlot
+        let remainingMealsCount: Int
+        let statusMessage: String?
+    }
+
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
@@ -36,8 +86,13 @@ struct MealPlanView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var lastGeneratedAt: Date?
-    @State private var consumedTodayKcal: Double?
-    @State private var targetDayKcal: Double = 2200
+    @State private var dayTargetNutrition = Nutrition(kcal: 2200, protein: 140, fat: 70, carbs: 220)
+    @State private var consumedTodayNutrition = Nutrition(kcal: 0, protein: 0, fat: 0, carbs: 0)
+    @State private var remainingTodayNutrition = Nutrition(kcal: 2200, protein: 140, fat: 70, carbs: 220)
+    @State private var nextMealTargetNutrition = Nutrition(kcal: 730, protein: 47, fat: 23, carbs: 73)
+    @State private var nextMealSlot: MealSlot = .breakfast
+    @State private var remainingMealsCount = 3
+    @State private var nextMealRecommendations: [RecommendResponse.RankedRecipe] = []
     @State private var healthStatusMessage: String?
     @State private var hasRequestedHealthAccess = false
 
@@ -52,35 +107,52 @@ struct MealPlanView: View {
                 .pickerStyle(.segmented)
             }
 
-            Section("Калории (Apple Health / Yazio)") {
+            Section("КБЖУ (Apple Health / Yazio)") {
                 HStack {
                     Text("Цель на день")
                     Spacer()
-                    Text("\(targetDayKcal.formatted(.number.precision(.fractionLength(0)))) ккал")
+                    Text(nutritionSummary(dayTargetNutrition))
                 }
 
-                if let consumedTodayKcal {
-                    HStack {
-                        Text("Съедено сегодня")
-                        Spacer()
-                        Text("\(consumedTodayKcal.formatted(.number.precision(.fractionLength(0)))) ккал")
-                    }
+                HStack {
+                    Text("Съедено сегодня")
+                    Spacer()
+                    Text(nutritionSummary(consumedTodayNutrition))
+                }
 
-                    HStack {
-                        Text("Остаток")
-                        Spacer()
-                        Text("\(max(0, targetDayKcal - consumedTodayKcal).formatted(.number.precision(.fractionLength(0)))) ккал")
-                    }
-                } else {
-                    Text("Нет данных о потреблении калорий за сегодня.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                HStack {
+                    Text("Остаток на сегодня")
+                    Spacer()
+                    Text(nutritionSummary(remainingTodayNutrition))
+                }
+
+                HStack {
+                    Text("Таргет на \(nextMealSlot.title.lowercased())")
+                    Spacer()
+                    Text(nutritionSummary(nextMealTargetNutrition))
                 }
 
                 if let healthStatusMessage {
                     Text(healthStatusMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+            }
+
+            if !nextMealRecommendations.isEmpty {
+                Section("Рекомендации на \(nextMealSlot.title.lowercased())") {
+                    ForEach(nextMealRecommendations.prefix(5), id: \.recipe.id) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.recipe.title)
+                                .font(.headline)
+                            Text(nutritionSummary(item.recipe.nutrition ?? .empty))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("Скор: \(item.score.formatted(.number.precision(.fractionLength(2))))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
 
@@ -185,7 +257,15 @@ struct MealPlanView: View {
             let products = try await productsTask
             let expiringBatches = try await expiringBatchesTask
             let settings = try await settingsTask
-            let nutritionTarget = try await computeAdaptiveNutritionTarget()
+            let nutritionSnapshot = try await computeAdaptiveNutritionSnapshot()
+
+            dayTargetNutrition = selectedRange == .day ? nutritionSnapshot.planDayTarget : nutritionSnapshot.baselineDayTarget
+            consumedTodayNutrition = nutritionSnapshot.consumedToday
+            remainingTodayNutrition = nutritionSnapshot.remainingToday
+            nextMealTargetNutrition = nutritionSnapshot.nextMealTarget
+            nextMealSlot = nutritionSnapshot.nextMealSlot
+            remainingMealsCount = nutritionSnapshot.remainingMealsCount
+            healthStatusMessage = nutritionSnapshot.statusMessage
 
             let productsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
             let ingredientKeywords = Array(Set(products.map { $0.name.lowercased() })).sorted()
@@ -199,6 +279,7 @@ struct MealPlanView: View {
 
             guard !ingredientKeywords.isEmpty else {
                 mealPlan = nil
+                nextMealRecommendations = []
                 errorMessage = "Добавьте продукты в инвентарь, чтобы сгенерировать план."
                 return
             }
@@ -208,7 +289,7 @@ struct MealPlanView: View {
                 days: selectedRange.daysCount,
                 ingredientKeywords: ingredientKeywords,
                 expiringSoonKeywords: expiringSoonKeywords,
-                targets: nutritionTarget,
+                targets: selectedRange == .day ? nutritionSnapshot.planDayTarget : nutritionSnapshot.baselineDayTarget,
                 beveragesKcal: 120,
                 budget: .init(perDay: budgetPerDay > 0 ? budgetPerDay : nil, perMeal: nil),
                 exclude: settings.dislikedList,
@@ -218,6 +299,31 @@ struct MealPlanView: View {
 
             let generated = try await recipeServiceClient.generateMealPlan(payload: payload)
             mealPlan = generated
+
+            let nextMealBudget = budgetPerDay > 0 ? budgetPerDay / Double(max(1, nutritionSnapshot.remainingMealsCount)) : nil
+            do {
+                let recommendPayload = RecommendRequest(
+                    ingredientKeywords: ingredientKeywords,
+                    expiringSoonKeywords: expiringSoonKeywords,
+                    targets: nutritionSnapshot.nextMealTarget,
+                    budget: .init(perMeal: nextMealBudget),
+                    exclude: settings.dislikedList,
+                    avoidBones: settings.avoidBones,
+                    cuisine: [],
+                    limit: 10
+                )
+                let recommended = try await recipeServiceClient.recommend(payload: recommendPayload)
+                nextMealRecommendations = recommended.items
+            } catch {
+                nextMealRecommendations = []
+                let fallback = "Не удалось обновить рекомендации на следующий приём."
+                if let current = healthStatusMessage, !current.isEmpty {
+                    healthStatusMessage = "\(current) \(fallback)"
+                } else {
+                    healthStatusMessage = fallback
+                }
+            }
+
             errorMessage = nil
             lastGeneratedAt = Date()
         } catch {
@@ -225,49 +331,114 @@ struct MealPlanView: View {
         }
     }
 
-    private func computeAdaptiveNutritionTarget() async throws -> Nutrition {
+    private func computeAdaptiveNutritionSnapshot() async throws -> NutritionSnapshot {
+        let nextMealSlot = MealSlot.next(for: Date())
+        let remainingMealsCount = max(1, nextMealSlot.remainingMealsCount)
+
         if !hasRequestedHealthAccess {
             hasRequestedHealthAccess = true
             _ = try? await healthKitService.requestReadAccess()
         }
 
         let metrics = try await healthKitService.fetchLatestMetrics()
-        let baselineTarget = Double(healthKitService.calculateDailyCalories(metrics: metrics, targetLossPerWeek: 0.5))
-        var adjustedTarget = baselineTarget
+        let baselineKcal = Double(healthKitService.calculateDailyCalories(metrics: metrics, targetLossPerWeek: 0.5))
+        let baselineTarget = nutritionForTargetKcal(baselineKcal, weightKG: metrics.weightKG)
+
+        var consumedToday = Nutrition(kcal: 0, protein: 0, fat: 0, carbs: 0)
+        var healthMessage = "Таргет на следующий приём делится по оставшимся приёмам: \(remainingMealsCount)."
 
         do {
-            let consumedToday = try await healthKitService.fetchTodayConsumedEnergyKcal()
-            consumedTodayKcal = consumedToday
-
-            if let consumedToday {
-                if selectedRange == .day {
-                    adjustedTarget = max(900, baselineTarget - consumedToday)
-                    healthStatusMessage = "Меню адаптировано под уже съеденные калории за сегодня."
-                } else {
-                    healthStatusMessage = "Для недельного плана используется базовая дневная цель."
-                }
+            let healthValues = try await healthKitService.fetchTodayConsumedNutrition()
+            let hasAnyValue = [healthValues.kcal, healthValues.protein, healthValues.fat, healthValues.carbs].contains { $0 != nil }
+            if hasAnyValue {
+                consumedToday = normalizeNutrition(healthValues)
+                healthMessage = "Меню адаптировано по съеденному КБЖУ из Apple Health."
             } else {
-                healthStatusMessage = "Apple Health не вернул потреблённые калории за сегодня."
+                healthMessage = "Apple Health не вернул КБЖУ за сегодня. Используется базовый таргет."
             }
         } catch {
-            consumedTodayKcal = nil
-            healthStatusMessage = "Не удалось прочитать калории из Apple Health."
+            healthMessage = "Не удалось прочитать КБЖУ из Apple Health. Используется базовый таргет."
         }
 
-        targetDayKcal = adjustedTarget
-        return nutritionForTargetKcal(adjustedTarget)
+        let remainingToday = subtractNutrition(baselineTarget, consumedToday)
+        let nextMealTarget = divideNutrition(remainingToday, by: Double(remainingMealsCount))
+        let planDayTarget = selectedRange == .day ? remainingToday : baselineTarget
+
+        return NutritionSnapshot(
+            baselineDayTarget: baselineTarget,
+            planDayTarget: planDayTarget,
+            consumedToday: consumedToday,
+            remainingToday: remainingToday,
+            nextMealTarget: nextMealTarget,
+            nextMealSlot: nextMealSlot,
+            remainingMealsCount: remainingMealsCount,
+            statusMessage: healthMessage
+        )
     }
 
-    private func nutritionForTargetKcal(_ kcal: Double) -> Nutrition {
-        let clampedKcal = max(900, kcal)
-        let ratio = clampedKcal / 2200
+    private func nutritionForTargetKcal(_ kcal: Double, weightKG: Double?) -> Nutrition {
+        let baseKcal = max(900, kcal)
 
-        return Nutrition(
-            kcal: clampedKcal,
-            protein: max(75, 150 * ratio),
-            fat: max(30, 70 * ratio),
-            carbs: max(80, 220 * ratio)
+        let protein: Double
+        if let weightKG {
+            protein = min(max(weightKG * 1.8, 90), 220)
+        } else {
+            protein = max(90, baseKcal * 0.28 / 4)
+        }
+
+        let fat: Double
+        if let weightKG {
+            fat = min(max(weightKG * 0.8, 45), 120)
+        } else {
+            fat = max(45, baseKcal * 0.28 / 9)
+        }
+
+        let minCarbs = 80.0
+        let minRequiredKcal = protein * 4 + fat * 9 + minCarbs * 4
+        let adjustedKcal = max(baseKcal, minRequiredKcal)
+        let carbs = max(minCarbs, (adjustedKcal - protein * 4 - fat * 9) / 4)
+
+        return Nutrition(kcal: adjustedKcal, protein: protein, fat: fat, carbs: carbs)
+    }
+
+    private func normalizeNutrition(_ value: Nutrition) -> Nutrition {
+        Nutrition(
+            kcal: max(0, value.kcal ?? 0),
+            protein: max(0, value.protein ?? 0),
+            fat: max(0, value.fat ?? 0),
+            carbs: max(0, value.carbs ?? 0)
         )
+    }
+
+    private func subtractNutrition(_ left: Nutrition, _ right: Nutrition) -> Nutrition {
+        Nutrition(
+            kcal: max(0, resolved(left.kcal) - resolved(right.kcal)),
+            protein: max(0, resolved(left.protein) - resolved(right.protein)),
+            fat: max(0, resolved(left.fat) - resolved(right.fat)),
+            carbs: max(0, resolved(left.carbs) - resolved(right.carbs))
+        )
+    }
+
+    private func divideNutrition(_ value: Nutrition, by divisor: Double) -> Nutrition {
+        let safeDivisor = max(divisor, 1)
+        return Nutrition(
+            kcal: resolved(value.kcal) / safeDivisor,
+            protein: resolved(value.protein) / safeDivisor,
+            fat: resolved(value.fat) / safeDivisor,
+            carbs: resolved(value.carbs) / safeDivisor
+        )
+    }
+
+    private func resolved(_ value: Double?) -> Double {
+        max(0, value ?? 0)
+    }
+
+    private func nutritionSummary(_ nutrition: Nutrition) -> String {
+        "К \(numberText(nutrition.kcal)) · Б \(numberText(nutrition.protein)) · Ж \(numberText(nutrition.fat)) · У \(numberText(nutrition.carbs))"
+    }
+
+    private func numberText(_ value: Double?) -> String {
+        resolved(value).formatted(.number.precision(.fractionLength(0)))
     }
 
     private func mealTypeTitle(_ raw: String) -> String {
