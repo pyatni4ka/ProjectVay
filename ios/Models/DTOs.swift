@@ -15,12 +15,17 @@ enum ScanResolution: Equatable {
 }
 
 struct RecommendRequest: Codable {
+    struct Budget: Codable {
+        let perMeal: Double?
+    }
+
     let ingredientKeywords: [String]
     let expiringSoonKeywords: [String]
     let targets: Nutrition
-    let budgetPerMeal: Double
+    let budget: Budget?
     let exclude: [String]
     let avoidBones: Bool
+    let cuisine: [String]
     let limit: Int
 }
 

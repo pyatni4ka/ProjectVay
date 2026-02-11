@@ -4,6 +4,7 @@ import UserNotifications
 struct AppDependencies {
     let inventoryService: InventoryService
     let settingsService: SettingsService
+    let healthKitService: HealthKitService
     let scannerService: ScannerService
     let barcodeLookupService: BarcodeLookupService
     let recipeServiceClient: RecipeServiceClient?
@@ -27,6 +28,7 @@ struct AppDependencies {
             notificationScheduler: notificationScheduler,
             center: .current()
         )
+        let healthKitService = HealthKitService()
         let scannerService = ScannerService()
 
         var providers: [any BarcodeLookupProvider] = []
@@ -54,6 +56,7 @@ struct AppDependencies {
         return AppDependencies(
             inventoryService: inventoryService,
             settingsService: settingsService,
+            healthKitService: healthKitService,
             scannerService: scannerService,
             barcodeLookupService: barcodeLookupService,
             recipeServiceClient: recipeServiceClient

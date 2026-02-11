@@ -112,13 +112,19 @@ ProjectVay/
 ### Сканирование и lookup pipeline
 1. `ScannerView` читает live-баркоды через `DataScannerViewController`.
 2. `ScannerService` классифицирует payload: EAN-13 / DataMatrix / internal.
-3. `BarcodeLookupService` применяет pipeline:
+3. `ScannerView` поддерживает режимы:
+   - `Добавление` (lookup + при необходимости создание карточки),
+   - `Списание` (только существующий локальный инвентарь, без автосоздания).
+4. `BarcodeLookupService` применяет pipeline:
    - нормализует GTIN из DataMatrix (`14 -> 13`, если префикс `0`) для совместимости с EAN-13;
    - локальный поиск (`InventoryService.findProduct`)
    - внешние провайдеры (`EAN-DB`, `RF`, `Open Food Facts`)
    - fallback на ручное создание
-4. Для internal code после ручного подтверждения сохраняется `internal_code_mappings`, и последующие сканы резолвятся локально, включая fallback веса из сохранённого mapping.
-5. Hardening:
+5. Для internal code после ручного подтверждения сохраняется `internal_code_mappings`, и последующие сканы резолвятся локально, включая fallback веса из сохранённого mapping.
+6. В режиме списания доступен быстрый сценарий `Быстро −1`:
+   - выбор подходящей партии по товару и единице измерения;
+   - уменьшение количества или удаление партии при исчерпании.
+7. Hardening:
    - negative cache по barcode для повторных miss;
    - circuit breaker по провайдерам (threshold/cooldown);
    - retry + timeout + межзапросный cooldown;
@@ -143,11 +149,15 @@ ProjectVay/
 
 ### iOS meal plan flow
 1. `MealPlanView` собирает данные из локального инвентаря и настроек (`budget/disliked/avoidBones`).
-2. Формирует payload для `/api/v1/meal-plan/generate`:
+2. Подтягивает калории из Apple Health (`dietaryEnergyConsumed`), куда они попадают из Yazio.
+3. Вычисляет адаптивную дневную цель:
+   - для режима `День` уменьшает цель на уже потреблённые калории;
+   - для режима `Неделя` использует базовую дневную цель.
+4. Формирует payload для `/api/v1/meal-plan/generate`:
    - список доступных ингредиентов,
    - список expiring-ингредиентов,
    - цель по калориям и бюджет.
-3. Отображает план по дням, missing ingredients, shopping list, estimated total cost и warnings.
+5. Отображает план по дням, missing ingredients, shopping list, estimated total cost и warnings.
 
 ## 5) Уведомления сроков (quiet hours)
 

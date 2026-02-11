@@ -3,12 +3,29 @@ import SwiftUI
 import VisionKit
 
 struct ScannerView: View {
+    enum ScannerMode: String, CaseIterable, Identifiable {
+        case add
+        case writeOff
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .add:
+                return "Добавление"
+            case .writeOff:
+                return "Списание"
+            }
+        }
+    }
+
     let inventoryService: any InventoryServiceProtocol
     let barcodeLookupService: BarcodeLookupService
     let onInventoryChanged: () async -> Void
 
     @Environment(\.dismiss) private var dismiss
 
+    @State private var mode: ScannerMode = .add
     @State private var manualCode: String = ""
     @State private var isProcessing = false
     @State private var lastScannedCode: String = ""
@@ -22,8 +39,8 @@ struct ScannerView: View {
     @State private var errorMessage: String?
     @State private var showAddBatchSheet = false
     @State private var showCreateProductSheet = false
-    @State private var isQuickAdding = false
-    @State private var quickAddMessage: String?
+    @State private var isQuickActionInProgress = false
+    @State private var quickActionMessage: String?
 
     private var scannerAvailable: Bool {
         DataScannerViewController.isSupported && DataScannerViewController.isAvailable
@@ -57,8 +74,16 @@ struct ScannerView: View {
             manualLookupView
                 .padding(.horizontal)
 
-            if let quickAddMessage {
-                Text(quickAddMessage)
+            Picker("Режим", selection: $mode) {
+                ForEach(ScannerMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+
+            if let quickActionMessage {
+                Text(quickActionMessage)
                     .font(.caption)
                     .foregroundStyle(.green)
                     .padding(.horizontal)
@@ -176,7 +201,7 @@ struct ScannerView: View {
         switch resolution {
         case .found(let product, let suggestedExpiry, _):
             VStack(alignment: .leading, spacing: 8) {
-                Text("Найдено локально")
+                Text(mode == .add ? "Найдено локально" : "Найдено для списания")
                     .font(.headline)
                 Text(product.name)
                     .font(.title3)
@@ -190,16 +215,24 @@ struct ScannerView: View {
                 }
 
                 HStack {
-                    Button(isQuickAdding ? "Добавляем..." : "Быстро +1") {
-                        Task { await quickAddBatch(product: product) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isQuickAdding)
+                    if mode == .add {
+                        Button(isQuickActionInProgress ? "Добавляем..." : "Быстро +1") {
+                            Task { await quickAddBatch(product: product) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isQuickActionInProgress)
 
-                    Button("Добавить партию") {
-                        showAddBatchSheet = true
+                        Button("Добавить партию") {
+                            showAddBatchSheet = true
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Button(isQuickActionInProgress ? "Списываем..." : "Быстро −1") {
+                            Task { await quickWriteOffBatch(product: product) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isQuickActionInProgress)
                     }
-                    .buttonStyle(.bordered)
 
                     Button("Сканировать снова") {
                         resetResolutionState()
@@ -229,11 +262,11 @@ struct ScannerView: View {
                 }
 
                 HStack {
-                    Button(isQuickAdding ? "Добавляем..." : "Быстро +1") {
+                    Button(isQuickActionInProgress ? "Добавляем..." : "Быстро +1") {
                         Task { await quickAddBatch(product: product) }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isQuickAdding)
+                    .disabled(isQuickActionInProgress)
 
                     Button("Добавить партию") {
                         showAddBatchSheet = true
@@ -254,7 +287,9 @@ struct ScannerView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Товар не найден")
                     .font(.headline)
-                Text("Создайте локальную карточку. После сохранения распознавание будет работать офлайн.")
+                Text(mode == .add
+                     ? "Создайте локальную карточку. После сохранения распознавание будет работать офлайн."
+                     : "Для списания товар должен уже быть в локальном инвентаре.")
                     .foregroundStyle(.secondary)
 
                 if let barcode {
@@ -277,10 +312,17 @@ struct ScannerView: View {
                         .font(.caption)
                 }
 
-                Button("Создать вручную") {
-                    showCreateProductSheet = true
+                if mode == .add {
+                    Button("Создать вручную") {
+                        showCreateProductSheet = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Переключиться в режим добавления") {
+                        mode = .add
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.borderedProminent)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
@@ -303,13 +345,13 @@ struct ScannerView: View {
         isProcessing = true
         defer { isProcessing = false }
 
-        let resolved = await barcodeLookupService.resolve(rawCode: normalized)
+        let resolved = await barcodeLookupService.resolve(rawCode: normalized, allowCreate: mode == .add)
         applyResolution(resolved)
     }
 
     private func applyResolution(_ resolved: ScanResolution) {
         resolution = resolved
-        quickAddMessage = nil
+        quickActionMessage = nil
 
         switch resolved {
         case .found(let product, let expiry, let weight):
@@ -336,10 +378,10 @@ struct ScannerView: View {
     }
 
     private func quickAddBatch(product: Product) async {
-        guard !isQuickAdding else { return }
+        guard !isQuickActionInProgress else { return }
 
-        isQuickAdding = true
-        defer { isQuickAdding = false }
+        isQuickActionInProgress = true
+        defer { isQuickActionInProgress = false }
 
         let quantity: Double
         let unit: UnitType
@@ -364,7 +406,47 @@ struct ScannerView: View {
         do {
             _ = try await inventoryService.addBatch(batch)
             await onInventoryChanged()
-            quickAddMessage = "Партия добавлена: \(quantity.formatted()) \(unit.title)"
+            quickActionMessage = "Партия добавлена: \(quantity.formatted()) \(unit.title)"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func quickWriteOffBatch(product: Product) async {
+        guard !isQuickActionInProgress else { return }
+
+        isQuickActionInProgress = true
+        defer { isQuickActionInProgress = false }
+
+        do {
+            let batches = try await inventoryService.listBatches(productId: product.id)
+            guard !batches.isEmpty else {
+                errorMessage = "Нет партий для списания"
+                return
+            }
+
+            let preferredUnit: UnitType = parsedWeightGrams == nil ? product.defaultUnit : .g
+            var targetBatch = batches.first(where: { $0.unit == preferredUnit }) ?? batches.first!
+
+            var quantityToWriteOff = parsedWeightGrams ?? 1
+            if quantityToWriteOff <= 0 {
+                quantityToWriteOff = 1
+            }
+
+            if targetBatch.unit != preferredUnit {
+                quantityToWriteOff = min(targetBatch.quantity, targetBatch.unit == .pcs ? 1 : quantityToWriteOff)
+            }
+
+            if targetBatch.quantity <= quantityToWriteOff + 0.000_001 {
+                try await inventoryService.removeBatch(id: targetBatch.id)
+                quickActionMessage = "Партия полностью списана"
+            } else {
+                targetBatch.quantity -= quantityToWriteOff
+                _ = try await inventoryService.updateBatch(targetBatch)
+                quickActionMessage = "Списано: \(quantityToWriteOff.formatted()) \(targetBatch.unit.title)"
+            }
+
+            await onInventoryChanged()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -377,7 +459,7 @@ struct ScannerView: View {
         internalCodeToBind = nil
         parsedWeightGrams = nil
         barcodeForManualCreation = nil
-        quickAddMessage = nil
+        quickActionMessage = nil
     }
 }
 

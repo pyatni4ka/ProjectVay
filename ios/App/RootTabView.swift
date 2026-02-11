@@ -5,6 +5,7 @@ struct RootTabView: View {
 
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
+    let healthKitService: HealthKitService
     let barcodeLookupService: BarcodeLookupService
     let recipeServiceClient: RecipeServiceClient?
 
@@ -27,6 +28,7 @@ struct RootTabView: View {
                 MealPlanView(
                     inventoryService: inventoryService,
                     settingsService: settingsService,
+                    healthKitService: healthKitService,
                     recipeServiceClient: recipeServiceClient
                 )
             }

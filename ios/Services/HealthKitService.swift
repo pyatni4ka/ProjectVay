@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(HealthKit)
+import HealthKit
+#endif
 
 final class HealthKitService {
     struct UserMetrics {
@@ -10,13 +13,102 @@ final class HealthKitService {
         var sex: String?
     }
 
-    func requestReadAccess() async throws {
-        // TODO: HKHealthStore authorization
+    #if canImport(HealthKit)
+    private let store = HKHealthStore()
+    #endif
+
+    func requestReadAccess() async throws -> Bool {
+        #if canImport(HealthKit)
+        guard HKHealthStore.isHealthDataAvailable() else {
+            return false
+        }
+
+        guard
+            let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass),
+            let height = HKObjectType.quantityType(forIdentifier: .height),
+            let bodyFat = HKObjectType.quantityType(forIdentifier: .bodyFatPercentage),
+            let activeEnergy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned),
+            let dietaryEnergy = HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed),
+            let dietaryProtein = HKObjectType.quantityType(forIdentifier: .dietaryProtein),
+            let dietaryFatTotal = HKObjectType.quantityType(forIdentifier: .dietaryFatTotal),
+            let dietaryCarbohydrates = HKObjectType.quantityType(forIdentifier: .dietaryCarbohydrates),
+            let dateOfBirth = HKObjectType.characteristicType(forIdentifier: .dateOfBirth),
+            let biologicalSex = HKObjectType.characteristicType(forIdentifier: .biologicalSex)
+        else {
+            return false
+        }
+
+        let readTypes: Set<HKObjectType> = [
+            bodyMass,
+            height,
+            bodyFat,
+            activeEnergy,
+            dietaryEnergy,
+            dietaryProtein,
+            dietaryFatTotal,
+            dietaryCarbohydrates,
+            dateOfBirth,
+            biologicalSex
+        ]
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+            store.requestAuthorization(toShare: nil, read: readTypes) { granted, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
+        #else
+        return false
+        #endif
     }
 
     func fetchLatestMetrics() async throws -> UserMetrics {
-        // TODO: Read HKQuantityType for weight/body fat/height/active energy
+        #if canImport(HealthKit)
+        let height = try await latestQuantityValue(for: .height, unit: .meterUnit(with: .centi))
+        let weight = try await latestQuantityValue(for: .bodyMass, unit: .gramUnit(with: .kilo))
+        let bodyFat = try await latestQuantityValue(for: .bodyFatPercentage, unit: .percent())
+        let activeEnergy = try await latestQuantityValue(for: .activeEnergyBurned, unit: .kilocalorie())
+
+        let age = try? ageFromHealthKit()
+        let sex = try? biologicalSexFromHealthKit()
+
+        return UserMetrics(
+            heightCM: height,
+            weightKG: weight,
+            bodyFatPercent: bodyFat,
+            activeEnergyKcal: activeEnergy,
+            age: age,
+            sex: sex
+        )
+        #else
         return UserMetrics()
+        #endif
+    }
+
+    func fetchTodayConsumedEnergyKcal() async throws -> Double? {
+        let nutrition = try await fetchTodayConsumedNutrition()
+        return nutrition.kcal
+    }
+
+    func fetchTodayConsumedNutrition() async throws -> Nutrition {
+        #if canImport(HealthKit)
+        async let kcal = todayCumulativeValue(for: .dietaryEnergyConsumed, unit: .kilocalorie())
+        async let protein = todayCumulativeValue(for: .dietaryProtein, unit: .gram())
+        async let fat = todayCumulativeValue(for: .dietaryFatTotal, unit: .gram())
+        async let carbs = todayCumulativeValue(for: .dietaryCarbohydrates, unit: .gram())
+
+        return Nutrition(
+            kcal: try await kcal,
+            protein: try await protein,
+            fat: try await fat,
+            carbs: try await carbs
+        )
+        #else
+        return .empty
+        #endif
     }
 
     func calculateDailyCalories(metrics: UserMetrics, targetLossPerWeek: Double = 0.5) -> Int {
@@ -39,4 +131,80 @@ final class HealthKitService {
         let adjusted = max(1500, min(3200, tdee - deficit))
         return Int(adjusted.rounded())
     }
+
+    #if canImport(HealthKit)
+    private func todayCumulativeValue(for identifier: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double? {
+        guard let type = HKObjectType.quantityType(forIdentifier: identifier) else {
+            return nil
+        }
+
+        let start = Calendar.current.startOfDay(for: Date())
+        let end = Date()
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double?, Error>) in
+            let query = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                let value = result?.sumQuantity()?.doubleValue(for: unit)
+                continuation.resume(returning: value)
+            }
+
+            store.execute(query)
+        }
+    }
+
+    private func latestQuantityValue(for identifier: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double? {
+        guard let type = HKObjectType.quantityType(forIdentifier: identifier) else {
+            return nil
+        }
+
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double?, Error>) in
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: nil,
+                limit: 1,
+                sortDescriptors: [sort]
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                let sample = samples?.first as? HKQuantitySample
+                continuation.resume(returning: sample?.quantity.doubleValue(for: unit))
+            }
+            store.execute(query)
+        }
+    }
+
+    private func ageFromHealthKit() throws -> Int? {
+        let components = try store.dateOfBirthComponents()
+        guard let birthDate = Calendar.current.date(from: components) else {
+            return nil
+        }
+        return Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year
+    }
+
+    private func biologicalSexFromHealthKit() throws -> String? {
+        let value = try store.biologicalSex().biologicalSex
+        switch value {
+        case .male:
+            return "male"
+        case .female:
+            return "female"
+        default:
+            return nil
+        }
+    }
+    #endif
 }

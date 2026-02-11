@@ -25,6 +25,7 @@ struct InventoryAIApp: App {
                         RootTabView(
                             inventoryService: dependencies.inventoryService,
                             settingsService: dependencies.settingsService,
+                            healthKitService: dependencies.healthKitService,
                             barcodeLookupService: dependencies.barcodeLookupService,
                             recipeServiceClient: dependencies.recipeServiceClient
                         )

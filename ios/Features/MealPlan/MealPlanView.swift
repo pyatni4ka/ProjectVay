@@ -28,6 +28,7 @@ struct MealPlanView: View {
 
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
+    let healthKitService: HealthKitService
     let recipeServiceClient: RecipeServiceClient?
 
     @State private var selectedRange: PlanRange = .day
@@ -35,6 +36,10 @@ struct MealPlanView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var lastGeneratedAt: Date?
+    @State private var consumedTodayKcal: Double?
+    @State private var targetDayKcal: Double = 2200
+    @State private var healthStatusMessage: String?
+    @State private var hasRequestedHealthAccess = false
 
     var body: some View {
         List {
@@ -45,6 +50,38 @@ struct MealPlanView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+            }
+
+            Section("Калории (Apple Health / Yazio)") {
+                HStack {
+                    Text("Цель на день")
+                    Spacer()
+                    Text("\(targetDayKcal.formatted(.number.precision(.fractionLength(0)))) ккал")
+                }
+
+                if let consumedTodayKcal {
+                    HStack {
+                        Text("Съедено сегодня")
+                        Spacer()
+                        Text("\(consumedTodayKcal.formatted(.number.precision(.fractionLength(0)))) ккал")
+                    }
+
+                    HStack {
+                        Text("Остаток")
+                        Spacer()
+                        Text("\(max(0, targetDayKcal - consumedTodayKcal).formatted(.number.precision(.fractionLength(0)))) ккал")
+                    }
+                } else {
+                    Text("Нет данных о потреблении калорий за сегодня.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let healthStatusMessage {
+                    Text(healthStatusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if isLoading {
@@ -148,6 +185,7 @@ struct MealPlanView: View {
             let products = try await productsTask
             let expiringBatches = try await expiringBatchesTask
             let settings = try await settingsTask
+            let nutritionTarget = try await computeAdaptiveNutritionTarget()
 
             let productsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
             let ingredientKeywords = Array(Set(products.map { $0.name.lowercased() })).sorted()
@@ -170,7 +208,7 @@ struct MealPlanView: View {
                 days: selectedRange.daysCount,
                 ingredientKeywords: ingredientKeywords,
                 expiringSoonKeywords: expiringSoonKeywords,
-                targets: Nutrition(kcal: 2200, protein: 150, fat: 70, carbs: 220),
+                targets: nutritionTarget,
                 beveragesKcal: 120,
                 budget: .init(perDay: budgetPerDay > 0 ? budgetPerDay : nil, perMeal: nil),
                 exclude: settings.dislikedList,
@@ -185,6 +223,51 @@ struct MealPlanView: View {
         } catch {
             errorMessage = "Не удалось сгенерировать план: \(error.localizedDescription)"
         }
+    }
+
+    private func computeAdaptiveNutritionTarget() async throws -> Nutrition {
+        if !hasRequestedHealthAccess {
+            hasRequestedHealthAccess = true
+            _ = try? await healthKitService.requestReadAccess()
+        }
+
+        let metrics = try await healthKitService.fetchLatestMetrics()
+        let baselineTarget = Double(healthKitService.calculateDailyCalories(metrics: metrics, targetLossPerWeek: 0.5))
+        var adjustedTarget = baselineTarget
+
+        do {
+            let consumedToday = try await healthKitService.fetchTodayConsumedEnergyKcal()
+            consumedTodayKcal = consumedToday
+
+            if let consumedToday {
+                if selectedRange == .day {
+                    adjustedTarget = max(900, baselineTarget - consumedToday)
+                    healthStatusMessage = "Меню адаптировано под уже съеденные калории за сегодня."
+                } else {
+                    healthStatusMessage = "Для недельного плана используется базовая дневная цель."
+                }
+            } else {
+                healthStatusMessage = "Apple Health не вернул потреблённые калории за сегодня."
+            }
+        } catch {
+            consumedTodayKcal = nil
+            healthStatusMessage = "Не удалось прочитать калории из Apple Health."
+        }
+
+        targetDayKcal = adjustedTarget
+        return nutritionForTargetKcal(adjustedTarget)
+    }
+
+    private func nutritionForTargetKcal(_ kcal: Double) -> Nutrition {
+        let clampedKcal = max(900, kcal)
+        let ratio = clampedKcal / 2200
+
+        return Nutrition(
+            kcal: clampedKcal,
+            protein: max(75, 150 * ratio),
+            fat: max(30, 70 * ratio),
+            carbs: max(80, 220 * ratio)
+        )
     }
 
     private func mealTypeTitle(_ raw: String) -> String {

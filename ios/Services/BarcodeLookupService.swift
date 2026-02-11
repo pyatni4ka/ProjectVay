@@ -43,12 +43,17 @@ final class BarcodeLookupService {
         self.policy = policy
     }
 
-    func resolve(rawCode: String) async -> ScanResolution {
+    func resolve(rawCode: String, allowCreate: Bool = true) async -> ScanResolution {
         let payload = scannerService.parse(code: rawCode)
 
         switch payload {
         case .ean13(let barcode):
-            return await resolveEan(barcode, suggestedExpiry: nil, parsedWeightGrams: nil)
+            return await resolveEan(
+                barcode,
+                suggestedExpiry: nil,
+                parsedWeightGrams: nil,
+                allowCreate: allowCreate
+            )
         case .dataMatrix(_, let gtin, let expiryDate):
             guard
                 let gtin,
@@ -56,13 +61,23 @@ final class BarcodeLookupService {
             else {
                 return .notFound(barcode: nil, internalCode: nil, parsedWeightGrams: nil, suggestedExpiry: expiryDate)
             }
-            return await resolveEan(normalizedBarcode, suggestedExpiry: expiryDate, parsedWeightGrams: nil)
+            return await resolveEan(
+                normalizedBarcode,
+                suggestedExpiry: expiryDate,
+                parsedWeightGrams: nil,
+                allowCreate: allowCreate
+            )
         case .internalCode(let code, let parsedWeightGrams):
             return await resolveInternalCode(code, parsedWeightGrams: parsedWeightGrams)
         }
     }
 
-    private func resolveEan(_ barcode: String, suggestedExpiry: Date?, parsedWeightGrams: Double?) async -> ScanResolution {
+    private func resolveEan(
+        _ barcode: String,
+        suggestedExpiry: Date?,
+        parsedWeightGrams: Double?,
+        allowCreate: Bool
+    ) async -> ScanResolution {
         do {
             if await runtimeGuard.isNegativeCached(barcode: barcode) {
                 return .notFound(barcode: barcode, internalCode: nil, parsedWeightGrams: parsedWeightGrams, suggestedExpiry: suggestedExpiry)
@@ -71,6 +86,16 @@ final class BarcodeLookupService {
             if let product = try await inventoryService.findProduct(by: barcode) {
                 await runtimeGuard.clearNegativeCache(barcode: barcode)
                 return .found(product: product, suggestedExpiry: suggestedExpiry, parsedWeightGrams: parsedWeightGrams)
+            }
+
+            guard allowCreate else {
+                await runtimeGuard.saveNegativeCache(barcode: barcode, ttlSeconds: policy.negativeCacheSeconds)
+                return .notFound(
+                    barcode: barcode,
+                    internalCode: nil,
+                    parsedWeightGrams: parsedWeightGrams,
+                    suggestedExpiry: suggestedExpiry
+                )
             }
 
             for provider in providers {
