@@ -5,6 +5,9 @@ struct SettingsView: View {
 
     @State private var quietStartDate = DateComponents.from(minutes: AppSettings.default.quietStartMinute).asSettingsDate
     @State private var quietEndDate = DateComponents.from(minutes: AppSettings.default.quietEndMinute).asSettingsDate
+    @State private var breakfastDate = DateComponents.from(minutes: AppSettings.default.mealSchedule.breakfastMinute).asSettingsDate
+    @State private var lunchDate = DateComponents.from(minutes: AppSettings.default.mealSchedule.lunchMinute).asSettingsDate
+    @State private var dinnerDate = DateComponents.from(minutes: AppSettings.default.mealSchedule.dinnerMinute).asSettingsDate
     @State private var expiryDaysText = "5,3,1"
     @State private var budgetDayText = "800"
     @State private var budgetWeekText = ""
@@ -32,6 +35,12 @@ struct SettingsView: View {
                     .keyboardType(.decimalPad)
                 TextField("Нелюбимые продукты", text: $dislikedText)
                 Toggle("Кости допустимы редко", isOn: $avoidBones)
+            }
+
+            Section("Расписание приёмов") {
+                DatePicker("Завтрак", selection: $breakfastDate, displayedComponents: [.hourAndMinute])
+                DatePicker("Обед", selection: $lunchDate, displayedComponents: [.hourAndMinute])
+                DatePicker("Ужин", selection: $dinnerDate, displayedComponents: [.hourAndMinute])
             }
 
             Section("Магазины") {
@@ -86,6 +95,9 @@ struct SettingsView: View {
             let settings = try await settingsService.loadSettings()
             quietStartDate = DateComponents.from(minutes: settings.quietStartMinute).asSettingsDate
             quietEndDate = DateComponents.from(minutes: settings.quietEndMinute).asSettingsDate
+            breakfastDate = DateComponents.from(minutes: settings.mealSchedule.breakfastMinute).asSettingsDate
+            lunchDate = DateComponents.from(minutes: settings.mealSchedule.lunchMinute).asSettingsDate
+            dinnerDate = DateComponents.from(minutes: settings.mealSchedule.dinnerMinute).asSettingsDate
             expiryDaysText = settings.expiryAlertsDays.map(String.init).joined(separator: ",")
             budgetDayText = settings.budgetDay.formattedSimple
             budgetWeekText = settings.budgetWeek?.formattedSimple ?? ""
@@ -128,7 +140,12 @@ struct SettingsView: View {
             budgetWeek: budgetWeek,
             stores: selectedStores.isEmpty ? AppSettings.default.stores : Array(selectedStores),
             dislikedList: disliked,
-            avoidBones: avoidBones
+            avoidBones: avoidBones,
+            mealSchedule: .init(
+                breakfastMinute: minuteOfDay(breakfastDate),
+                lunchMinute: minuteOfDay(lunchDate),
+                dinnerMinute: minuteOfDay(dinnerDate)
+            )
         ).normalized()
 
         isSaving = true

@@ -21,6 +21,7 @@ protocol InventoryRepositoryProtocol: Sendable {
     func saveInventoryEvent(_ event: InventoryEvent) throws
     func upsertInternalCodeMapping(_ mapping: InternalCodeMapping) throws
     func fetchInternalCodeMapping(code: String) throws -> InternalCodeMapping?
+    func deleteAllInventoryData() throws
 }
 
 final class InventoryRepository: InventoryRepositoryProtocol {
@@ -204,6 +205,16 @@ final class InventoryRepository: InventoryRepositoryProtocol {
     func fetchInternalCodeMapping(code: String) throws -> InternalCodeMapping? {
         try dbQueue.read { db in
             try InternalCodeMappingRecord.fetchOne(db, key: code)?.asDomain()
+        }
+    }
+
+    func deleteAllInventoryData() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM internal_code_mappings")
+            try db.execute(sql: "DELETE FROM inventory_events")
+            try db.execute(sql: "DELETE FROM price_entries")
+            try db.execute(sql: "DELETE FROM batches")
+            try db.execute(sql: "DELETE FROM products")
         }
     }
 }

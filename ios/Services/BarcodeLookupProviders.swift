@@ -81,10 +81,18 @@ final class RFBarcodeProvider: BarcodeLookupProvider, @unchecked Sendable {
 
         struct Response: Decodable {
             struct Item: Decodable {
+                struct NutritionPayload: Decodable {
+                    let kcal: Double?
+                    let protein: Double?
+                    let fat: Double?
+                    let carbs: Double?
+                }
+
                 let barcode: String?
                 let name: String?
                 let brand: String?
                 let category: String?
+                let nutrition: NutritionPayload?
             }
 
             let found: Bool
@@ -103,7 +111,12 @@ final class RFBarcodeProvider: BarcodeLookupProvider, @unchecked Sendable {
             name: name,
             brand: product.brand?.trimmingCharacters(in: .whitespacesAndNewlines),
             category: category?.isEmpty == false ? category! : "Продукты",
-            nutrition: .empty
+            nutrition: Nutrition(
+                kcal: product.nutrition?.kcal,
+                protein: product.nutrition?.protein,
+                fat: product.nutrition?.fat,
+                carbs: product.nutrition?.carbs
+            )
         )
     }
 }

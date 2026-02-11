@@ -54,14 +54,39 @@ struct MealPlanView: View {
         }
 
         static func next(for date: Date) -> MealSlot {
-            let hour = Calendar.current.component(.hour, from: date)
-            if hour < 11 {
+            let calendar = Calendar.current
+            let minute = (calendar.component(.hour, from: date) * 60) + calendar.component(.minute, from: date)
+            let schedule = AppSettings.MealSchedule.default
+
+            if minute < schedule.breakfastMinute {
                 return .breakfast
             }
-            if hour < 17 {
+            if minute < schedule.lunchMinute {
                 return .lunch
             }
-            return .dinner
+            if minute < schedule.dinnerMinute {
+                return .dinner
+            }
+
+            return .breakfast
+        }
+
+        static func next(for date: Date, schedule: AppSettings.MealSchedule) -> MealSlot {
+            let calendar = Calendar.current
+            let minute = (calendar.component(.hour, from: date) * 60) + calendar.component(.minute, from: date)
+            let normalized = schedule.normalized()
+
+            if minute < normalized.breakfastMinute {
+                return .breakfast
+            }
+            if minute < normalized.lunchMinute {
+                return .lunch
+            }
+            if minute < normalized.dinnerMinute {
+                return .dinner
+            }
+
+            return .breakfast
         }
     }
 
@@ -180,7 +205,7 @@ struct MealPlanView: View {
         if isLoading {
             Section {
                 HStack {
-                    ProgressView()
+                    SwiftUI.ProgressView()
                     Text("Генерируем план...")
                 }
             }
@@ -285,7 +310,7 @@ struct MealPlanView: View {
             let products = try await productsTask
             let expiringBatches = try await expiringBatchesTask
             let settings = try await settingsTask
-            let nutritionSnapshot = try await computeAdaptiveNutritionSnapshot()
+            let nutritionSnapshot = try await computeAdaptiveNutritionSnapshot(settings: settings)
 
             dayTargetNutrition = selectedRange == .day ? nutritionSnapshot.planDayTarget : nutritionSnapshot.baselineDayTarget
             consumedTodayNutrition = nutritionSnapshot.consumedToday
@@ -358,8 +383,8 @@ struct MealPlanView: View {
         }
     }
 
-    private func computeAdaptiveNutritionSnapshot() async throws -> NutritionSnapshot {
-        let nextMealSlot = MealSlot.next(for: Date())
+    private func computeAdaptiveNutritionSnapshot(settings: AppSettings) async throws -> NutritionSnapshot {
+        let nextMealSlot = MealSlot.next(for: Date(), schedule: settings.mealSchedule)
         let remainingMealsCount = max(1, nextMealSlot.remainingMealsCount)
 
         if !hasRequestedHealthAccess {

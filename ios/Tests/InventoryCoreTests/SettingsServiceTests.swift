@@ -41,7 +41,7 @@ final class SettingsServiceTests: XCTestCase {
             notificationScheduler: scheduler
         )
 
-        let _ = try await service.saveSettings(
+        let saved = try await service.saveSettings(
             AppSettings(
                 quietStartMinute: 90,
                 quietEndMinute: 360,
@@ -50,7 +50,12 @@ final class SettingsServiceTests: XCTestCase {
                 budgetWeek: 5_000,
                 stores: [.pyaterochka, .auchan],
                 dislikedList: ["Кускус", " кускус "],
-                avoidBones: true
+                avoidBones: true,
+                mealSchedule: .init(
+                    breakfastMinute: 14 * 60,
+                    lunchMinute: 13 * 60,
+                    dinnerMinute: 12 * 60
+                )
             )
         )
 
@@ -58,6 +63,7 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(calls.rescheduledBatchIDs, [expiringBatch.id])
         XCTAssertEqual(calls.scheduledBatchIDs, [])
         XCTAssertEqual(calls.canceledBatchIDs, [])
+        XCTAssertEqual(saved.mealSchedule, .default)
     }
 
     func testOnboardingFlagRoundtrip() async throws {
