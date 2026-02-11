@@ -15,6 +15,11 @@ export type Recipe = {
   ingredients: string[];
   instructions: string[];
   nutrition?: Nutrition;
+  times?: {
+    totalMinutes?: number;
+  };
+  servings?: number;
+  cuisine?: string;
   tags?: string[];
   estimatedCost?: number;
 };

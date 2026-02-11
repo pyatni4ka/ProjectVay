@@ -82,6 +82,18 @@ enum AppMigrations {
             try db.execute(sql: "INSERT INTO app_settings (id, quiet_start_minute, quiet_end_minute, expiry_alerts_days_json, budget_day_minor, budget_week_minor, stores_json, disliked_list_json, avoid_bones, onboarding_completed) VALUES (1, 60, 360, '[5,3,1]', 80000, NULL, '[\"pyaterochka\",\"yandexLavka\",\"chizhik\",\"auchan\"]', '[\"кускус\"]', 1, 0)")
         }
 
+        migrator.registerMigration("v2_internal_code_mappings") { db in
+            try db.create(table: "internal_code_mappings") { table in
+                table.column("code", .text).primaryKey()
+                table.column("product_id", .text).notNull()
+                    .references("products", onDelete: .cascade, onUpdate: .cascade)
+                table.column("parsed_weight_grams", .double)
+                table.column("created_at", .datetime).notNull()
+            }
+
+            try db.create(index: "idx_internal_code_mappings_product", on: "internal_code_mappings", columns: ["product_id"])
+        }
+
         return migrator
     }
 }

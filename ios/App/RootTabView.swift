@@ -5,6 +5,7 @@ struct RootTabView: View {
 
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
+    let barcodeLookupService: BarcodeLookupService
 
     var body: some View {
         TabView(selection: $coordinator.selectedTab) {
@@ -12,7 +13,12 @@ struct RootTabView: View {
                 .tabItem { Label("Что приготовить", systemImage: "sparkles") }
                 .tag(RootTab.home)
 
-            NavigationStack { InventoryView(inventoryService: inventoryService) }
+            NavigationStack {
+                InventoryView(
+                    inventoryService: inventoryService,
+                    barcodeLookupService: barcodeLookupService
+                )
+            }
                 .tabItem { Label("Инвентарь", systemImage: "refrigerator") }
                 .tag(RootTab.inventory)
 

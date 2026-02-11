@@ -1,4 +1,4 @@
-# Архитектура проекта (после Этапа 1)
+# Архитектура проекта (после Этапов 1 + 2 hardening + базового 3)
 
 ## 1) Структура модулей
 
@@ -25,6 +25,8 @@ ProjectVay/
 │   │   ├── InventoryService.swift
 │   │   ├── SettingsService.swift
 │   │   ├── NotificationScheduler.swift
+│   │   ├── BarcodeLookupService.swift
+│   │   ├── BarcodeLookupProviders.swift
 │   │   ├── HealthKitService.swift
 │   │   ├── ScannerService.swift
 │   │   └── RecipeServiceClient.swift
@@ -41,6 +43,12 @@ ProjectVay/
 │   │   └── Scanner/ScannerView.swift
 │   └── Shared/
 ├── backend/
+│   ├── src/
+│   │   ├── api/routes.ts
+│   │   ├── config/recipeSources.ts
+│   │   ├── services/{recipeScraper,recipeIndex,sourcePolicy,cacheStore,recommendation}.ts
+│   │   └── types/contracts.ts
+│   └── test/
 └── docs/
 ```
 
@@ -52,8 +60,9 @@ ProjectVay/
 - `price_entries`
 - `inventory_events`
 - `app_settings`
+- `internal_code_mappings`
 
-На сервер в Этапе 1 инвентарь не отправляется.
+На сервер отправляются только barcode-запросы lookup (без полного инвентаря и партий).
 
 ## 3) Схема БД и миграции
 
@@ -64,12 +73,16 @@ ProjectVay/
 - `inventory_events(id PK, type, product_id FK, batch_id NULL FK, quantity_delta, timestamp, note NULL)`
 - `app_settings(id=1, quiet_start_minute, quiet_end_minute, expiry_alerts_days_json, budget_day_minor, budget_week_minor NULL, stores_json, disliked_list_json, avoid_bones, onboarding_completed)`
 
+`v2_internal_code_mappings` создаёт:
+- `internal_code_mappings(code PK, product_id FK, parsed_weight_grams NULL, created_at)`
+
 Индексы:
 - `idx_products_barcode`
 - `idx_batches_expiry_date`
 - `idx_batches_location`
 - `idx_price_entries_product_date`
 - `idx_events_product_timestamp`
+- `idx_internal_code_mappings_product`
 
 Политика: только forward migrations.
 
@@ -91,6 +104,33 @@ ProjectVay/
 2. `InventoryService.updateBatch` сохраняет изменения.
 3. Старые уведомления отменяются, новые планируются заново.
 
+### Сканирование и lookup pipeline
+1. `ScannerView` читает live-баркоды через `DataScannerViewController`.
+2. `ScannerService` классифицирует payload: EAN-13 / DataMatrix / internal.
+3. `BarcodeLookupService` применяет pipeline:
+   - нормализует GTIN из DataMatrix (`14 -> 13`, если префикс `0`) для совместимости с EAN-13;
+   - локальный поиск (`InventoryService.findProduct`)
+   - внешние провайдеры (`EAN-DB`, `RF`, `Open Food Facts`)
+   - fallback на ручное создание
+4. Для internal code после ручного подтверждения сохраняется `internal_code_mappings`, и последующие сканы резолвятся локально, включая fallback веса из сохранённого mapping.
+5. Hardening:
+   - negative cache по barcode для повторных miss;
+   - circuit breaker по провайдерам (threshold/cooldown);
+   - retry + timeout + межзапросный cooldown;
+   - безопасная валидация RF endpoint (по умолчанию только `https`).
+
+### Backend recipes (Stage 3)
+1. `POST /api/v1/recipes/fetch`:
+   - валидирует URL источника и применяет whitelist доменов;
+   - применяет rate limiting;
+   - берёт recipe из кэша или скачивает HTML и парсит JSON-LD schema.org;
+   - отклоняет рецепт без изображения/ингредиентов/шагов.
+2. Успешно распарсенный рецепт:
+   - попадает в `CacheStore` (TTL + ограничение размера);
+   - индексируется в `RecipeIndex`.
+3. `GET /api/v1/recipes/search` ищет по объединённому индексу (seed + fetched).
+4. `POST /api/v1/recipes/recommend` ранжирует текущий индекс.
+
 ## 5) Уведомления сроков (quiet hours)
 
 Правила:
@@ -108,12 +148,13 @@ ProjectVay/
 - `Persistence` — инфраструктура SQLite/GRDB и миграции.
 - `Repositories` — доступ к данным и SQL-операции.
 - `Services` — бизнес-операции, правила, уведомления.
+  `NotificationScheduler` реализует `NotificationScheduling` для тестируемой интеграции `InventoryService`.
 - `UseCases` — сценарии UI (композиция сервисов).
 - `Features` — SwiftUI экраны и пользовательские потоки.
 
 ## 7) Что остаётся следующими этапами
 
-- production scanner pipeline (EAN/DataMatrix/internal);
-- расширенный recipe ranking + план питания;
+- калибровка lookup-провайдеров на реальных ключах/API-квотах;
+- расширенный recipe ranking + генерация meal plan;
 - полноценная интеграция HealthKit-графиков прогресса;
-- backend интеграции рецептов на production-уровне.
+- persistent cache/index backend (SQLite/Postgres вместо in-memory).

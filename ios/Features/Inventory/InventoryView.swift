@@ -2,11 +2,13 @@ import SwiftUI
 
 struct InventoryView: View {
     let inventoryService: any InventoryServiceProtocol
+    let barcodeLookupService: BarcodeLookupService
 
     @State private var selectedLocation: InventoryLocation = .fridge
     @State private var searchText: String = ""
     @State private var snapshot = InventorySnapshot(products: [], expiringSoon: [])
     @State private var isPresentingAddProduct = false
+    @State private var isPresentingScanner = false
     @State private var errorMessage: String?
 
     private var groupedProducts: [ProductWithBatches] {
@@ -86,8 +88,9 @@ struct InventoryView: View {
         .searchable(text: $searchText, prompt: "Поиск по товарам")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button("Сканировать") {}
-                    .disabled(true)
+                Button("Сканировать") {
+                    isPresentingScanner = true
+                }
 
                 Button("Добавить") {
                     isPresentingAddProduct = true
@@ -96,9 +99,20 @@ struct InventoryView: View {
         }
         .sheet(isPresented: $isPresentingAddProduct) {
             NavigationStack {
-                AddProductView(inventoryService: inventoryService) {
+                AddProductView(inventoryService: inventoryService) { _ in
                     Task { await reload() }
                 }
+            }
+        }
+        .sheet(isPresented: $isPresentingScanner) {
+            NavigationStack {
+                ScannerView(
+                    inventoryService: inventoryService,
+                    barcodeLookupService: barcodeLookupService,
+                    onInventoryChanged: {
+                        await reload()
+                    }
+                )
             }
         }
         .alert("Ошибка", isPresented: Binding(get: { errorMessage != nil }, set: { _ in errorMessage = nil })) {

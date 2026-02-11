@@ -298,6 +298,14 @@ struct BeverageLog: Identifiable, Codable, Equatable {
     var kcal: Double
 }
 
+struct InternalCodeMapping: Identifiable, Codable, Equatable {
+    var id: String { code }
+    var code: String
+    var productId: UUID
+    var parsedWeightGrams: Double?
+    var createdAt: Date
+}
+
 extension DateComponents {
     static func from(minutes: Int) -> DateComponents {
         DateComponents(hour: minutes / 60, minute: minutes % 60)

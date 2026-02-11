@@ -24,7 +24,8 @@ struct InventoryAIApp: App {
                     if coordinator.isOnboardingCompleted {
                         RootTabView(
                             inventoryService: dependencies.inventoryService,
-                            settingsService: dependencies.settingsService
+                            settingsService: dependencies.settingsService,
+                            barcodeLookupService: dependencies.barcodeLookupService
                         )
                     } else {
                         NavigationStack {

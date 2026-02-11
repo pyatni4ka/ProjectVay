@@ -6,6 +6,7 @@ enum InventoryServiceError: Error {
 
 protocol InventoryServiceProtocol {
     func findProduct(by barcode: String) async throws -> Product?
+    func findProduct(byInternalCode code: String) async throws -> Product?
     func createProduct(_ product: Product) async throws -> Product
     func updateProduct(_ product: Product) async throws -> Product
     func deleteProduct(id: UUID) async throws
@@ -22,17 +23,19 @@ protocol InventoryServiceProtocol {
 
     func recordEvent(_ event: InventoryEvent) async throws
     func expiringBatches(horizonDays: Int) async throws -> [Batch]
+    func bindInternalCode(_ code: String, productId: UUID, parsedWeightGrams: Double?) async throws
+    func internalCodeMapping(for code: String) async throws -> InternalCodeMapping?
 }
 
 final class InventoryService: InventoryServiceProtocol {
     private let repository: InventoryRepositoryProtocol
     private let settingsRepository: SettingsRepositoryProtocol
-    private let notificationScheduler: NotificationScheduler
+    private let notificationScheduler: any NotificationScheduling
 
     init(
         repository: InventoryRepositoryProtocol,
         settingsRepository: SettingsRepositoryProtocol,
-        notificationScheduler: NotificationScheduler
+        notificationScheduler: any NotificationScheduling
     ) {
         self.repository = repository
         self.settingsRepository = settingsRepository
@@ -43,7 +46,15 @@ final class InventoryService: InventoryServiceProtocol {
         try repository.findProduct(byBarcode: barcode)
     }
 
+    func findProduct(byInternalCode code: String) async throws -> Product? {
+        try repository.findProduct(byInternalCode: code)
+    }
+
     func createProduct(_ product: Product) async throws -> Product {
+        if let barcode = product.barcode, let existing = try repository.findProduct(byBarcode: barcode) {
+            return existing
+        }
+
         let now = Date()
         var stored = product
         stored.createdAt = now
@@ -122,9 +133,6 @@ final class InventoryService: InventoryServiceProtocol {
         let allBatches = try repository.listBatches(productId: nil)
         guard let batch = allBatches.first(where: { $0.id == id }) else { return }
 
-        try await notificationScheduler.cancelExpiryNotifications(batchId: id)
-        try repository.removeBatch(id: id)
-
         let event = InventoryEvent(
             type: .remove,
             productId: batch.productId,
@@ -133,6 +141,9 @@ final class InventoryService: InventoryServiceProtocol {
             note: "Удаление партии"
         )
         try repository.saveInventoryEvent(event)
+
+        try await notificationScheduler.cancelExpiryNotifications(batchId: id)
+        try repository.removeBatch(id: id)
     }
 
     func listProducts(location: InventoryLocation?, search: String?) async throws -> [Product] {
@@ -159,5 +170,19 @@ final class InventoryService: InventoryServiceProtocol {
         let safeDays = max(1, min(horizonDays, 90))
         let horizonDate = Calendar.current.date(byAdding: .day, value: safeDays, to: Date()) ?? Date()
         return try repository.expiringBatches(until: horizonDate)
+    }
+
+    func bindInternalCode(_ code: String, productId: UUID, parsedWeightGrams: Double?) async throws {
+        let mapping = InternalCodeMapping(
+            code: code,
+            productId: productId,
+            parsedWeightGrams: parsedWeightGrams,
+            createdAt: Date()
+        )
+        try repository.upsertInternalCodeMapping(mapping)
+    }
+
+    func internalCodeMapping(for code: String) async throws -> InternalCodeMapping? {
+        try repository.fetchInternalCodeMapping(code: code)
     }
 }

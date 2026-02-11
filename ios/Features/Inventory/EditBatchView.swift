@@ -5,6 +5,9 @@ struct EditBatchView: View {
     let batch: Batch?
     let inventoryService: any InventoryServiceProtocol
     let onSaved: () -> Void
+    let initialExpiryDate: Date?
+    let initialQuantity: Double?
+    let initialUnit: UnitType?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -15,6 +18,24 @@ struct EditBatchView: View {
     @State private var expiryDate = Date()
     @State private var isOpened = false
     @State private var errorMessage: String?
+
+    init(
+        productID: UUID,
+        batch: Batch?,
+        inventoryService: any InventoryServiceProtocol,
+        onSaved: @escaping () -> Void,
+        initialExpiryDate: Date? = nil,
+        initialQuantity: Double? = nil,
+        initialUnit: UnitType? = nil
+    ) {
+        self.productID = productID
+        self.batch = batch
+        self.inventoryService = inventoryService
+        self.onSaved = onSaved
+        self.initialExpiryDate = initialExpiryDate
+        self.initialQuantity = initialQuantity
+        self.initialUnit = initialUnit
+    }
 
     var body: some View {
         Form {
@@ -71,6 +92,18 @@ struct EditBatchView: View {
 
     private func loadFromInput() {
         guard let batch else {
+            if let initialQuantity {
+                quantity = initialQuantity.formatted()
+            }
+
+            if let initialUnit {
+                unit = initialUnit
+            }
+
+            if let initialExpiryDate {
+                hasExpiryDate = true
+                expiryDate = initialExpiryDate
+            }
             return
         }
 

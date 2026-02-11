@@ -6,7 +6,13 @@ struct ReminderCandidate: Equatable {
     let fireDate: Date
 }
 
-final class NotificationScheduler: @unchecked Sendable {
+protocol NotificationScheduling: Sendable {
+    func scheduleExpiryNotifications(for batch: Batch, product: Product, settings: AppSettings) async throws
+    func cancelExpiryNotifications(batchId: UUID) async throws
+    func rescheduleExpiryNotifications(for batch: Batch, product: Product, settings: AppSettings) async throws
+}
+
+final class NotificationScheduler: NotificationScheduling, @unchecked Sendable {
     private let center: UNUserNotificationCenter?
     private let calendar: Calendar
 

@@ -1,16 +1,14 @@
-# Backend API (MVP)
+# Backend API (MVP + Stage 3 baseline)
 
 Base URL: `/api/v1`
 
 ## 1) GET /recipes/search
-Поиск по индексу рецептов (из white-list источников).
+Поиск по индексу рецептов (seed + fetched из white-list источников).
 
 Query params:
 - `q` — строка поиска
-- `timeMax` — максимум минут
-- `budgetPerServing` — максимум ₽/порция
-- `onlyInStock` — bool
-- `exclude` — csv исключений
+- `cuisine` — csv-фильтр по кухне/тегам (опционально)
+- `limit` — ограничение размера выдачи (по умолчанию 50, максимум 200)
 
 Response `200`:
 ```json
@@ -86,11 +84,32 @@ Response `200`:
   "videoURL": null,
   "ingredients": ["яйца", "молоко"],
   "instructions": ["Шаг 1", "Шаг 2"],
+  "servings": 2,
+  "cuisine": "русская",
   "times": {"totalMinutes": 15}
 }
 ```
 
-## 4) GET /barcode/lookup (optional)
+Ошибки:
+- `400 invalid_url`
+- `403 source_not_allowed`
+- `429 rate_limited`
+- `422 recipe_schema_not_found | recipe_image_required | recipe_ingredients_required | recipe_instructions_required`
+- `502 upstream_fetch_failed`
+- `504 upstream_timeout`
+
+## 4) GET /recipes/sources
+Текущие разрешённые источники и размер кэша.
+
+Response `200`:
+```json
+{
+  "sources": ["food.ru", "eda.ru", "allrecipes.com"],
+  "cacheSize": 42
+}
+```
+
+## 5) GET /barcode/lookup (optional)
 Прокси-lookup для barcode провайдеров.
 
 Query:
@@ -109,3 +128,9 @@ Response:
   "provider": "openfoodfacts"
 }
 ```
+
+## Политики безопасности
+- `recipes/fetch` принимает только `http/https` URL.
+- Блокируются `localhost`, loopback и private network диапазоны.
+- Источник должен входить в whitelist доменов (`RECIPE_SOURCE_WHITELIST`).
+- На endpoint действует in-memory rate limit (окно и лимит настраиваются env-переменными).

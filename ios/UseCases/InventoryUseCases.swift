@@ -32,7 +32,7 @@ struct LoadInventorySnapshotUseCase {
 struct CreateProductWithBatchUseCase {
     let inventoryService: any InventoryServiceProtocol
 
-    func execute(product: Product, initialBatch: Batch?, initialPrice: PriceEntry?) async throws {
+    func execute(product: Product, initialBatch: Batch?, initialPrice: PriceEntry?) async throws -> Product {
         let storedProduct = try await inventoryService.createProduct(product)
 
         if var batch = initialBatch {
@@ -61,5 +61,7 @@ struct CreateProductWithBatchUseCase {
             )
             try await inventoryService.savePriceEntry(initialPrice)
         }
+
+        return storedProduct
     }
 }

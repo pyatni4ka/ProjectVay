@@ -3,6 +3,7 @@ import GRDB
 
 protocol InventoryRepositoryProtocol: Sendable {
     func findProduct(byBarcode barcode: String) throws -> Product?
+    func findProduct(byInternalCode code: String) throws -> Product?
     func fetchProduct(id: UUID) throws -> Product?
     func upsertProduct(_ product: Product) throws
     func deleteProduct(id: UUID) throws
@@ -18,6 +19,8 @@ protocol InventoryRepositoryProtocol: Sendable {
     func listPriceHistory(productId: UUID) throws -> [PriceEntry]
 
     func saveInventoryEvent(_ event: InventoryEvent) throws
+    func upsertInternalCodeMapping(_ mapping: InternalCodeMapping) throws
+    func fetchInternalCodeMapping(code: String) throws -> InternalCodeMapping?
 }
 
 final class InventoryRepository: InventoryRepositoryProtocol {
@@ -35,6 +38,27 @@ final class InventoryRepository: InventoryRepositoryProtocol {
             else {
                 return nil
             }
+            return try record.asDomain()
+        }
+    }
+
+    func findProduct(byInternalCode code: String) throws -> Product? {
+        try dbQueue.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                SELECT p.*
+                FROM products p
+                JOIN internal_code_mappings m ON m.product_id = p.id
+                WHERE m.code = ?
+                LIMIT 1
+                """,
+                arguments: [code]
+            ) else {
+                return nil
+            }
+
+            let record = try ProductRecord(row: row)
             return try record.asDomain()
         }
     }
@@ -167,6 +191,19 @@ final class InventoryRepository: InventoryRepositoryProtocol {
         try dbQueue.write { db in
             var record = InventoryEventRecord(event: event)
             try record.save(db)
+        }
+    }
+
+    func upsertInternalCodeMapping(_ mapping: InternalCodeMapping) throws {
+        try dbQueue.write { db in
+            var record = InternalCodeMappingRecord(mapping: mapping)
+            try record.save(db)
+        }
+    }
+
+    func fetchInternalCodeMapping(code: String) throws -> InternalCodeMapping? {
+        try dbQueue.read { db in
+            try InternalCodeMappingRecord.fetchOne(db, key: code)?.asDomain()
         }
     }
 }

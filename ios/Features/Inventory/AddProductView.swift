@@ -2,7 +2,13 @@ import SwiftUI
 
 struct AddProductView: View {
     let inventoryService: any InventoryServiceProtocol
-    let onSaved: () -> Void
+    let initialName: String?
+    let initialBarcode: String?
+    let initialCategory: String?
+    let initialUnit: UnitType?
+    let initialQuantity: Double?
+    let initialExpiryDate: Date?
+    let onSaved: (Product) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -26,6 +32,26 @@ struct AddProductView: View {
 
     @State private var errorMessage: String?
     @State private var isSaving = false
+
+    init(
+        inventoryService: any InventoryServiceProtocol,
+        initialName: String? = nil,
+        initialBarcode: String? = nil,
+        initialCategory: String? = nil,
+        initialUnit: UnitType? = nil,
+        initialQuantity: Double? = nil,
+        initialExpiryDate: Date? = nil,
+        onSaved: @escaping (Product) -> Void
+    ) {
+        self.inventoryService = inventoryService
+        self.initialName = initialName
+        self.initialBarcode = initialBarcode
+        self.initialCategory = initialCategory
+        self.initialUnit = initialUnit
+        self.initialQuantity = initialQuantity
+        self.initialExpiryDate = initialExpiryDate
+        self.onSaved = onSaved
+    }
 
     var body: some View {
         Form {
@@ -96,11 +122,39 @@ struct AddProductView: View {
         } message: {
             Text(errorMessage ?? "Не удалось сохранить")
         }
+        .onAppear(perform: applyInitialValues)
     }
 
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !category.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func applyInitialValues() {
+        if let initialName, name.isEmpty {
+            name = initialName
+        }
+
+        if let initialBarcode, barcode.isEmpty {
+            barcode = initialBarcode
+        }
+
+        if let initialCategory, category.isEmpty {
+            category = initialCategory
+        }
+
+        if let initialUnit {
+            unit = initialUnit
+        }
+
+        if let initialQuantity {
+            quantity = initialQuantity.formatted()
+        }
+
+        if let initialExpiryDate {
+            hasExpiryDate = true
+            expiryDate = initialExpiryDate
+        }
     }
 
     private func save() async {
@@ -147,8 +201,8 @@ struct AddProductView: View {
 
         do {
             let useCase = CreateProductWithBatchUseCase(inventoryService: inventoryService)
-            try await useCase.execute(product: product, initialBatch: initialBatch, initialPrice: initialPrice)
-            onSaved()
+            let savedProduct = try await useCase.execute(product: product, initialBatch: initialBatch, initialPrice: initialPrice)
+            onSaved(savedProduct)
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
