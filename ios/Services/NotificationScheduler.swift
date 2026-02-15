@@ -38,6 +38,17 @@ final class NotificationScheduler: NotificationScheduling, @unchecked Sendable {
             content.title = "Проверь срок годности"
             content.body = "\(product.name): срок истекает через \(reminder.daysBefore) дн."
             content.sound = .default
+            // Группировка уведомлений
+            content.threadIdentifier = "expiry-alerts"
+            content.summaryArgument = product.name
+            content.summaryArgumentCount = 1
+            // Actionable notification с кнопками
+            content.categoryIdentifier = "EXPIRY_ALERT"
+            content.userInfo = [
+                "batchId": batch.id.uuidString,
+                "productId": batch.productId.uuidString,
+                "productName": product.name
+            ]
 
             let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: reminder.fireDate)
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)

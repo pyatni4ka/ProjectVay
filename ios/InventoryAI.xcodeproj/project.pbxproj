@@ -8,20 +8,25 @@
 
 /* Begin PBXBuildFile section */
 		06411A6082360276D54CE45A /* ProductDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21C3C843923CE27EFB85832 /* ProductDetailView.swift */; };
+		074C62A6E34B2FF984E10B1D /* StatCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C8DA82D8FBC910B1604700 /* StatCard.swift */; };
 		117890566693F4B53E5CBA82 /* DTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC52CBB6D2300D537D1E934 /* DTOs.swift */; };
 		184BC4D7E07DFB29BD791623 /* AddProductView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F32432159700AEECE99AD8 /* AddProductView.swift */; };
 		1922B5B4880D290DE3E296D2 /* SettingsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6303D1384F56FD0945DF9A70 /* SettingsRepository.swift */; };
 		23A19E045FFE4E867AAC8EA4 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DF1EE5A75D979CFD4257E6 /* RootTabView.swift */; };
 		297F186A33E743056B67C29E /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DE74EF74D8D73458DC227A /* AppCoordinator.swift */; };
 		2B01E649CDF1D170BC5CB7B4 /* EditBatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65E8C4A4FA5CB0E8D4E7982E /* EditBatchView.swift */; };
+		341E169CC39DBC84E25A569E /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27B65E33FDA8892096CD4A1D /* DesignSystem.swift */; };
 		39F3AAA653923BF30B732B39 /* AppSettingsRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6CD145BB6F0E0DFE6FFC32 /* AppSettingsRecord.swift */; };
 		3FE17F27E2785D8FC53B67D7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6513EB461776936D524ABC4A /* SettingsView.swift */; };
 		430C7B456CB2F48E45D96ECF /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304FC756B86B6CD7ACC7B581 /* NotificationScheduler.swift */; };
 		499CFDA6DF6ACFDBCE296004 /* Database.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B21538D196D56F81C3F9FB7 /* Database.swift */; };
+		49A816AA2A3F1D80B49937DA /* GlassCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 612B0C439C20EAD9A1B04430 /* GlassCard.swift */; };
 		4A26B5BCF17FE0FD4E9B4905 /* BatchRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AA63F9021F1A3BEE015A499 /* BatchRecord.swift */; };
 		4B23718C89F1ACCF2DE4F18E /* PriceEntryRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47484EC74E15DBB59198C26D /* PriceEntryRecord.swift */; };
 		4D9EC234C7998B843C8CCDA7 /* MealPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF4A687DC38ED5D59D3AC27 /* MealPlanView.swift */; };
 		51894195FD3901FA3B969FFC /* AppDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = D709D2660AFBC666C3B526EE /* AppDependencies.swift */; };
+		5F304CF40465A14074DB06C7 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550CED58D673F03AAAB848B0 /* EmptyStateView.swift */; };
+		618C54D2D55CC4B18E9CB64A /* MacroRecommendationFilterUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03485DF9403E4E043639179 /* MacroRecommendationFilterUseCase.swift */; };
 		622DE74BDA9218EAC5E84874 /* InventoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FA018E68F28499DAA99C6A4 /* InventoryService.swift */; };
 		62E32EC40E27DC10B98C3314 /* Migrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E02A137D0F0AC34C121F2EF /* Migrations.swift */; };
 		6473C2002C2414560D67F263 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5E541877665853E87E9C9C /* HomeView.swift */; };
@@ -37,6 +42,7 @@
 		A09F7A2546D729CBC3950356 /* InternalCodeMappingRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBF1DC7128519A9CF80D825E /* InternalCodeMappingRecord.swift */; };
 		A3A1418540243103ABE5C43D /* ProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD0326D790C12B608B526CD0 /* ProgressView.swift */; };
 		A7315714910E83BEF6424793 /* SettingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0331D28BA35FD9C8C0B66A85 /* SettingsService.swift */; };
+		A917F42908081DFD09D1949B /* NutritionRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54C6DC81DA2966C8A3D2092E /* NutritionRing.swift */; };
 		AB869B37E8E475C776F76C87 /* ScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A107567ED11654CF90FCC004 /* ScannerView.swift */; };
 		C2766EEC520802B1E95450CA /* InventoryUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = A16712EB1737E4E4183CE189 /* InventoryUseCases.swift */; };
 		C9D8ACB38417486CAA986205 /* RecipeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AD75210A6920C904EF25C96 /* RecipeView.swift */; };
@@ -55,6 +61,7 @@
 		1C6CD145BB6F0E0DFE6FFC32 /* AppSettingsRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsRecord.swift; sourceTree = "<group>"; };
 		1D96BEE34757CD202B837CF3 /* RecipeServiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeServiceClient.swift; sourceTree = "<group>"; };
 		1DF388A9481F00B34B5C51AF /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		27B65E33FDA8892096CD4A1D /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		2E02A137D0F0AC34C121F2EF /* Migrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Migrations.swift; sourceTree = "<group>"; };
 		304FC756B86B6CD7ACC7B581 /* NotificationScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationScheduler.swift; sourceTree = "<group>"; };
 		35C75B81459C1E1588E13FA9 /* InventoryEventRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryEventRecord.swift; sourceTree = "<group>"; };
@@ -63,12 +70,16 @@
 		46E51C234C1F962C2012B072 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		47484EC74E15DBB59198C26D /* PriceEntryRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PriceEntryRecord.swift; sourceTree = "<group>"; };
 		4FC52CBB6D2300D537D1E934 /* DTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DTOs.swift; sourceTree = "<group>"; };
+		54C6DC81DA2966C8A3D2092E /* NutritionRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionRing.swift; sourceTree = "<group>"; };
+		550CED58D673F03AAAB848B0 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		58F32432159700AEECE99AD8 /* AddProductView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddProductView.swift; sourceTree = "<group>"; };
 		5CF886682120A84111FDEFA9 /* HealthKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitService.swift; sourceTree = "<group>"; };
+		612B0C439C20EAD9A1B04430 /* GlassCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassCard.swift; sourceTree = "<group>"; };
 		6303D1384F56FD0945DF9A70 /* SettingsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRepository.swift; sourceTree = "<group>"; };
 		6513EB461776936D524ABC4A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		65E8C4A4FA5CB0E8D4E7982E /* EditBatchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditBatchView.swift; sourceTree = "<group>"; };
 		6AA63F9021F1A3BEE015A499 /* BatchRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchRecord.swift; sourceTree = "<group>"; };
+		6E309306A985CAA8840800DA /* InventoryAI.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = InventoryAI.entitlements; sourceTree = "<group>"; };
 		76B3126DBCF96C097E0A1A95 /* ProductRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductRecord.swift; sourceTree = "<group>"; };
 		777025D3A06BE4314328D5FD /* ScannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerService.swift; sourceTree = "<group>"; };
 		7A5E541877665853E87E9C9C /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -81,6 +92,7 @@
 		9FA018E68F28499DAA99C6A4 /* InventoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryService.swift; sourceTree = "<group>"; };
 		A107567ED11654CF90FCC004 /* ScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerView.swift; sourceTree = "<group>"; };
 		A16712EB1737E4E4183CE189 /* InventoryUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryUseCases.swift; sourceTree = "<group>"; };
+		A6C8DA82D8FBC910B1604700 /* StatCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatCard.swift; sourceTree = "<group>"; };
 		BD0326D790C12B608B526CD0 /* ProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressView.swift; sourceTree = "<group>"; };
 		BF16DC1686787D4B9350B6F1 /* BarcodeLookupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeLookupService.swift; sourceTree = "<group>"; };
 		C21C3C843923CE27EFB85832 /* ProductDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductDetailView.swift; sourceTree = "<group>"; };
@@ -88,6 +100,7 @@
 		CAF4A687DC38ED5D59D3AC27 /* MealPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealPlanView.swift; sourceTree = "<group>"; };
 		CD35E41E3E6D6ED4CD293EB7 /* BarcodeLookupProviders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeLookupProviders.swift; sourceTree = "<group>"; };
 		D709D2660AFBC666C3B526EE /* AppDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependencies.swift; sourceTree = "<group>"; };
+		F03485DF9403E4E043639179 /* MacroRecommendationFilterUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroRecommendationFilterUseCase.swift; sourceTree = "<group>"; };
 		F86D101CA77F656A64CC222B /* InventoryAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryAIApp.swift; sourceTree = "<group>"; };
 		FBF1DC7128519A9CF80D825E /* InternalCodeMappingRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternalCodeMappingRecord.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -136,6 +149,7 @@
 			isa = PBXGroup;
 			children = (
 				A16712EB1737E4E4183CE189 /* InventoryUseCases.swift */,
+				F03485DF9403E4E043639179 /* MacroRecommendationFilterUseCase.swift */,
 			);
 			path = UseCases;
 			sourceTree = "<group>";
@@ -193,7 +207,9 @@
 		995C4BDBC91292100386944F /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				27B65E33FDA8892096CD4A1D /* DesignSystem.swift */,
 				1DF388A9481F00B34B5C51AF /* Theme.swift */,
+				AB603B03B7CE4C6F135A5AA4 /* Components */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -212,6 +228,17 @@
 				BD0326D790C12B608B526CD0 /* ProgressView.swift */,
 			);
 			path = Progress;
+			sourceTree = "<group>";
+		};
+		AB603B03B7CE4C6F135A5AA4 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				550CED58D673F03AAAB848B0 /* EmptyStateView.swift */,
+				612B0C439C20EAD9A1B04430 /* GlassCard.swift */,
+				54C6DC81DA2966C8A3D2092E /* NutritionRing.swift */,
+				A6C8DA82D8FBC910B1604700 /* StatCard.swift */,
+			);
+			path = Components;
 			sourceTree = "<group>";
 		};
 		C2BFD83DA725C9860E9B35EA /* Onboarding */ = {
@@ -252,6 +279,7 @@
 				46E51C234C1F962C2012B072 /* AppConfig.swift */,
 				97DE74EF74D8D73458DC227A /* AppCoordinator.swift */,
 				D709D2660AFBC666C3B526EE /* AppDependencies.swift */,
+				6E309306A985CAA8840800DA /* InventoryAI.entitlements */,
 				F86D101CA77F656A64CC222B /* InventoryAIApp.swift */,
 				39DF1EE5A75D979CFD4257E6 /* RootTabView.swift */,
 			);
@@ -367,8 +395,11 @@
 				4A26B5BCF17FE0FD4E9B4905 /* BatchRecord.swift in Sources */,
 				117890566693F4B53E5CBA82 /* DTOs.swift in Sources */,
 				499CFDA6DF6ACFDBCE296004 /* Database.swift in Sources */,
+				341E169CC39DBC84E25A569E /* DesignSystem.swift in Sources */,
 				8422F3A0176B31DA389C2E96 /* DomainModels.swift in Sources */,
 				2B01E649CDF1D170BC5CB7B4 /* EditBatchView.swift in Sources */,
+				5F304CF40465A14074DB06C7 /* EmptyStateView.swift in Sources */,
+				49A816AA2A3F1D80B49937DA /* GlassCard.swift in Sources */,
 				9CEDB41571133A0CFA2C077C /* HealthKitService.swift in Sources */,
 				6473C2002C2414560D67F263 /* HomeView.swift in Sources */,
 				A09F7A2546D729CBC3950356 /* InternalCodeMappingRecord.swift in Sources */,
@@ -378,9 +409,11 @@
 				622DE74BDA9218EAC5E84874 /* InventoryService.swift in Sources */,
 				C2766EEC520802B1E95450CA /* InventoryUseCases.swift in Sources */,
 				7777A1108BAE1DADC35BBB01 /* InventoryView.swift in Sources */,
+				618C54D2D55CC4B18E9CB64A /* MacroRecommendationFilterUseCase.swift in Sources */,
 				4D9EC234C7998B843C8CCDA7 /* MealPlanView.swift in Sources */,
 				62E32EC40E27DC10B98C3314 /* Migrations.swift in Sources */,
 				430C7B456CB2F48E45D96ECF /* NotificationScheduler.swift in Sources */,
+				A917F42908081DFD09D1949B /* NutritionRing.swift in Sources */,
 				9CCBCDAB56381E05D8179047 /* OnboardingFlowView.swift in Sources */,
 				74EA21D496763AA6104CC52E /* OnboardingView.swift in Sources */,
 				4B23718C89F1ACCF2DE4F18E /* PriceEntryRecord.swift in Sources */,
@@ -395,6 +428,7 @@
 				1922B5B4880D290DE3E296D2 /* SettingsRepository.swift in Sources */,
 				A7315714910E83BEF6424793 /* SettingsService.swift in Sources */,
 				3FE17F27E2785D8FC53B67D7 /* SettingsView.swift in Sources */,
+				074C62A6E34B2FF984E10B1D /* StatCard.swift in Sources */,
 				DC2B7EFED3A02DAA3B78C8A7 /* Theme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -465,14 +499,22 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/InventoryAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "ДомИнвентарь";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.food-and-drink";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_127.0.0.1_NSExceptionAllowsInsecureHTTPLoads = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_127.0.0.1_NSIncludesSubdomains = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_localhost_NSExceptionAllowsInsecureHTTPLoads = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_localhost_NSIncludesSubdomains = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Камера нужна для сканирования штрихкодов и DataMatrix.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Нужно для чтения веса, жира и КБЖУ из Apple Health.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Нужно для синхронизации данных питания и прогресса.";
+				INFOPLIST_KEY_RecipeServiceBaseURL = "http://127.0.0.1:8080";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -492,14 +534,22 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/InventoryAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "ДомИнвентарь";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.food-and-drink";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_127.0.0.1_NSExceptionAllowsInsecureHTTPLoads = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_127.0.0.1_NSIncludesSubdomains = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_localhost_NSExceptionAllowsInsecureHTTPLoads = YES;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_localhost_NSIncludesSubdomains = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Камера нужна для сканирования штрихкодов и DataMatrix.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Нужно для чтения веса, жира и КБЖУ из Apple Health.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Нужно для синхронизации данных питания и прогресса.";
+				INFOPLIST_KEY_RecipeServiceBaseURL = "http://127.0.0.1:8080";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;

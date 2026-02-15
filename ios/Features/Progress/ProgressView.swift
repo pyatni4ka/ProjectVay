@@ -1,217 +1,586 @@
+import Charts
 import SwiftUI
 
-struct ProgressView: View {
-    let healthKitService: HealthKitService
+struct ProgressTrackingView: View {
+    let inventoryService: any InventoryServiceProtocol
+    let settingsService: any SettingsServiceProtocol
 
-    @State private var isLoading = false
-    @State private var errorMessage: String?
-    @State private var metrics = HealthKitService.UserMetrics()
-    @State private var consumedNutrition = Nutrition.empty
-    @State private var targetNutrition = Nutrition(kcal: 2200, protein: 140, fat: 70, carbs: 220)
-    @State private var weightHistory: [HealthKitService.SamplePoint] = []
-    @State private var bodyFatHistory: [HealthKitService.SamplePoint] = []
-    @State private var hasRequestedHealthAccess = false
+    @State private var settings: AppSettings = .default
+    @State private var products: [Product] = []
+    @State private var batches: [Batch] = []
+    @State private var events: [InventoryEvent] = []
+    @State private var priceEntries: [PriceEntry] = []
+    @State private var isLoading = true
+
+    @State private var selectedPeriod: Period = .week
+
+    enum Period: String, CaseIterable, Identifiable {
+        case week, month, all
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .week: return "Неделя"
+            case .month: return "Месяц"
+            case .all: return "Всё время"
+            }
+        }
+    }
 
     var body: some View {
-        List {
-            if isLoading {
-                Section {
-                    HStack {
-                        SwiftUI.ProgressView()
-                        Text("Загружаем данные Health...")
-                    }
-                }
-            }
+        ScrollView {
+            VStack(spacing: VaySpacing.xl) {
+                periodPicker
 
-            Section("Текущие метрики") {
-                metricRow("Вес", valueText(metrics.weightKG, suffix: "кг"))
-                metricRow("Жир", valueText(metrics.bodyFatPercent.map { $0 * 100 }, suffix: "%"))
-                metricRow("Рост", valueText(metrics.heightCM, suffix: "см"))
-                metricRow("Активная энергия", valueText(metrics.activeEnergyKcal, suffix: "ккал"))
-            }
-
-            Section("КБЖУ за сегодня (Apple Health / Yazio)") {
-                nutritionRow("Цель", targetNutrition)
-                nutritionRow("Съедено", consumedNutrition)
-                nutritionRow("Остаток", subtractNutrition(targetNutrition, consumedNutrition))
-            }
-
-            Section("Тренд веса") {
-                if let weeklyDelta = weightWeeklyDelta() {
-                    Text("Тренд: \(weeklyDelta >= 0 ? "+" : "")\(weeklyDelta.formatted(.number.precision(.fractionLength(2)))) кг/нед")
-                        .font(.subheadline)
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                } else if products.isEmpty && events.isEmpty {
+                    EmptyStateView(
+                        icon: "chart.line.uptrend.xyaxis",
+                        title: "Начните отслеживать инвентарь для статистики",
+                        subtitle: "Добавляйте продукты и операции, чтобы видеть динамику расходов, потерь и потребления."
+                    )
                 } else {
-                    Text("Недостаточно данных для тренда.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    nutritionGoalsCard
+                    inventoryTrendCard
+                    consumptionStatsCard
+                    wasteCard
+                    spendingCard
+                    categoryBreakdownCard
                 }
 
-                ForEach(Array(weightHistory.suffix(5).reversed()), id: \.id) { point in
-                    HStack {
-                        Text(point.date.formatted(date: .abbreviated, time: .omitted))
-                        Spacer()
-                        Text("\(point.value.formatted(.number.precision(.fractionLength(1)))) кг")
-                    }
-                    .font(.caption)
-                }
+                Color.clear.frame(height: VaySpacing.huge + VaySpacing.xxl)
             }
-
-            Section("Тренд процента жира") {
-                if bodyFatHistory.isEmpty {
-                    Text("Нет данных по проценту жира.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(bodyFatHistory.suffix(5).reversed()), id: \.id) { point in
-                        HStack {
-                            Text(point.date.formatted(date: .abbreviated, time: .omitted))
-                            Spacer()
-                            Text("\((point.value * 100).formatted(.number.precision(.fractionLength(1)))) %")
-                        }
-                        .font(.caption)
-                    }
-                }
-            }
-
-            if let errorMessage {
-                Section("Статус") {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                }
-            }
+            .padding(.horizontal, VaySpacing.lg)
         }
+        .background(Color.vayBackground)
         .navigationTitle("Прогресс")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Обновить") {
-                    Task { await load() }
-                }
-                .disabled(isLoading)
-            }
-        }
         .task {
-            await load()
+            await loadData()
+        }
+        .refreshable {
+            await loadData()
         }
     }
 
-    private func load() async {
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
+    private var periodPicker: some View {
+        HStack(spacing: 0) {
+            ForEach(Period.allCases) { period in
+                Button {
+                    withAnimation(VayAnimation.springSnappy) {
+                        selectedPeriod = period
+                    }
+                    VayHaptic.selection()
+                } label: {
+                    Text(period.title)
+                        .font(VayFont.label(13))
+                        .foregroundStyle(selectedPeriod == period ? .white : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, VaySpacing.sm)
+                        .background(selectedPeriod == period ? Color.vayPrimary : Color.clear)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(VaySpacing.xs)
+        .background(Color.vayCardBackground)
+        .clipShape(Capsule())
+        .vayShadow(.subtle)
+        .vayAccessibilityLabel("Период статистики: \(selectedPeriod.title)")
+    }
 
-        do {
-            if !hasRequestedHealthAccess {
-                hasRequestedHealthAccess = true
-                _ = try? await healthKitService.requestReadAccess()
+    private var nutritionGoalsCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "flame.fill")
+                    .foregroundStyle(Color.vayCalories)
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Цели питания")
+                    .font(VayFont.heading(16))
             }
 
-            async let metricsTask = healthKitService.fetchLatestMetrics()
-            async let nutritionTask = healthKitService.fetchTodayConsumedNutrition()
-            async let weightTask = healthKitService.fetchWeightHistory(days: 30)
-            async let bodyFatTask = healthKitService.fetchBodyFatHistory(days: 30)
-
-            let fetchedMetrics = try await metricsTask
-            let fetchedNutrition = try await nutritionTask
-            let fetchedWeight = try await weightTask
-            let fetchedBodyFat = try await bodyFatTask
-
-            metrics = fetchedMetrics
-            consumedNutrition = normalizeNutrition(fetchedNutrition)
-            targetNutrition = nutritionForTargetKcal(
-                Double(healthKitService.calculateDailyCalories(metrics: fetchedMetrics, targetLossPerWeek: 0.5)),
-                weightKG: fetchedMetrics.weightKG
+            NutritionRingGroup(
+                kcal: 0,
+                protein: 0,
+                fat: 0,
+                carbs: 0,
+                kcalGoal: settings.kcalGoal ?? 2000,
+                proteinGoal: settings.proteinGoalGrams ?? 80,
+                fatGoal: settings.fatGoalGrams ?? 65,
+                carbsGoal: settings.carbsGoalGrams ?? 250
             )
-            weightHistory = fetchedWeight
-            bodyFatHistory = fetchedBodyFat
-            errorMessage = nil
-        } catch {
-            errorMessage = "Не удалось загрузить данные Health: \(error.localizedDescription)"
+            .frame(maxWidth: .infinity)
+            .vayAccessibilityLabel("Кольца КБЖУ на сегодня")
         }
+        .vayCard()
     }
 
-    private func metricRow(_ title: String, _ value: String) -> some View {
-        HStack {
+    private var inventoryTrendCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .foregroundStyle(Color.vayInfo)
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Инвентарь")
+                    .font(VayFont.heading(16))
+                Spacer()
+                Text("\(products.count) продуктов")
+                    .font(VayFont.caption(12))
+                    .foregroundStyle(.tertiary)
+            }
+
+            if inventoryChartData.count >= 2 {
+                Chart(inventoryChartData, id: \.date) { point in
+                    LineMark(
+                        x: .value("Дата", point.date),
+                        y: .value("Количество", point.count)
+                    )
+                    .foregroundStyle(Color.vayInfo)
+                    .interpolationMethod(.catmullRom)
+
+                    AreaMark(
+                        x: .value("Дата", point.date),
+                        y: .value("Количество", point.count)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.vayInfo.opacity(0.2), .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .interpolationMethod(.catmullRom)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { _ in
+                        AxisValueLabel()
+                            .font(VayFont.caption(10))
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks { _ in
+                        AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+                            .font(VayFont.caption(9))
+                    }
+                }
+                .frame(height: 160)
+                .vayAccessibilityLabel("График динамики инвентаря")
+            } else {
+                Text("Недостаточно данных для графика")
+                    .font(VayFont.caption())
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            }
+        }
+        .vayCard()
+    }
+
+    private var consumptionStatsCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundStyle(Color.vayDanger)
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Расход")
+                    .font(VayFont.heading(16))
+            }
+
+            let addEvents = filteredEvents.filter { $0.type == .add }
+            let removeEvents = filteredEvents.filter { $0.type == .remove }
+
+            LazyVGrid(columns: [
+                GridItem(.flexible()),
+                GridItem(.flexible())
+            ], spacing: VaySpacing.md) {
+                miniStatCard(
+                    icon: "plus.circle.fill",
+                    label: "Добавлено",
+                    value: "\(addEvents.count)",
+                    color: .vaySuccess
+                )
+
+                miniStatCard(
+                    icon: "minus.circle.fill",
+                    label: "Списано",
+                    value: "\(removeEvents.count)",
+                    color: .vayDanger
+                )
+            }
+
+            if !activityChartData.isEmpty {
+                Chart(activityChartData, id: \.date) { point in
+                    BarMark(
+                        x: .value("Дата", point.date, unit: .day),
+                        y: .value("Добавлено", point.added)
+                    )
+                    .foregroundStyle(Color.vaySuccess.opacity(0.7))
+                    .cornerRadius(4)
+
+                    BarMark(
+                        x: .value("Дата", point.date, unit: .day),
+                        y: .value("Списано", -point.removed)
+                    )
+                    .foregroundStyle(Color.vayDanger.opacity(0.7))
+                    .cornerRadius(4)
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { _ in
+                        AxisValueLabel()
+                            .font(VayFont.caption(10))
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks { _ in
+                        AxisValueLabel(format: .dateTime.day())
+                            .font(VayFont.caption(9))
+                    }
+                }
+                .frame(height: 140)
+                .vayAccessibilityLabel("График расхода и пополнения")
+            }
+        }
+        .vayCard()
+    }
+
+    private var wasteCard: some View {
+        let expiredEvents = filteredEvents.filter { $0.type == .remove && $0.reason == .expired }
+        let writeOffEvents = filteredEvents.filter { $0.type == .remove && $0.reason == .writeOff }
+        let consumedEvents = filteredEvents.filter { $0.type == .remove && $0.reason == .consumed }
+        let totalLossMinor = lossTotalMinor(events: expiredEvents + writeOffEvents)
+
+        return VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "trash.slash.fill")
+                    .foregroundStyle(Color.vayDanger)
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Потери")
+                    .font(VayFont.heading(16))
+                Spacer()
+                Text(rubText(fromMinor: totalLossMinor))
+                    .font(VayFont.label(16))
+                    .foregroundStyle(Color.vayDanger)
+            }
+            .vayAccessibilityLabel("Потери за период: \(rubText(fromMinor: totalLossMinor))")
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: VaySpacing.sm) {
+                wasteMiniCard(
+                    icon: "clock.badge.exclamationmark",
+                    title: "Просрочено",
+                    count: expiredEvents.count,
+                    amountMinor: lossTotalMinor(events: expiredEvents),
+                    color: .vayDanger
+                )
+                wasteMiniCard(
+                    icon: "minus.circle.fill",
+                    title: "Списано",
+                    count: writeOffEvents.count,
+                    amountMinor: lossTotalMinor(events: writeOffEvents),
+                    color: .vayWarning
+                )
+                wasteMiniCard(
+                    icon: "checkmark.circle.fill",
+                    title: "Съедено",
+                    count: consumedEvents.count,
+                    amountMinor: lossTotalMinor(events: consumedEvents),
+                    color: .vaySuccess
+                )
+            }
+
+            if !wasteChartData.isEmpty {
+                Chart(wasteChartData, id: \.date) { point in
+                    LineMark(
+                        x: .value("Дата", point.date),
+                        y: .value("Потери", point.lossRub)
+                    )
+                    .foregroundStyle(Color.vayDanger)
+                    .interpolationMethod(.catmullRom)
+
+                    AreaMark(
+                        x: .value("Дата", point.date),
+                        y: .value("Потери", point.lossRub)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.vayDanger.opacity(0.25), .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { _ in
+                        AxisValueLabel()
+                            .font(VayFont.caption(10))
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks { _ in
+                        AxisValueLabel(format: .dateTime.day())
+                            .font(VayFont.caption(9))
+                    }
+                }
+                .frame(height: 140)
+                .vayAccessibilityLabel("График потерь в рублях")
+            }
+        }
+        .vayCard()
+    }
+
+    private var spendingCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "rublesign.circle.fill")
+                    .foregroundStyle(Color.vayWarning)
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Расходы")
+                    .font(VayFont.heading(16))
+            }
+
+            let totalSpending = filteredPriceEntries.reduce(Decimal.zero) { $0 + $1.price }
+
+            HStack {
+                Text("Всего")
+                    .font(VayFont.body(14))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(NSDecimalNumber(decimal: totalSpending).doubleValue.formatted(.number.precision(.fractionLength(0)))) ₽")
+                    .font(VayFont.title(20))
+                    .foregroundStyle(Color.vayWarning)
+            }
+
+            if filteredPriceEntries.isEmpty {
+                Text("Нет данных о ценах за выбранный период")
+                    .font(VayFont.caption())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .vayCard()
+        .vayAccessibilityLabel("Расходы за период")
+    }
+
+    private var categoryBreakdownCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "chart.pie.fill")
+                    .foregroundStyle(Color.vaySecondary)
+                    .font(.system(size: 14, weight: .semibold))
+                Text("По категориям")
+                    .font(VayFont.heading(16))
+            }
+
+            let categories = Dictionary(grouping: products, by: \.category)
+                .map { (category: $0.key, count: $0.value.count) }
+                .sorted { $0.count > $1.count }
+
+            if categories.count >= 2 {
+                Chart(categories, id: \.category) { item in
+                    SectorMark(
+                        angle: .value("Количество", item.count),
+                        innerRadius: .ratio(0.6),
+                        angularInset: 2
+                    )
+                    .foregroundStyle(by: .value("Категория", item.category))
+                    .cornerRadius(4)
+                }
+                .chartLegend(position: .bottom)
+                .frame(height: 180)
+                .vayAccessibilityLabel("Диаграмма категорий продуктов")
+            }
+
+            ForEach(categories.prefix(6), id: \.category) { item in
+                HStack {
+                    Text(item.category)
+                        .font(VayFont.body(14))
+                    Spacer()
+                    Text("\(item.count)")
+                        .font(VayFont.label(14))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .vayCard()
+    }
+
+    private func wasteMiniCard(icon: String, title: String, count: Int, amountMinor: Int64, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.xs) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(color)
+
+            Text("\(count)")
+                .font(VayFont.label(15))
+
             Text(title)
-            Spacer()
+                .font(VayFont.caption(10))
+                .foregroundStyle(.secondary)
+
+            Text(rubText(fromMinor: amountMinor))
+                .font(VayFont.caption(10))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(VaySpacing.sm)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous))
+        .vayAccessibilityLabel("\(title): \(count), \(rubText(fromMinor: amountMinor))")
+    }
+
+    private func miniStatCard(icon: String, label: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.sm) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundStyle(color)
+
             Text(value)
+                .font(VayFont.title(20))
+
+            Text(label)
+                .font(VayFont.caption(11))
                 .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(VaySpacing.md)
+        .background(color.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous))
+        .vayAccessibilityLabel("\(label): \(value)")
     }
 
-    private func valueText(_ value: Double?, suffix: String) -> String {
-        guard let value else { return "—" }
-        return "\(value.formatted(.number.precision(.fractionLength(1)))) \(suffix)"
+    private struct ChartPoint {
+        let date: Date
+        let count: Int
     }
 
-    private func nutritionRow(_ title: String, _ nutrition: Nutrition) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Text("К \(numberText(nutrition.kcal)) · Б \(numberText(nutrition.protein)) · Ж \(numberText(nutrition.fat)) · У \(numberText(nutrition.carbs))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private struct ActivityPoint {
+        let date: Date
+        let added: Int
+        let removed: Int
+    }
+
+    private struct WastePoint {
+        let date: Date
+        let lossRub: Double
+    }
+
+    private var inventoryChartData: [ChartPoint] {
+        let grouped = Dictionary(grouping: events) { event in
+            Calendar.current.startOfDay(for: event.timestamp)
+        }
+
+        var runningTotal = 0
+        return grouped.keys.sorted().map { date in
+            let dayEvents = grouped[date] ?? []
+            for event in dayEvents {
+                switch event.type {
+                case .add: runningTotal += 1
+                case .remove: runningTotal = max(0, runningTotal - 1)
+                default: break
+                }
+            }
+            return ChartPoint(date: date, count: runningTotal)
         }
     }
 
-    private func numberText(_ value: Double?) -> String {
-        max(0, value ?? 0).formatted(.number.precision(.fractionLength(0)))
-    }
-
-    private func normalizeNutrition(_ value: Nutrition) -> Nutrition {
-        Nutrition(
-            kcal: max(0, value.kcal ?? 0),
-            protein: max(0, value.protein ?? 0),
-            fat: max(0, value.fat ?? 0),
-            carbs: max(0, value.carbs ?? 0)
-        )
-    }
-
-    private func subtractNutrition(_ left: Nutrition, _ right: Nutrition) -> Nutrition {
-        Nutrition(
-            kcal: max(0, (left.kcal ?? 0) - (right.kcal ?? 0)),
-            protein: max(0, (left.protein ?? 0) - (right.protein ?? 0)),
-            fat: max(0, (left.fat ?? 0) - (right.fat ?? 0)),
-            carbs: max(0, (left.carbs ?? 0) - (right.carbs ?? 0))
-        )
-    }
-
-    private func nutritionForTargetKcal(_ kcal: Double, weightKG: Double?) -> Nutrition {
-        let baseKcal = max(900, kcal)
-
-        let protein: Double
-        if let weightKG {
-            protein = min(max(weightKG * 1.8, 90), 220)
-        } else {
-            protein = max(90, baseKcal * 0.28 / 4)
+    private var activityChartData: [ActivityPoint] {
+        let grouped = Dictionary(grouping: filteredEvents) { event in
+            Calendar.current.startOfDay(for: event.timestamp)
         }
 
-        let fat: Double
-        if let weightKG {
-            fat = min(max(weightKG * 0.8, 45), 120)
-        } else {
-            fat = max(45, baseKcal * 0.28 / 9)
+        return grouped.keys.sorted().map { date in
+            let dayEvents = grouped[date] ?? []
+            let added = dayEvents.filter { $0.type == .add }.count
+            let removed = dayEvents.filter { $0.type == .remove }.count
+            return ActivityPoint(date: date, added: added, removed: removed)
         }
-
-        let minCarbs = 80.0
-        let minRequiredKcal = protein * 4 + fat * 9 + minCarbs * 4
-        let adjustedKcal = max(baseKcal, minRequiredKcal)
-        let carbs = max(minCarbs, (adjustedKcal - protein * 4 - fat * 9) / 4)
-
-        return Nutrition(kcal: adjustedKcal, protein: protein, fat: fat, carbs: carbs)
     }
 
-    private func weightWeeklyDelta() -> Double? {
-        guard
-            let first = weightHistory.first,
-            let last = weightHistory.last,
-            first.date < last.date
-        else {
+    private var wasteChartData: [WastePoint] {
+        let wasteEvents = filteredEvents.filter { event in
+            event.type == .remove && (event.reason == .expired || event.reason == .writeOff)
+        }
+
+        let grouped = Dictionary(grouping: wasteEvents) { event in
+            Calendar.current.startOfDay(for: event.timestamp)
+        }
+
+        return grouped.keys.sorted().map { date in
+            let dayEvents = grouped[date] ?? []
+            let totalMinor = lossTotalMinor(events: dayEvents)
+            return WastePoint(date: date, lossRub: Double(totalMinor) / 100)
+        }
+    }
+
+    private var filteredEvents: [InventoryEvent] {
+        let cutoff = periodCutoffDate
+        return events.filter { $0.timestamp >= cutoff }
+    }
+
+    private var filteredPriceEntries: [PriceEntry] {
+        let cutoff = periodCutoffDate
+        return priceEntries.filter { $0.date >= cutoff }
+    }
+
+    private var latestPriceMinorByProduct: [UUID: Int64] {
+        Dictionary(uniqueKeysWithValues: Dictionary(grouping: priceEntries, by: \.productId).compactMap { productID, entries in
+            guard let latest = entries.max(by: { $0.date < $1.date }) else {
+                return nil
+            }
+            return (productID, latest.price.asMinorUnits)
+        })
+    }
+
+    private var periodCutoffDate: Date {
+        switch selectedPeriod {
+        case .week:
+            return Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .now
+        case .month:
+            return Calendar.current.date(byAdding: .month, value: -1, to: .now) ?? .now
+        case .all:
+            return .distantPast
+        }
+    }
+
+    private func eventValueMinor(_ event: InventoryEvent) -> Int64? {
+        if let estimated = event.estimatedValueMinor {
+            return estimated
+        }
+
+        guard let latestPriceMinor = latestPriceMinorByProduct[event.productId], latestPriceMinor > 0 else {
             return nil
         }
 
-        let deltaWeight = last.value - first.value
-        let deltaDays = last.date.timeIntervalSince(first.date) / 86_400
-        guard deltaDays > 0 else { return nil }
-        return deltaWeight / deltaDays * 7
+        let multiplier = max(abs(event.quantityDelta), 1)
+        return Int64((Double(latestPriceMinor) * multiplier).rounded())
+    }
+
+    private func lossTotalMinor(events: [InventoryEvent]) -> Int64 {
+        events.compactMap(eventValueMinor).reduce(0, +)
+    }
+
+    private func rubText(fromMinor minor: Int64) -> String {
+        let value = Double(minor) / 100
+        return "\(value.formatted(.number.precision(.fractionLength(0)))) ₽"
+    }
+
+    private func loadData() async {
+        do {
+            settings = try await settingsService.loadSettings()
+            products = try await inventoryService.listProducts(location: nil, search: nil)
+            batches = try await inventoryService.listBatches(productId: nil)
+
+            var allEvents: [InventoryEvent] = []
+            var allPrices: [PriceEntry] = []
+            for product in products {
+                let productEvents = try await inventoryService.listEvents(productId: product.id)
+                allEvents.append(contentsOf: productEvents)
+                let prices = try await inventoryService.listPriceHistory(productId: product.id)
+                allPrices.append(contentsOf: prices)
+            }
+            events = allEvents
+            priceEntries = allPrices
+            isLoading = false
+        } catch {
+            isLoading = false
+        }
     }
 }

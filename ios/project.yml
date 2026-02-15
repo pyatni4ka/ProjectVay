@@ -50,7 +50,19 @@ targets:
         INFOPLIST_KEY_NSHealthShareUsageDescription: Нужно для чтения веса, жира и КБЖУ из Apple Health.
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: Нужно для синхронизации данных питания и прогресса.
         INFOPLIST_KEY_NSCameraUsageDescription: Камера нужна для сканирования штрихкодов и DataMatrix.
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
+        INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_localhost_NSExceptionAllowsInsecureHTTPLoads: YES
+        INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_localhost_NSIncludesSubdomains: YES
+        INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_127.0.0.1_NSExceptionAllowsInsecureHTTPLoads: YES
+        INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_127.0.0.1_NSIncludesSubdomains: YES
+        INFOPLIST_KEY_RecipeServiceBaseURL: "http://127.0.0.1:8080"
+        INFOPLIST_KEY_AllowInsecureRecipeServiceURL: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         SUPPORTS_MACCATALYST: NO
         CODE_SIGN_STYLE: Automatic
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: App/InventoryAI.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: App/InventoryAI.entitlements

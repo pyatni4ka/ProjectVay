@@ -9,6 +9,8 @@ struct InventoryEventRecord: Codable, FetchableRecord, MutablePersistableRecord 
     var productID: String
     var batchID: String?
     var quantityDelta: Double
+    var reason: String
+    var estimatedValueMinor: Int64?
     var timestamp: Date
     var note: String?
 
@@ -18,6 +20,8 @@ struct InventoryEventRecord: Codable, FetchableRecord, MutablePersistableRecord 
         case productID = "product_id"
         case batchID = "batch_id"
         case quantityDelta = "quantity_delta"
+        case reason
+        case estimatedValueMinor = "estimated_value_minor"
         case timestamp
         case note
     }
@@ -30,6 +34,8 @@ extension InventoryEventRecord {
         productID = event.productId.uuidString
         batchID = event.batchId?.uuidString
         quantityDelta = event.quantityDelta
+        reason = event.reason.rawValue
+        estimatedValueMinor = event.estimatedValueMinor
         timestamp = event.timestamp
         note = event.note
     }
@@ -41,6 +47,8 @@ extension InventoryEventRecord {
             productId: UUID(uuidString: productID) ?? UUID(),
             batchId: batchID.flatMap(UUID.init(uuidString:)),
             quantityDelta: quantityDelta,
+            reason: InventoryEventReason(rawValue: reason) ?? .unknown,
+            estimatedValueMinor: estimatedValueMinor,
             timestamp: timestamp,
             note: note
         )

@@ -8,6 +8,7 @@ Package.resolved
 
 # Xcode
 DerivedData/
+ios/build/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 
@@ -18,3 +19,6 @@ backend/dist/
 
 # Logs
 *.log
+
+# Local backups
+legacy/

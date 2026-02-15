@@ -27,6 +27,8 @@ struct RecommendRequest: Codable {
     let avoidBones: Bool
     let cuisine: [String]
     let limit: Int
+    let strictNutrition: Bool?
+    let macroTolerancePercent: Double?
 }
 
 struct RecommendResponse: Codable {

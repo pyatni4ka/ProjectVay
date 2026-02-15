@@ -40,8 +40,7 @@ final class DatabaseMigrationTests: XCTestCase {
             XCTAssertTrue(appSettingsColumns.contains("lunch_minute"))
             XCTAssertTrue(appSettingsColumns.contains("dinner_minute"))
             XCTAssertTrue(appSettingsColumns.contains("strict_macro_tracking"))
-            XCTAssertTrue(appSettingsColumns.contains("macro_tolerance_percent"))
-            XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_mode"))
+            XCTAssertTrue(appSettingsColumns.contains("macro_tolerance_percent"))            XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_mode"))
             XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_months"))
             XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_year"))
             XCTAssertTrue(appSettingsColumns.contains("ai_personalization_enabled"))
@@ -49,6 +48,19 @@ final class DatabaseMigrationTests: XCTestCase {
             XCTAssertTrue(appSettingsColumns.contains("ai_ru_only_storage"))
             XCTAssertTrue(appSettingsColumns.contains("ai_data_consent_accepted_at"))
             XCTAssertTrue(appSettingsColumns.contains("ai_data_collection_mode"))
+
+            let batchColumns = try String.fetchAll(
+                db,
+                sql: "SELECT name FROM pragma_table_info('batches')"
+            )
+            XCTAssertTrue(batchColumns.contains("purchase_price_minor"))
+
+            let eventColumns = try String.fetchAll(
+                db,
+                sql: "SELECT name FROM pragma_table_info('inventory_events')"
+            )
+            XCTAssertTrue(eventColumns.contains("reason"))
+            XCTAssertTrue(eventColumns.contains("estimated_value_minor"))
         }
     }
 

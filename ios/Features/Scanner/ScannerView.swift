@@ -17,6 +17,13 @@ struct ScannerView: View {
                 return "Списание"
             }
         }
+
+        var icon: String {
+            switch self {
+            case .add: return "plus.circle"
+            case .writeOff: return "minus.circle"
+            }
+        }
     }
 
     let inventoryService: any InventoryServiceProtocol
@@ -59,7 +66,8 @@ struct ScannerView: View {
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        ZStack(alignment: .bottom) {
+            // Camera / Fallback
             Group {
                 if scannerAvailable {
                     ScannerCameraView(
@@ -70,49 +78,81 @@ struct ScannerView: View {
                             errorMessage = message
                         }
                     )
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 300)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
-                    )
                 } else {
                     fallbackView
                 }
             }
-            .padding(.horizontal)
+            .ignoresSafeArea()
 
-            manualLookupView
-                .padding(.horizontal)
+            // Gradient overlay at bottom for readability
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.7), .black.opacity(0.85)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 420)
+            .ignoresSafeArea()
 
-            Picker("Режим", selection: $mode) {
-                ForEach(ScannerMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+            // Bottom Controls
+            VStack(spacing: VaySpacing.md) {
+                // Quick action success message
+                if let quickActionMessage {
+                    HStack(spacing: VaySpacing.sm) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text(quickActionMessage)
+                    }
+                    .font(VayFont.label(13))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, VaySpacing.lg)
+                    .padding(.vertical, VaySpacing.sm)
+                    .background(.green.opacity(0.8))
+                    .clipShape(Capsule())
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
 
-            if let quickActionMessage {
-                Text(quickActionMessage)
-                    .font(.caption)
-                    .foregroundStyle(.green)
-                    .padding(.horizontal)
-            }
+                // Scanning indicator
+                if isProcessing {
+                    HStack(spacing: VaySpacing.sm) {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Распознаю…")
+                            .font(VayFont.label(13))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, VaySpacing.lg)
+                    .padding(.vertical, VaySpacing.sm)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                }
 
-            if let resolution {
-                resolutionCard(for: resolution)
-                    .padding(.horizontal)
-            }
+                // Resolution Card (overlaying camera)
+                if let resolution {
+                    resolutionCard(for: resolution)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
 
-            Spacer(minLength: 0)
+                // Mode Picker
+                modePicker
+
+                // Manual Input
+                manualLookupView
+            }
+            .padding(.horizontal, VaySpacing.lg)
+            .padding(.bottom, VaySpacing.xxl)
+            .animation(VayAnimation.springSmooth, value: resolution != nil)
+            .animation(VayAnimation.springSmooth, value: quickActionMessage)
         }
         .navigationTitle("Сканер")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Закрыть") {
+                Button {
                     dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.white.opacity(0.7))
                 }
             }
         }
@@ -173,174 +213,312 @@ struct ScannerView: View {
         }
     }
 
+    // MARK: - Fallback View
+
     private var fallbackView: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: VaySpacing.md) {
             Image(systemName: "camera.metering.unknown")
-                .font(.system(size: 36))
-            Text("Live-сканер недоступен на этом устройстве")
-                .font(.headline)
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(.white.opacity(0.6))
+            Text("Live-сканер недоступен")
+                .font(VayFont.heading())
+                .foregroundStyle(.white)
             Text("Введите код вручную ниже")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(VayFont.caption())
+                .foregroundStyle(.white.opacity(0.6))
         }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: 220)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
     }
 
-    private var manualLookupView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Ручной ввод")
-                .font(.headline)
+    // MARK: - Mode Picker
 
-            HStack {
-                TextField("EAN-13 / DataMatrix / внутренний код", text: $manualCode)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textFieldStyle(.roundedBorder)
-
-                Button(isProcessing ? "..." : "Найти") {
-                    Task { await processScannedCode(manualCode) }
+    private var modePicker: some View {
+        HStack(spacing: 0) {
+            ForEach(ScannerMode.allCases) { m in
+                Button {
+                    withAnimation(VayAnimation.springSnappy) {
+                        mode = m
+                    }
+                    VayHaptic.selection()
+                } label: {
+                    HStack(spacing: VaySpacing.xs) {
+                        Image(systemName: m.icon)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(m.title)
+                            .font(VayFont.label(13))
+                    }
+                    .foregroundStyle(mode == m ? .white : .white.opacity(0.5))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, VaySpacing.sm)
+                    .background(mode == m ? Color.vayPrimary : Color.clear)
+                    .clipShape(Capsule())
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(isProcessing || manualCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .buttonStyle(.plain)
             }
         }
+        .padding(VaySpacing.xs)
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
     }
+
+    // MARK: - Manual Input
+
+    private var manualLookupView: some View {
+        HStack(spacing: VaySpacing.sm) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "keyboard")
+                    .foregroundStyle(.white.opacity(0.5))
+                    .font(.system(size: 13))
+                TextField("EAN-13 / DataMatrix / код", text: $manualCode)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .foregroundStyle(.white)
+                    .font(VayFont.body(14))
+            }
+            .padding(.horizontal, VaySpacing.md)
+            .padding(.vertical, VaySpacing.sm + 2)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
+
+            Button {
+                Task { await processScannedCode(manualCode) }
+            } label: {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Color.vayPrimary)
+            }
+            .disabled(isProcessing || manualCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    // MARK: - Resolution Card
 
     @ViewBuilder
     private func resolutionCard(for resolution: ScanResolution) -> some View {
         switch resolution {
         case .found(let product, let suggestedExpiry, _):
-            VStack(alignment: .leading, spacing: 8) {
-                Text(mode == .add ? "Найдено локально" : "Найдено для списания")
-                    .font(.headline)
-                Text(product.name)
-                    .font(.title3)
-                Text(product.category)
-                    .foregroundStyle(.secondary)
-
-                if let suggestedExpiry {
-                    Text("Срок из кода: \(suggestedExpiry.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    if mode == .add {
-                        Button(isQuickActionInProgress ? "Добавляем..." : "Быстро +1") {
-                            Task { await quickAddBatch(product: product) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isQuickActionInProgress)
-
-                        Button("Добавить партию") {
-                            showAddBatchSheet = true
-                        }
-                        .buttonStyle(.bordered)
-                    } else {
-                        Button(isQuickActionInProgress ? "Списываем..." : "Быстро −1") {
-                            Task { await quickWriteOffBatch(product: product) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isQuickActionInProgress)
-                    }
-
-                    Button("Сканировать снова") {
-                        resetResolutionState()
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            resolutionContent(
+                icon: "checkmark.circle.fill",
+                iconColor: .vaySuccess,
+                title: mode == .add ? "Найдено" : "Для списания",
+                productName: product.name,
+                category: product.category,
+                expiry: suggestedExpiry,
+                product: product,
+                showAddActions: mode == .add,
+                showWriteOffActions: mode == .writeOff
+            )
 
         case .created(let product, let suggestedExpiry, _, let provider):
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Карточка создана автоматически")
-                    .font(.headline)
-                Text(product.name)
-                    .font(.title3)
-
-                Text("Источник: \(provider)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if let suggestedExpiry {
-                    Text("Срок из DataMatrix: \(suggestedExpiry.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack {
-                    Button(isQuickActionInProgress ? "Добавляем..." : "Быстро +1") {
-                        Task { await quickAddBatch(product: product) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isQuickActionInProgress)
-
-                    Button("Добавить партию") {
-                        showAddBatchSheet = true
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Сканировать снова") {
-                        resetResolutionState()
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            resolutionContent(
+                icon: "sparkles",
+                iconColor: .vayInfo,
+                title: "Создано автоматически",
+                productName: product.name,
+                category: "\(product.category) • \(provider)",
+                expiry: suggestedExpiry,
+                product: product,
+                showAddActions: true,
+                showWriteOffActions: false
+            )
 
         case .notFound(let barcode, let internalCode, let parsedWeightGrams, let suggestedExpiry):
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Товар не найден")
-                    .font(.headline)
-                Text(mode == .add
-                     ? "Создайте локальную карточку. После сохранения распознавание будет работать офлайн."
-                     : "Для списания товар должен уже быть в локальном инвентаре.")
-                    .foregroundStyle(.secondary)
-
-                if let barcode {
-                    Text("Штрихкод: \(barcode)")
-                        .font(.caption)
-                }
-
-                if let internalCode {
-                    Text("Внутренний код: \(internalCode)")
-                        .font(.caption)
-                }
-
-                if let parsedWeightGrams {
-                    Text("Определён вес: \(parsedWeightGrams.formatted()) г")
-                        .font(.caption)
-                }
-
-                if let suggestedExpiry {
-                    Text("Срок из DataMatrix: \(suggestedExpiry.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.caption)
-                }
-
-                if mode == .add {
-                    Button("Создать вручную") {
-                        showCreateProductSheet = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                } else {
-                    Button("Переключиться в режим добавления") {
-                        mode = .add
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            notFoundContent(
+                barcode: barcode,
+                internalCode: internalCode,
+                parsedWeightGrams: parsedWeightGrams,
+                suggestedExpiry: suggestedExpiry
+            )
         }
     }
+
+    private func resolutionContent(
+        icon: String,
+        iconColor: Color,
+        title: String,
+        productName: String,
+        category: String,
+        expiry: Date?,
+        product: Product,
+        showAddActions: Bool,
+        showWriteOffActions: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: icon)
+                    .foregroundStyle(iconColor)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(title)
+                    .font(VayFont.label(13))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(productName)
+                .font(VayFont.heading())
+
+            HStack(spacing: VaySpacing.sm) {
+                Text(category)
+                    .font(VayFont.caption(12))
+                    .foregroundStyle(.secondary)
+
+                if let expiry {
+                    Text("• до \(expiry.formatted(date: .abbreviated, time: .omitted))")
+                        .font(VayFont.caption(12))
+                        .foregroundStyle(Color.vayWarning)
+                }
+            }
+
+            HStack(spacing: VaySpacing.sm) {
+                if showAddActions {
+                    Button {
+                        Task { await quickAddBatch(product: product) }
+                    } label: {
+                        HStack(spacing: VaySpacing.xs) {
+                            Image(systemName: "plus")
+                            Text(isQuickActionInProgress ? "…" : "Быстро +1")
+                        }
+                        .font(VayFont.label(13))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, VaySpacing.md)
+                        .padding(.vertical, VaySpacing.sm)
+                        .background(Color.vayPrimary)
+                        .clipShape(Capsule())
+                    }
+                    .disabled(isQuickActionInProgress)
+
+                    Button {
+                        showAddBatchSheet = true
+                    } label: {
+                        Text("Партия")
+                            .font(VayFont.label(13))
+                            .foregroundStyle(Color.vayPrimary)
+                            .padding(.horizontal, VaySpacing.md)
+                            .padding(.vertical, VaySpacing.sm)
+                            .background(Color.vayPrimary.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+
+                if showWriteOffActions {
+                    Button {
+                        Task { await quickWriteOffBatch(product: product) }
+                    } label: {
+                        HStack(spacing: VaySpacing.xs) {
+                            Image(systemName: "minus")
+                            Text(isQuickActionInProgress ? "…" : "Списать")
+                        }
+                        .font(VayFont.label(13))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, VaySpacing.md)
+                        .padding(.vertical, VaySpacing.sm)
+                        .background(Color.vayDanger)
+                        .clipShape(Capsule())
+                    }
+                    .disabled(isQuickActionInProgress)
+                }
+
+                Spacer()
+
+                Button {
+                    resetResolutionState()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .padding(VaySpacing.sm)
+                        .background(Color.secondary.opacity(0.12))
+                        .clipShape(Circle())
+                }
+            }
+        }
+        .padding(VaySpacing.lg)
+        .background(.ultraThickMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.xl, style: .continuous))
+    }
+
+    private func notFoundContent(
+        barcode: String?,
+        internalCode: String?,
+        parsedWeightGrams: Double?,
+        suggestedExpiry: Date?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "questionmark.circle.fill")
+                    .foregroundStyle(Color.vayWarning)
+                    .font(.system(size: 16, weight: .semibold))
+                Text("Не найдено")
+                    .font(VayFont.label(13))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(mode == .add
+                 ? "Создайте карточку — распознавание будет работать офлайн"
+                 : "Для списания товар должен быть в инвентаре")
+                .font(VayFont.body(14))
+                .foregroundStyle(.secondary)
+
+            if let barcode {
+                HStack(spacing: VaySpacing.xs) {
+                    Image(systemName: "barcode")
+                        .font(.system(size: 11))
+                    Text(barcode)
+                        .font(VayFont.caption(12))
+                }
+                .foregroundStyle(.tertiary)
+            }
+
+            HStack(spacing: VaySpacing.sm) {
+                if mode == .add {
+                    Button {
+                        showCreateProductSheet = true
+                    } label: {
+                        HStack(spacing: VaySpacing.xs) {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Создать")
+                        }
+                        .font(VayFont.label(13))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, VaySpacing.md)
+                        .padding(.vertical, VaySpacing.sm)
+                        .background(Color.vayPrimary)
+                        .clipShape(Capsule())
+                    }
+                } else {
+                    Button {
+                        mode = .add
+                    } label: {
+                        Text("В режим добавления")
+                            .font(VayFont.label(13))
+                            .foregroundStyle(Color.vayPrimary)
+                            .padding(.horizontal, VaySpacing.md)
+                            .padding(.vertical, VaySpacing.sm)
+                            .background(Color.vayPrimary.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    resetResolutionState()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .padding(VaySpacing.sm)
+                        .background(Color.secondary.opacity(0.12))
+                        .clipShape(Circle())
+                }
+            }
+        }
+        .padding(VaySpacing.lg)
+        .background(.ultraThickMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.xl, style: .continuous))
+    }
+
+    // MARK: - Logic (preserved exactly)
 
     private func processScannedCode(_ rawCode: String) async {
         let normalized = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -359,6 +537,7 @@ struct ScannerView: View {
 
         let resolved = await barcodeLookupService.resolve(rawCode: normalized, allowCreate: mode == .add)
         applyResolution(resolved)
+        VayHaptic.impact(.medium)
     }
 
     private func applyResolution(_ resolved: ScanResolution) {
@@ -418,7 +597,10 @@ struct ScannerView: View {
         do {
             _ = try await inventoryService.addBatch(batch)
             await onInventoryChanged()
-            quickActionMessage = "Партия добавлена: \(quantity.formatted()) \(unit.title)"
+            withAnimation(VayAnimation.springSmooth) {
+                quickActionMessage = "Добавлено: \(quantity.formatted()) \(unit.title)"
+            }
+            VayHaptic.success()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -450,14 +632,28 @@ struct ScannerView: View {
             }
 
             if targetBatch.quantity <= quantityToWriteOff + 0.000_001 {
-                try await inventoryService.removeBatch(id: targetBatch.id)
-                quickActionMessage = "Партия полностью списана"
+                try await inventoryService.removeBatch(
+                    id: targetBatch.id,
+                    quantity: nil,
+                    intent: .writeOff,
+                    note: "Списано через сканер"
+                )
+                withAnimation(VayAnimation.springSmooth) {
+                    quickActionMessage = "Партия полностью списана"
+                }
             } else {
-                targetBatch.quantity -= quantityToWriteOff
-                _ = try await inventoryService.updateBatch(targetBatch)
-                quickActionMessage = "Списано: \(quantityToWriteOff.formatted()) \(targetBatch.unit.title)"
+                try await inventoryService.removeBatch(
+                    id: targetBatch.id,
+                    quantity: quantityToWriteOff,
+                    intent: .writeOff,
+                    note: "Списано через сканер"
+                )
+                withAnimation(VayAnimation.springSmooth) {
+                    quickActionMessage = "Списано: \(quantityToWriteOff.formatted()) \(targetBatch.unit.title)"
+                }
             }
 
+            VayHaptic.success()
             await onInventoryChanged()
         } catch {
             errorMessage = error.localizedDescription
@@ -465,7 +661,9 @@ struct ScannerView: View {
     }
 
     private func resetResolutionState() {
-        resolution = nil
+        withAnimation(VayAnimation.springSmooth) {
+            resolution = nil
+        }
         selectedProduct = nil
         suggestedExpiry = nil
         internalCodeToBind = nil

@@ -1,610 +1,430 @@
 import SwiftUI
 
 struct HomeView: View {
-    enum TimeFilter: String, CaseIterable, Identifiable {
-        case any
-        case upTo15
-        case upTo30
-        case upTo60
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .any: return "Любое"
-            case .upTo15: return "до 15 мин"
-            case .upTo30: return "до 30 мин"
-            case .upTo60: return "до 60 мин"
-            }
-        }
-
-        var maxMinutes: Int? {
-            switch self {
-            case .any: return nil
-            case .upTo15: return 15
-            case .upTo30: return 30
-            case .upTo60: return 60
-            }
-        }
-    }
-
-    private enum MealSlot {
-        case breakfast
-        case lunch
-        case dinner
-
-        var title: String {
-            switch self {
-            case .breakfast: return "завтрак"
-            case .lunch: return "обед"
-            case .dinner: return "ужин"
-            }
-        }
-
-        var remainingMealsCount: Int {
-            switch self {
-            case .breakfast: return 3
-            case .lunch: return 2
-            case .dinner: return 1
-            }
-        }
-
-        static func next(for date: Date, schedule: AppSettings.MealSchedule) -> MealSlot {
-            let calendar = Calendar.current
-            let minute = (calendar.component(.hour, from: date) * 60) + calendar.component(.minute, from: date)
-            let normalized = schedule.normalized()
-
-            if minute < normalized.breakfastMinute {
-                return .breakfast
-            }
-            if minute < normalized.lunchMinute {
-                return .lunch
-            }
-            if minute < normalized.dinnerMinute {
-                return .dinner
-            }
-
-            return .breakfast
-        }
-    }
-
-    private struct AdaptiveTarget {
-        let target: Nutrition
-        let slot: MealSlot
-        let status: String
-    }
-
-    private struct MacroFilterOutcome {
-        let items: [RecommendResponse.RankedRecipe]
-        let note: String?
-    }
-
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
-    let healthKitService: HealthKitService
-    let recipeServiceClient: RecipeServiceClient?
+    var onOpenScanner: () -> Void = {}
 
-    @State private var expiringSoon: [Batch] = []
-    @State private var productsByID: [UUID: Product] = [:]
-    @State private var ingredientKeywords: [String] = []
-    @State private var settings: AppSettings = .default
-
-    @State private var recommended: [RecommendResponse.RankedRecipe] = []
-    @State private var searchedRecipes: [Recipe] = []
-
-    @State private var searchText = ""
-    @State private var onlyInStock = false
-    @State private var hideBones = false
-    @State private var selectedTimeFilter: TimeFilter = .any
-
-    @State private var recommendationTarget = Nutrition(kcal: 650, protein: 40, fat: 22, carbs: 65)
-    @State private var recommendationSlot: MealSlot = .breakfast
-    @State private var recommendationStatus = "Таргет по умолчанию."
-    @State private var hasRequestedHealthAccess = false
-
-    @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var products: [Product] = []
+    @State private var batches: [Batch] = []
+    @State private var events: [InventoryEvent] = []
+    @State private var settings: AppSettings?
+    @State private var appeared = false
+    @State private var isLoading = true
 
     var body: some View {
-        List {
-            urgentSection
-            filtersSection
-            recipesSection
+        ScrollView {
+            VStack(spacing: VaySpacing.xl) {
+                heroSection
 
-            if let errorMessage {
-                Section("Статус") {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                } else if products.isEmpty {
+                    EmptyStateView(
+                        icon: "refrigerator",
+                        title: "Начните добавлять продукты",
+                        subtitle: "Сканируйте первый товар или добавьте его вручную, чтобы увидеть статистику и рекомендации.",
+                        actionTitle: "Сканировать первый товар",
+                        action: onOpenScanner
+                    )
+                    .padding(.top, VaySpacing.xl)
+                } else {
+                    quickStatsSection
+                    savingsMoneyCard
+                    weeklyBreakdownCard
+
+                    if !expiringSoonBatches.isEmpty {
+                        expiringSoonSection
+                    }
+
+                    if let settings {
+                        nutritionSection(settings: settings)
+                    }
+
+                    if !lowStockProducts.isEmpty {
+                        lowStockSection
+                    }
                 }
+
+                Color.clear.frame(height: VaySpacing.huge)
+            }
+            .padding(.horizontal, VaySpacing.lg)
+        }
+        .background(Color.vayBackground)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: onOpenScanner) {
+                    Image(systemName: "barcode.viewfinder")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.vayPrimary)
+                }
+                .vayAccessibilityLabel("Открыть сканер", hint: "Быстрое добавление товаров")
             }
         }
-        .navigationTitle("Что приготовить")
-        .searchable(text: $searchText, prompt: "Поиск рецептов")
         .task {
-            await loadInitialData()
-        }
-        .onChange(of: searchText) { _, newValue in
-            Task { await handleSearchChange(newValue) }
-        }
-        .onChange(of: onlyInStock) { _, _ in
-            Task { await refreshRecommendations() }
-        }
-        .onChange(of: hideBones) { _, _ in
-            Task { await refreshRecommendations() }
-        }
-        .onChange(of: selectedTimeFilter) { _, _ in
-            Task { await refreshRecommendations() }
+            await loadData()
         }
         .refreshable {
-            await loadInitialData()
+            await loadData()
         }
     }
 
-    @ViewBuilder
-    private var urgentSection: some View {
-        Section("Срочно использовать") {
-            if expiringSoon.isEmpty {
-                Text("Нет продуктов с близким сроком")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(expiringSoon) { batch in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(productsByID[batch.productId]?.name ?? "Продукт")
-                            .font(.headline)
-                        if let expiryDate = batch.expiryDate {
-                            Text("Срок: \(expiryDate.formatted(date: .abbreviated, time: .omitted))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+    private var heroSection: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.sm) {
+            Text(greetingText)
+                .font(VayFont.caption())
+                .foregroundStyle(.secondary)
+                .vayAccessibilityLabel("Приветствие: \(greetingText)")
+
+            Text("ДомИнвентарь")
+                .font(VayFont.hero())
+                .foregroundStyle(.primary)
+                .vayAccessibilityLabel("ДомИнвентарь — главная")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, VaySpacing.sm)
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared ? 0 : 10)
+        .onAppear {
+            withAnimation(VayAnimation.springSmooth) {
+                appeared = true
+            }
+        }
+    }
+
+    private var quickStatsSection: some View {
+        LazyVGrid(columns: [
+            GridItem(.flexible(), spacing: VaySpacing.md),
+            GridItem(.flexible(), spacing: VaySpacing.md)
+        ], spacing: VaySpacing.md) {
+            StatCard(
+                icon: "cube.box",
+                title: "Продукты",
+                value: "\(products.count)",
+                subtitle: "в инвентаре",
+                color: .vayPrimary
+            )
+            .vayAccessibilityLabel("Продуктов в инвентаре: \(products.count)")
+
+            StatCard(
+                icon: "shippingbox",
+                title: "Партии",
+                value: "\(batches.count)",
+                subtitle: totalQuantityText,
+                color: .vayInfo
+            )
+            .vayAccessibilityLabel("Партий: \(batches.count), \(totalQuantityText)")
+
+            StatCard(
+                icon: "exclamationmark.triangle",
+                title: "Истекает",
+                value: "\(expiringSoonBatches.count)",
+                subtitle: "в ближ. 3 дня",
+                color: .vayWarning
+            )
+            .vayAccessibilityLabel("Истекает скоро: \(expiringSoonBatches.count) партий в ближайшие 3 дня")
+
+            StatCard(
+                icon: "snowflake",
+                title: "Морозилка",
+                value: "\(freezerCount)",
+                subtitle: "партий",
+                color: .vayFreezer
+            )
+            .vayAccessibilityLabel("В морозилке: \(freezerCount) партий")
+        }
+    }
+
+    private var savingsMoneyCard: some View {
+        let savedMinor = weeklySavedMinor
+        let lostMinor = weeklyLossMinor
+
+        return VStack(alignment: .leading, spacing: VaySpacing.md) {
+            sectionHeader(icon: "leaf.fill", title: "Сэкономлено на этой неделе", color: .vaySuccess)
+
+            HStack(alignment: .firstTextBaseline) {
+                Text(rubText(fromMinor: savedMinor))
+                    .font(VayFont.title(28))
+                    .foregroundStyle(Color.vaySuccess)
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: VaySpacing.xs) {
+                    Text("Потери")
+                        .font(VayFont.caption(12))
+                        .foregroundStyle(.secondary)
+                    Text(rubText(fromMinor: lostMinor))
+                        .font(VayFont.label(15))
+                        .foregroundStyle(lostMinor > 0 ? Color.vayDanger : Color.secondary)
+                }
+            }
+
+            if savedMinor + lostMinor > 0 {
+                let efficiency = Double(savedMinor) / Double(savedMinor + lostMinor)
+                VStack(alignment: .leading, spacing: VaySpacing.xs) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.vayDanger.opacity(0.15))
+                                .frame(height: 6)
+
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.vaySuccess, .vayPrimary],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: geo.size.width * efficiency, height: 6)
                         }
                     }
+                    .frame(height: 6)
+
+                    Text("Эффективность: \(Int(efficiency * 100))%")
+                        .font(VayFont.caption(11))
+                        .foregroundStyle(.tertiary)
                 }
             }
         }
+        .vayCard()
+        .vayAccessibilityLabel("Сэкономлено на этой неделе \(rubText(fromMinor: savedMinor)), потери \(rubText(fromMinor: lostMinor))")
     }
 
-    private var filtersSection: some View {
-        Section("Фильтры") {
-            Toggle("Только из того, что есть", isOn: $onlyInStock)
-            Toggle("Без костей", isOn: $hideBones)
+    private var weeklyBreakdownCard: some View {
+        let consumedCount = weeklyConsumedCount
+        let expiredCount = weeklyExpiredCount
+        let writeOffCount = weeklyWriteOffCount
 
-            Picker("Время", selection: $selectedTimeFilter) {
-                ForEach(TimeFilter.allCases) { filter in
-                    Text(filter.title).tag(filter)
+        return VStack(alignment: .leading, spacing: VaySpacing.md) {
+            sectionHeader(icon: "chart.bar.fill", title: "Операции недели", color: .vayInfo)
+
+            HStack(spacing: VaySpacing.md) {
+                miniPill(icon: "checkmark.circle.fill", label: "Съедено", value: "\(consumedCount)", color: .vaySuccess)
+                miniPill(icon: "clock.badge.exclamationmark", label: "Просрочено", value: "\(expiredCount)", color: .vayDanger)
+                miniPill(icon: "minus.circle.fill", label: "Списано", value: "\(writeOffCount)", color: .vayWarning)
+            }
+        }
+        .vayCard()
+        .vayAccessibilityLabel("За неделю: съедено \(consumedCount), просрочено \(expiredCount), списано \(writeOffCount)")
+    }
+
+    private var expiringSoonSection: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            sectionHeader(icon: "clock.badge.exclamationmark", title: "Скоро истекает", color: .vayWarning)
+
+            ForEach(expiringSoonBatches.prefix(5)) { batch in
+                if let product = products.first(where: { $0.id == batch.productId }) {
+                    expiryRow(product: product, batch: batch)
                 }
             }
+        }
+        .vayCard()
+        .vayAccessibilityLabel("Скоро истекает: \(expiringSoonBatches.count) продуктов")
+    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Таргет на \(recommendationSlot.title): \(nutritionSummary(recommendationTarget))")
-                    .font(.caption)
-                Text(recommendationStatus)
-                    .font(.caption2)
+    private func expiryRow(product: Product, batch: Batch) -> some View {
+        HStack(spacing: VaySpacing.md) {
+            Image(systemName: batch.location.icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(batch.location.color)
+                .frame(width: 32, height: 32)
+                .background(batch.location.color.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: VayRadius.sm, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(product.name)
+                    .font(VayFont.label(14))
+                    .lineLimit(1)
+
+                Text("\(batch.quantity.formatted()) \(batch.unit.title)")
+                    .font(VayFont.caption(12))
                     .foregroundStyle(.secondary)
             }
+
+            Spacer()
+
+            if let expiry = batch.expiryDate {
+                Text(expiry.expiryLabel)
+                    .font(VayFont.label(12))
+                    .foregroundStyle(expiry.expiryColor)
+                    .padding(.horizontal, VaySpacing.sm)
+                    .padding(.vertical, VaySpacing.xs)
+                    .background(expiry.expiryColor.opacity(0.12))
+                    .clipShape(Capsule())
+            }
         }
+        .vayAccessibilityLabel("\(product.name), \(batch.quantity.formatted()) \(batch.unit.title), \(batch.expiryDate?.expiryLabel ?? "")")
     }
 
-    @ViewBuilder
-    private var recipesSection: some View {
-        Section(sectionTitle) {
-            if isLoading {
-                HStack {
-                    SwiftUI.ProgressView()
-                    Text("Обновляем рекомендации...")
-                }
-            }
+    private func nutritionSection(settings: AppSettings) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            sectionHeader(icon: "flame.fill", title: "Цели на сегодня", color: .vayCalories)
 
-            if displayedRecipes.isEmpty, !isLoading {
-                Text("Пока нет подходящих рецептов")
+            NutritionRingGroup(
+                kcal: 0,
+                protein: 0,
+                fat: 0,
+                carbs: 0,
+                kcalGoal: settings.kcalGoal ?? 2000,
+                proteinGoal: settings.proteinGoalGrams ?? 80,
+                fatGoal: settings.fatGoalGrams ?? 65,
+                carbsGoal: settings.carbsGoalGrams ?? 250
+            )
+            .frame(maxWidth: .infinity)
+            .vayAccessibilityLabel("Кольца КБЖУ на сегодня")
+        }
+        .vayCard()
+    }
+
+    private var lowStockSection: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            sectionHeader(icon: "arrow.down.circle", title: "Заканчивается", color: .vayDanger)
+
+            ForEach(lowStockProducts.prefix(5)) { product in
+                HStack(spacing: VaySpacing.md) {
+                    Image(systemName: "cube.box")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.vayDanger)
+                        .frame(width: 28, height: 28)
+                        .background(Color.vayDanger.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                    Text(product.name)
+                        .font(VayFont.label(14))
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    let count = batches.filter { $0.productId == product.id }.count
+                    Text("\(count) шт.")
+                        .font(VayFont.caption(12))
+                        .foregroundStyle(.secondary)
+                }
+                .vayAccessibilityLabel("\(product.name) заканчивается, осталось \(batches.filter { $0.productId == product.id }.count) штук")
+            }
+        }
+        .vayCard()
+    }
+
+    private func miniPill(icon: String, label: String, value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.xs) {
+            HStack(spacing: VaySpacing.xs) {
+                Image(systemName: icon)
+                    .foregroundStyle(color)
+                Text(label)
+                    .font(VayFont.caption(11))
                     .foregroundStyle(.secondary)
-            } else {
-                ForEach(displayedRecipes) { item in
-                    NavigationLink {
-                        RecipeView(
-                            recipe: item.recipe,
-                            availableIngredients: Set(ingredientKeywords),
-                            inventoryService: inventoryService,
-                            onInventoryChanged: {
-                                await loadInitialData()
-                            }
-                        )
-                    } label: {
-                        RecipeCardView(recipe: item.recipe, score: item.score)
-                    }
-                }
             }
+            Text(value)
+                .font(VayFont.label(16))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(VaySpacing.sm)
+        .background(color.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous))
+        .vayAccessibilityLabel("\(label): \(value)")
+    }
+
+    private func sectionHeader(icon: String, title: String, color: Color) -> some View {
+        HStack(spacing: VaySpacing.sm) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+                .font(.system(size: 14, weight: .semibold))
+            Text(title)
+                .font(VayFont.heading(16))
         }
     }
 
-    private var sectionTitle: String {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Рекомендации" : "Результаты поиска"
+    private var expiringSoonBatches: [Batch] {
+        batches
+            .filter { batch in
+                guard let expiry = batch.expiryDate else { return false }
+                return expiry.daysUntilExpiry <= 3
+            }
+            .sorted { a, b in
+                (a.expiryDate ?? .distantFuture) < (b.expiryDate ?? .distantFuture)
+            }
     }
 
-    private var displayedRecipes: [RankedRecipeItem] {
-        let rawItems: [RankedRecipeItem]
-        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            rawItems = recommended.map { .init(recipe: $0.recipe, score: $0.score) }
-        } else {
-            rawItems = searchedRecipes.map { .init(recipe: $0, score: nil) }
-        }
-
-        return rawItems.filter { item in
-            guard let maxTime = selectedTimeFilter.maxMinutes else { return true }
-            guard let recipeMinutes = item.recipe.totalTimeMinutes else { return true }
-            return recipeMinutes <= maxTime
-        }
+    private var lowStockProducts: [Product] {
+        let productBatchCounts = Dictionary(grouping: batches, by: \.productId)
+            .mapValues { $0.count }
+        return products.filter { (productBatchCounts[$0.id] ?? 0) <= 1 }
     }
 
-    private func loadInitialData() async {
-        isLoading = true
-        defer { isLoading = false }
+    private var freezerCount: Int {
+        batches.filter { $0.location == .freezer }.count
+    }
 
+    private var totalQuantityText: String {
+        let total = batches.reduce(0.0) { $0 + $1.quantity }
+        return "всего \(Int(total)) ед."
+    }
+
+    private var weeklyEvents: [InventoryEvent] {
+        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .now
+        return events.filter { $0.type == .remove && $0.timestamp >= weekAgo }
+    }
+
+    private var weeklyConsumedCount: Int {
+        weeklyEvents.filter { $0.reason == .consumed }.count
+    }
+
+    private var weeklyExpiredCount: Int {
+        weeklyEvents.filter { $0.reason == .expired }.count
+    }
+
+    private var weeklyWriteOffCount: Int {
+        weeklyEvents.filter { $0.reason == .writeOff }.count
+    }
+
+    private var weeklySavedMinor: Int64 {
+        weeklyEvents
+            .filter { $0.reason == .consumed }
+            .compactMap(\.estimatedValueMinor)
+            .reduce(0, +)
+    }
+
+    private var weeklyLossMinor: Int64 {
+        weeklyEvents
+            .filter { $0.reason == .expired || $0.reason == .writeOff }
+            .compactMap(\.estimatedValueMinor)
+            .reduce(0, +)
+    }
+
+    private func rubText(fromMinor minor: Int64) -> String {
+        let rub = Double(minor) / 100
+        return "\(rub.formatted(.number.precision(.fractionLength(0)))) ₽"
+    }
+
+    private var greetingText: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        if hour < 6 { return "Доброй ночи 🌙" }
+        if hour < 12 { return "Доброе утро ☀️" }
+        if hour < 18 { return "Добрый день 🌤" }
+        return "Добрый вечер 🌇"
+    }
+
+    private func loadData() async {
         do {
-            async let productsTask = inventoryService.listProducts(location: nil, search: nil)
-            async let expiringTask = inventoryService.expiringBatches(horizonDays: 5)
-            async let settingsTask = settingsService.loadSettings()
+            products = try await inventoryService.listProducts(location: nil, search: nil)
+            batches = try await inventoryService.listBatches(productId: nil)
+            settings = try await settingsService.loadSettings()
 
-            let products = try await productsTask
-            let expiring = try await expiringTask
-            let loadedSettings = try await settingsTask
+            var allEvents: [InventoryEvent] = []
+            for product in products {
+                let productEvents = try await inventoryService.listEvents(productId: product.id)
+                allEvents.append(contentsOf: productEvents)
+            }
+            events = allEvents
 
-            productsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
-            ingredientKeywords = Array(Set(products.map { normalize($0.name) })).sorted()
-            expiringSoon = expiring
-            settings = loadedSettings
-            hideBones = loadedSettings.avoidBones
-
-            await refreshRecommendations()
+            isLoading = false
         } catch {
-            errorMessage = "Не удалось загрузить данные: \(error.localizedDescription)"
+            isLoading = false
         }
-    }
-
-    private func handleSearchChange(_ query: String) async {
-        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalized.isEmpty {
-            searchedRecipes = []
-            await refreshRecommendations()
-            return
-        }
-
-        guard let recipeServiceClient else {
-            errorMessage = "Сервис рецептов недоступен"
-            return
-        }
-
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            searchedRecipes = try await recipeServiceClient.search(query: normalized)
-            errorMessage = nil
-        } catch {
-            errorMessage = "Ошибка поиска рецептов: \(error.localizedDescription)"
-        }
-    }
-
-    private func refreshRecommendations() async {
-        guard searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return
-        }
-
-        guard let recipeServiceClient else {
-            errorMessage = "Сервис рецептов недоступен"
-            return
-        }
-
-        let expiringKeywords = Array(Set(expiringSoon.compactMap { batch in
-            productsByID[batch.productId].map { normalize($0.name) }
-        })).sorted()
-
-        guard !ingredientKeywords.isEmpty || !expiringKeywords.isEmpty else {
-            recommended = []
-            return
-        }
-
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            let adaptiveTarget = try await computeAdaptiveTarget(settings: settings)
-            recommendationTarget = adaptiveTarget.target
-            recommendationSlot = adaptiveTarget.slot
-            recommendationStatus = adaptiveTarget.status
-
-            let budgetPerMeal = NSDecimalNumber(decimal: settings.budgetDay).doubleValue / 3.0
-            let payload = RecommendRequest(
-                ingredientKeywords: ingredientKeywords,
-                expiringSoonKeywords: expiringKeywords,
-                targets: adaptiveTarget.target,
-                budget: .init(perMeal: budgetPerMeal > 0 ? budgetPerMeal : nil),
-                exclude: settings.dislikedList,
-                avoidBones: hideBones,
-                cuisine: [],
-                limit: 50
-            )
-
-            let response = try await recipeServiceClient.recommend(payload: payload)
-            let stockFiltered = response.items
-                .filter { item in
-                    if !onlyInStock { return true }
-                    return item.recipe.ingredients.allSatisfy { ingredient in
-                        ingredientKeywords.contains(normalize(ingredient))
-                    }
-                }
-
-            let macroFiltered = applyMacroFilter(
-                stockFiltered,
-                target: adaptiveTarget.target,
-                settings: settings
-            )
-
-            recommended = macroFiltered.items
-            if let note = macroFiltered.note {
-                recommendationStatus = "\(adaptiveTarget.status) \(note)"
-            }
-            errorMessage = nil
-        } catch {
-            errorMessage = "Не удалось получить рекомендации: \(error.localizedDescription)"
-        }
-    }
-
-    private func computeAdaptiveTarget(settings: AppSettings) async throws -> AdaptiveTarget {
-        let slot = MealSlot.next(for: Date(), schedule: settings.mealSchedule)
-        let remainingMealsCount = max(1, slot.remainingMealsCount)
-
-        if !hasRequestedHealthAccess {
-            hasRequestedHealthAccess = true
-            _ = try? await healthKitService.requestReadAccess()
-        }
-
-        let metrics = try await healthKitService.fetchLatestMetrics()
-        let baselineKcal = Double(healthKitService.calculateDailyCalories(metrics: metrics, targetLossPerWeek: 0.5))
-        let baselineNutrition = nutritionForTargetKcal(baselineKcal, weightKG: metrics.weightKG)
-
-        do {
-            let consumedToday = try await healthKitService.fetchTodayConsumedNutrition()
-            let hasAnyValue = [consumedToday.kcal, consumedToday.protein, consumedToday.fat, consumedToday.carbs]
-                .contains { $0 != nil && ($0 ?? 0) > 0 }
-            guard hasAnyValue else {
-                return AdaptiveTarget(
-                    target: divideNutrition(baselineNutrition, by: Double(remainingMealsCount)),
-                    slot: slot,
-                    status: "Apple Health не вернул КБЖУ за сегодня. Используется базовый таргет."
-                )
-            }
-
-            let consumed = normalizeNutrition(consumedToday)
-            let remaining = subtractNutrition(baselineNutrition, consumed)
-            let nextMealTarget = divideNutrition(remaining, by: Double(remainingMealsCount))
-            return AdaptiveTarget(
-                target: nextMealTarget,
-                slot: slot,
-                status: "Меню адаптировано по съеденному КБЖУ из Apple Health."
-            )
-        } catch {
-            return AdaptiveTarget(
-                target: divideNutrition(baselineNutrition, by: Double(remainingMealsCount)),
-                slot: slot,
-                status: "Не удалось прочитать КБЖУ из Apple Health. Используется базовый таргет."
-            )
-        }
-    }
-
-    private func nutritionForTargetKcal(_ kcal: Double, weightKG: Double?) -> Nutrition {
-        let baseKcal = max(900, kcal)
-
-        let protein: Double
-        if let weightKG {
-            protein = min(max(weightKG * 1.8, 90), 220)
-        } else {
-            protein = max(90, baseKcal * 0.28 / 4)
-        }
-
-        let fat: Double
-        if let weightKG {
-            fat = min(max(weightKG * 0.8, 45), 120)
-        } else {
-            fat = max(45, baseKcal * 0.28 / 9)
-        }
-
-        let minCarbs = 80.0
-        let minRequiredKcal = protein * 4 + fat * 9 + minCarbs * 4
-        let adjustedKcal = max(baseKcal, minRequiredKcal)
-        let carbs = max(minCarbs, (adjustedKcal - protein * 4 - fat * 9) / 4)
-
-        return Nutrition(kcal: adjustedKcal, protein: protein, fat: fat, carbs: carbs)
-    }
-
-    private func normalizeNutrition(_ value: Nutrition) -> Nutrition {
-        Nutrition(
-            kcal: max(0, value.kcal ?? 0),
-            protein: max(0, value.protein ?? 0),
-            fat: max(0, value.fat ?? 0),
-            carbs: max(0, value.carbs ?? 0)
-        )
-    }
-
-    private func subtractNutrition(_ left: Nutrition, _ right: Nutrition) -> Nutrition {
-        Nutrition(
-            kcal: max(0, resolved(left.kcal) - resolved(right.kcal)),
-            protein: max(0, resolved(left.protein) - resolved(right.protein)),
-            fat: max(0, resolved(left.fat) - resolved(right.fat)),
-            carbs: max(0, resolved(left.carbs) - resolved(right.carbs))
-        )
-    }
-
-    private func divideNutrition(_ value: Nutrition, by divisor: Double) -> Nutrition {
-        let safeDivisor = max(divisor, 1)
-        return Nutrition(
-            kcal: resolved(value.kcal) / safeDivisor,
-            protein: resolved(value.protein) / safeDivisor,
-            fat: resolved(value.fat) / safeDivisor,
-            carbs: resolved(value.carbs) / safeDivisor
-        )
-    }
-
-    private func resolved(_ value: Double?) -> Double {
-        max(0, value ?? 0)
-    }
-
-    private func nutritionSummary(_ nutrition: Nutrition) -> String {
-        "К \(numberText(nutrition.kcal)) · Б \(numberText(nutrition.protein)) · Ж \(numberText(nutrition.fat)) · У \(numberText(nutrition.carbs))"
-    }
-
-    private func numberText(_ value: Double?) -> String {
-        resolved(value).formatted(.number.precision(.fractionLength(0)))
-    }
-
-    private func normalize(_ text: String) -> String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
-
-    private func applyMacroFilter(
-        _ items: [RecommendResponse.RankedRecipe],
-        target: Nutrition,
-        settings: AppSettings
-    ) -> MacroFilterOutcome {
-        guard !items.isEmpty else {
-            return MacroFilterOutcome(items: items, note: nil)
-        }
-
-        guard settings.strictMacroTracking else {
-            return MacroFilterOutcome(items: items, note: nil)
-        }
-
-        let tolerance = settings.macroTolerancePercent / 100
-        let sortedByMacroDistance = items.sorted {
-            macroDistance(recipeNutrition: $0.recipe.nutrition, target: target) <
-                macroDistance(recipeNutrition: $1.recipe.nutrition, target: target)
-        }
-
-        let strict = sortedByMacroDistance.filter {
-            isWithinTolerance(recipeNutrition: $0.recipe.nutrition, target: target, tolerance: tolerance)
-        }
-
-        if !strict.isEmpty {
-            return MacroFilterOutcome(
-                items: strict,
-                note: "Включён строгий фильтр: допуск ±\(Int(settings.macroTolerancePercent))%."
-            )
-        }
-
-        return MacroFilterOutcome(
-            items: Array(sortedByMacroDistance.prefix(20)),
-            note: "Точных совпадений по КБЖУ не найдено, показаны ближайшие."
-        )
-    }
-
-    private func isWithinTolerance(recipeNutrition: Nutrition?, target: Nutrition, tolerance: Double) -> Bool {
-        guard let recipeNutrition else { return false }
-
-        let checks: [(Double?, Double?)] = [
-            (target.kcal, recipeNutrition.kcal),
-            (target.protein, recipeNutrition.protein),
-            (target.fat, recipeNutrition.fat),
-            (target.carbs, recipeNutrition.carbs)
-        ]
-
-        for (targetValue, actualValue) in checks {
-            guard let targetValue, targetValue > 0 else {
-                continue
-            }
-            guard let actualValue, actualValue >= 0 else {
-                return false
-            }
-
-            let deviation = abs(actualValue - targetValue) / max(targetValue, 1)
-            if deviation > tolerance {
-                return false
-            }
-        }
-
-        return true
-    }
-
-    private func macroDistance(recipeNutrition: Nutrition?, target: Nutrition) -> Double {
-        guard let recipeNutrition else {
-            return 10
-        }
-
-        let checks: [(Double?, Double?)] = [
-            (target.kcal, recipeNutrition.kcal),
-            (target.protein, recipeNutrition.protein),
-            (target.fat, recipeNutrition.fat),
-            (target.carbs, recipeNutrition.carbs)
-        ]
-
-        var sum = 0.0
-        var count = 0.0
-        for (targetValue, actualValue) in checks {
-            guard let targetValue, targetValue > 0 else {
-                continue
-            }
-            guard let actualValue else {
-                return 9
-            }
-            let deviation = abs(actualValue - targetValue) / max(targetValue, 1)
-            sum += deviation
-            count += 1
-        }
-
-        guard count > 0 else { return 8 }
-        return sum / count
-    }
-}
-
-private struct RankedRecipeItem: Identifiable {
-    var id: String { recipe.id }
-    let recipe: Recipe
-    let score: Double?
-}
-
-private struct RecipeCardView: View {
-    let recipe: Recipe
-    let score: Double?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            AsyncImage(url: recipe.imageURL) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                Rectangle()
-                    .fill(.gray.opacity(0.15))
-                    .overlay(SwiftUI.ProgressView())
-            }
-            .frame(height: 160)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            Text(recipe.title)
-                .font(.headline)
-                .lineLimit(2)
-
-            HStack(spacing: 10) {
-                if let minutes = recipe.totalTimeMinutes {
-                    Label("\(minutes) мин", systemImage: "clock")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let kcal = recipe.nutrition?.kcal {
-                    Label("\(Int(kcal.rounded())) ккал", systemImage: "flame")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let score {
-                    Label(score.formatted(.number.precision(.fractionLength(2))), systemImage: "sparkles")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Text(recipe.sourceName)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 4)
     }
 }

@@ -1,7 +1,5 @@
 import SwiftUI
 import UIKit
-import Nuke
-import NukeUI
 
 struct RecipeView: View {
     let recipe: Recipe
@@ -9,11 +7,14 @@ struct RecipeView: View {
     let inventoryService: any InventoryServiceProtocol
     let onInventoryChanged: () async -> Void
 
+    @Environment(\.vayMotion) private var motion
+
     @State private var statusText: String?
     @State private var pendingWriteOffPlan: RecipeWriteOffPlan?
     @State private var showWriteOffConfirmation = false
     @State private var isPreparingWriteOff = false
     @State private var isApplyingWriteOff = false
+    @State private var checkedIngredients: Set<String> = []
 
     init(
         recipe: Recipe,
@@ -29,89 +30,37 @@ struct RecipeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                LazyImage(source: recipe.imageURL) { state in
-                    if let image = state.image {
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Rectangle()
-                            .fill(.gray.opacity(0.2))
-                            .overlay(SwiftUI.ProgressView())
-                    }
-                }
-                .processors([ImageProcessors.Resize(width: 900)])
-                .priority(.high)
-                .pipeline(ImagePipeline.shared)
-                .frame(height: 220)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            VStack(alignment: .leading, spacing: VaySpacing.lg) {
+                heroCard
+                linksCard
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(recipe.title)
-                        .font(.title2.bold())
-
-                    Link("Источник: \(recipe.sourceName)", destination: recipe.sourceURL)
-                        .font(.subheadline)
-
-                    if let videoURL = recipe.videoURL {
-                        Link("Открыть видео", destination: videoURL)
-                            .font(.subheadline)
-                    }
-
-                    if let nutrition = recipe.nutrition {
-                        Text(nutritionSummary(nutrition))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                if let nutrition = recipe.nutrition {
+                    nutritionCard(nutrition)
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Ингредиенты")
-                        .font(.headline)
-
-                    ForEach(recipe.ingredients, id: \.self) { ingredient in
-                        let inStock = availableIngredients.contains(normalize(ingredient))
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: inStock ? "checkmark.circle.fill" : "xmark.circle")
-                                .foregroundStyle(inStock ? .green : .secondary)
-                            Text(ingredient)
-                        }
-                        .font(.subheadline)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Шаги")
-                        .font(.headline)
-
-                    ForEach(Array(recipe.instructions.enumerated()), id: \.offset) { index, step in
-                        Text("\(index + 1). \(step)")
-                            .font(.subheadline)
-                    }
-                }
-
-                Button("Добавить недостающее в список покупок") {
-                    copyMissingIngredients()
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button(isPreparingWriteOff ? "Подготовка..." : (isApplyingWriteOff ? "Списание..." : "Готовлю")) {
-                    Task { await prepareWriteOffPlan() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(isPreparingWriteOff || isApplyingWriteOff)
+                ingredientsCard
+                stepsCard
+                actionsCard
 
                 if let statusText {
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    statusBanner(statusText)
                 }
+
+                Color.clear.frame(height: VaySpacing.xxl)
             }
-            .padding()
+            .padding(.horizontal, VaySpacing.lg)
+            .padding(.top, VaySpacing.md)
         }
+        .background(Color.vayBackground)
         .navigationTitle("Рецепт")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            checkedIngredients = Set(
+                recipe.ingredients.filter { ingredient in
+                    availableIngredients.contains(normalize(ingredient))
+                }
+            )
+        }
         .alert(
             "Списать ингредиенты?",
             isPresented: $showWriteOffConfirmation,
@@ -126,6 +75,204 @@ struct RecipeView: View {
         } message: { plan in
             Text(plan.summaryText)
         }
+    }
+
+    private var heroCard: some View {
+        ZStack(alignment: .bottomLeading) {
+            AsyncImage(url: recipe.imageURL) { image in
+                image
+                    .resizable()
+                    .scaledToFill()
+            } placeholder: {
+                Rectangle()
+                    .fill(Color.vayCardBackground)
+                    .overlay(SwiftUI.ProgressView())
+            }
+            .frame(height: 240)
+            .clipShape(RoundedRectangle(cornerRadius: VayRadius.xl, style: .continuous))
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.55)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 240)
+            .clipShape(RoundedRectangle(cornerRadius: VayRadius.xl, style: .continuous))
+
+            Text(recipe.title)
+                .font(VayFont.title(24))
+                .foregroundStyle(.white)
+                .padding(VaySpacing.lg)
+        }
+        .vayShadow(.card)
+        .vayAccessibilityLabel("Рецепт: \(recipe.title)")
+    }
+
+    private var linksCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.sm) {
+            Link("Источник: \(recipe.sourceName)", destination: recipe.sourceURL)
+                .font(VayFont.body(14))
+                .foregroundStyle(Color.vayPrimary)
+
+            if let videoURL = recipe.videoURL {
+                Link("Открыть видео", destination: videoURL)
+                    .font(VayFont.body(14))
+                    .foregroundStyle(Color.vayPrimary)
+            }
+        }
+        .vayCard()
+    }
+
+    private func nutritionCard(_ nutrition: Nutrition) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.sm) {
+            Text("КБЖУ")
+                .font(VayFont.heading(16))
+
+            HStack(spacing: VaySpacing.sm) {
+                nutritionChip("К", numberText(nutrition.kcal), color: .vayCalories)
+                nutritionChip("Б", numberText(nutrition.protein), color: .vayProtein)
+                nutritionChip("Ж", numberText(nutrition.fat), color: .vayFat)
+                nutritionChip("У", numberText(nutrition.carbs), color: .vayCarbs)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .vayCard()
+        .vayAccessibilityLabel("КБЖУ: \(nutritionSummary(nutrition))")
+    }
+
+    private var ingredientsCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            Text("Ингредиенты")
+                .font(VayFont.heading(16))
+
+            ForEach(recipe.ingredients, id: \.self) { ingredient in
+                ingredientRow(ingredient)
+            }
+        }
+        .vayCard()
+    }
+
+    private func ingredientRow(_ ingredient: String) -> some View {
+        let inStock = availableIngredients.contains(normalize(ingredient))
+        let checked = checkedIngredients.contains(ingredient)
+
+        return Button {
+            withAnimation(motion.springSnappy) {
+                if checkedIngredients.contains(ingredient) {
+                    checkedIngredients.remove(ingredient)
+                } else {
+                    checkedIngredients.insert(ingredient)
+                }
+            }
+        } label: {
+            HStack(alignment: .center, spacing: VaySpacing.sm) {
+                Image(systemName: checked ? "checkmark.circle.fill" : (inStock ? "circle.fill" : "circle"))
+                    .foregroundStyle(checked ? Color.vaySuccess : (inStock ? Color.vayPrimary : Color.secondary))
+                    .font(.system(size: 18, weight: .semibold))
+
+                Text(ingredient)
+                    .font(VayFont.body(14))
+                    .foregroundStyle(checked ? .secondary : .primary)
+                    .strikethrough(checked)
+
+                Spacer()
+
+                if inStock {
+                    Text("Есть дома")
+                        .font(VayFont.caption(10))
+                        .foregroundStyle(Color.vaySuccess)
+                        .padding(.horizontal, VaySpacing.xs)
+                        .padding(.vertical, 2)
+                        .background(Color.vaySuccess.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+            }
+            .padding(VaySpacing.sm)
+            .background((checked ? Color.vaySuccess.opacity(0.08) : Color.clear))
+            .clipShape(RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .vayAccessibilityLabel(
+            "\(ingredient)",
+            hint: checked ? "Отмечено как выполненное" : "Дважды нажмите, чтобы отметить"
+        )
+    }
+
+    private var stepsCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            Text("Шаги")
+                .font(VayFont.heading(16))
+
+            ForEach(Array(recipe.instructions.enumerated()), id: \.offset) { index, step in
+                HStack(alignment: .top, spacing: VaySpacing.sm) {
+                    Text("\(index + 1)")
+                        .font(VayFont.label(12))
+                        .foregroundStyle(.white)
+                        .frame(width: 24, height: 24)
+                        .background(Color.vayPrimary)
+                        .clipShape(Circle())
+
+                    Text(step)
+                        .font(VayFont.body(14))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(VaySpacing.sm)
+                .background(Color.vayCardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous))
+                .vayAccessibilityLabel("Шаг \(index + 1): \(step)")
+            }
+        }
+        .vayCard()
+    }
+
+    private var actionsCard: some View {
+        VStack(spacing: VaySpacing.sm) {
+            Button("Добавить недостающее в список покупок") {
+                copyMissingIngredients()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.vayPrimary)
+            .vayAccessibilityLabel("Добавить недостающее в список покупок")
+
+            Button(isPreparingWriteOff ? "Подготовка..." : (isApplyingWriteOff ? "Списание..." : "Готовлю")) {
+                Task { await prepareWriteOffPlan() }
+            }
+            .buttonStyle(.bordered)
+            .disabled(isPreparingWriteOff || isApplyingWriteOff)
+            .vayAccessibilityLabel("Готовлю", hint: "Подготовить списание ингредиентов")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .vayCard()
+    }
+
+    private func statusBanner(_ text: String) -> some View {
+        HStack(spacing: VaySpacing.sm) {
+            Image(systemName: "info.circle.fill")
+                .foregroundStyle(Color.vayInfo)
+            Text(text)
+                .font(VayFont.caption(12))
+                .foregroundStyle(.secondary)
+        }
+        .padding(VaySpacing.md)
+        .background(Color.vayInfo.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
+        .vayAccessibilityLabel(text)
+    }
+
+    private func nutritionChip(_ shortTitle: String, _ value: String, color: Color) -> some View {
+        HStack(spacing: VaySpacing.xs) {
+            Text(shortTitle)
+                .font(VayFont.caption(11))
+                .foregroundStyle(color)
+            Text(value)
+                .font(VayFont.label(12))
+        }
+        .padding(.horizontal, VaySpacing.sm)
+        .padding(.vertical, VaySpacing.xs)
+        .background(color.opacity(0.12))
+        .clipShape(Capsule())
     }
 
     private func copyMissingIngredients() {

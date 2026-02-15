@@ -48,7 +48,6 @@ struct InventoryAIApp: App {
             .task {
                 await coordinator.bootstrap()
             }
-            .preferredColorScheme(.light)
         }
     }
 }

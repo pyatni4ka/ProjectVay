@@ -13,7 +13,7 @@ protocol InventoryServiceProtocol {
 
     func addBatch(_ batch: Batch) async throws -> Batch
     func updateBatch(_ batch: Batch) async throws -> Batch
-    func removeBatch(id: UUID) async throws
+    func removeBatch(id: UUID, quantity: Double?, intent: InventoryRemovalIntent, note: String?) async throws
 
     func listProducts(location: InventoryLocation?, search: String?) async throws -> [Product]
     func listBatches(productId: UUID?) async throws -> [Batch]
@@ -102,6 +102,7 @@ final class InventoryService: InventoryServiceProtocol {
             productId: stored.productId,
             batchId: stored.id,
             quantityDelta: stored.quantity,
+            reason: .unknown,
             note: "Добавление партии"
         )
         try repository.saveInventoryEvent(event)
@@ -126,6 +127,7 @@ final class InventoryService: InventoryServiceProtocol {
             productId: stored.productId,
             batchId: stored.id,
             quantityDelta: stored.quantity,
+            reason: .unknown,
             note: "Изменение партии"
         )
         try repository.saveInventoryEvent(event)
@@ -136,21 +138,46 @@ final class InventoryService: InventoryServiceProtocol {
         return stored
     }
 
-    func removeBatch(id: UUID) async throws {
+    func removeBatch(id: UUID, quantity: Double?, intent: InventoryRemovalIntent, note: String?) async throws {
         let allBatches = try repository.listBatches(productId: nil)
-        guard let batch = allBatches.first(where: { $0.id == id }) else { return }
+        guard var batch = allBatches.first(where: { $0.id == id }) else { return }
 
+        let quantityToRemove = resolvedRemovalQuantity(requestedQuantity: quantity, availableQuantity: batch.quantity)
+        guard quantityToRemove > 0 else { return }
+
+        let reason = eventReason(for: batch, intent: intent)
+        let estimatedValueMinor = try estimateRemovedValueMinor(batch: batch, quantityToRemove: quantityToRemove)
         let event = InventoryEvent(
             type: .remove,
             productId: batch.productId,
             batchId: batch.id,
-            quantityDelta: -batch.quantity,
-            note: "Удаление партии"
+            quantityDelta: -quantityToRemove,
+            reason: reason,
+            estimatedValueMinor: estimatedValueMinor,
+            note: note ?? defaultNote(for: reason)
         )
         try repository.saveInventoryEvent(event)
 
-        try await notificationScheduler.cancelExpiryNotifications(batchId: id)
-        try repository.removeBatch(id: id)
+        if quantityToRemove >= batch.quantity - 0.000_001 {
+            try await notificationScheduler.cancelExpiryNotifications(batchId: id)
+            try repository.removeBatch(id: id)
+            return
+        }
+
+        let originalQuantity = batch.quantity
+        batch.quantity = max(0, originalQuantity - quantityToRemove)
+        batch.purchasePriceMinor = updatedPurchasePriceMinor(
+            currentMinor: batch.purchasePriceMinor,
+            originalQuantity: originalQuantity,
+            newQuantity: batch.quantity
+        )
+        batch.updatedAt = Date()
+        try repository.updateBatch(batch)
+
+        if let product = try repository.fetchProduct(id: batch.productId), batch.expiryDate != nil {
+            let settings = try settingsRepository.loadSettings()
+            try await notificationScheduler.rescheduleExpiryNotifications(for: batch, product: product, settings: settings)
+        }
     }
 
     func listProducts(location: InventoryLocation?, search: String?) async throws -> [Product] {
@@ -195,5 +222,70 @@ final class InventoryService: InventoryServiceProtocol {
 
     func internalCodeMapping(for code: String) async throws -> InternalCodeMapping? {
         try repository.fetchInternalCodeMapping(code: code)
+    }
+
+    private func resolvedRemovalQuantity(requestedQuantity: Double?, availableQuantity: Double) -> Double {
+        guard let requestedQuantity else { return max(0, availableQuantity) }
+        return min(max(0, requestedQuantity), max(0, availableQuantity))
+    }
+
+    private func eventReason(for batch: Batch, intent: InventoryRemovalIntent) -> InventoryEventReason {
+        if intent == .consumed {
+            return .consumed
+        }
+
+        if let expiryDate = batch.expiryDate, expiryDate < Date() {
+            return .expired
+        }
+
+        return .writeOff
+    }
+
+    private func defaultNote(for reason: InventoryEventReason) -> String {
+        switch reason {
+        case .consumed:
+            return "Съедено"
+        case .expired:
+            return "Просрочено"
+        case .writeOff:
+            return "Списано"
+        case .unknown:
+            return "Удаление партии"
+        }
+    }
+
+    private func estimateRemovedValueMinor(batch: Batch, quantityToRemove: Double) throws -> Int64? {
+        let baseQuantity = max(0.000_001, batch.quantity)
+
+        if let purchasePriceMinor = batch.purchasePriceMinor, purchasePriceMinor > 0 {
+            let ratio = min(1, max(0, quantityToRemove / baseQuantity))
+            return proportionalMinor(totalMinor: purchasePriceMinor, ratio: ratio)
+        }
+
+        let history = try repository.listPriceHistory(productId: batch.productId)
+        guard let latestMinor = history.first?.price.asMinorUnits, latestMinor > 0 else {
+            return nil
+        }
+
+        if batch.unit == .pcs {
+            return Int64((Double(latestMinor) * quantityToRemove).rounded())
+        }
+
+        let ratio = min(1, max(0, quantityToRemove / baseQuantity))
+        return proportionalMinor(totalMinor: latestMinor, ratio: ratio)
+    }
+
+    private func updatedPurchasePriceMinor(currentMinor: Int64?, originalQuantity: Double, newQuantity: Double) -> Int64? {
+        guard let currentMinor, currentMinor > 0, originalQuantity > 0 else {
+            return currentMinor
+        }
+
+        let ratio = min(1, max(0, newQuantity / originalQuantity))
+        let updated = proportionalMinor(totalMinor: currentMinor, ratio: ratio)
+        return updated > 0 ? updated : nil
+    }
+
+    private func proportionalMinor(totalMinor: Int64, ratio: Double) -> Int64 {
+        Int64((Double(totalMinor) * ratio).rounded())
     }
 }

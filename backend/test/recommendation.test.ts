@@ -59,3 +59,42 @@ test("rankRecipes prefers recipes closer to target macros", () => {
   assert.ok((ranked[0]?.score ?? 0) > (ranked[1]?.score ?? 0));
   assert.ok((ranked[1]?.scoreBreakdown.macroDeviation ?? 0) > (ranked[0]?.scoreBreakdown.macroDeviation ?? 0));
 });
+
+test("rankRecipes applies strict nutrition filter when enabled", () => {
+  const candidates: Recipe[] = [
+    {
+      id: "strict_match",
+      title: "Подходящий",
+      imageURL: "https://images.example/strict-match.jpg",
+      sourceName: "example.ru",
+      sourceURL: "https://example.ru/strict-match",
+      ingredients: ["курица"],
+      instructions: ["Приготовить"],
+      nutrition: { kcal: 610, protein: 42, fat: 20, carbs: 58 },
+      estimatedCost: 210
+    },
+    {
+      id: "strict_miss",
+      title: "Неподходящий",
+      imageURL: "https://images.example/strict-miss.jpg",
+      sourceName: "example.ru",
+      sourceURL: "https://example.ru/strict-miss",
+      ingredients: ["курица"],
+      instructions: ["Приготовить"],
+      nutrition: { kcal: 890, protein: 12, fat: 48, carbs: 120 },
+      estimatedCost: 210
+    }
+  ];
+
+  const ranked = rankRecipes(candidates, {
+    ingredientKeywords: ["курица"],
+    expiringSoonKeywords: [],
+    targets: { kcal: 620, protein: 44, fat: 22, carbs: 60 },
+    budget: { perMeal: 300 },
+    strictNutrition: true,
+    macroTolerancePercent: 15,
+    limit: 10
+  });
+
+  assert.deepEqual(ranked.map((item) => item.recipe.id), ["strict_match"]);
+});

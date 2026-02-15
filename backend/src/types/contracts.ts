@@ -33,6 +33,8 @@ export type RecommendPayload = {
   avoidBones?: boolean;
   cuisine?: string[];
   limit?: number;
+  strictNutrition?: boolean;
+  macroTolerancePercent?: number;
 };
 
 export type MealType = "breakfast" | "lunch" | "dinner";

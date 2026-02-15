@@ -2,237 +2,511 @@ import SwiftUI
 
 struct InventoryView: View {
     let inventoryService: any InventoryServiceProtocol
-    let barcodeLookupService: BarcodeLookupService
+    var onOpenScanner: () -> Void = {}
 
-    @State private var selectedLocation: InventoryLocation = .fridge
-    @State private var searchText: String = ""
-    @State private var snapshot = InventorySnapshot(products: [], expiringSoon: [], productByID: [:])
-    @State private var isPresentingAddProduct = false
-    @State private var isPresentingScanner = false
-    @State private var scannerMode: ScannerView.ScannerMode = .add
-    @State private var batchPendingWriteOff: Batch?
-    @State private var errorMessage: String?
+    @State private var products: [Product] = []
+    @State private var batches: [Batch] = []
+    @State private var selectedLocation: InventoryLocation? = nil
+    @State private var searchText = ""
+    @State private var showAddProduct = false
+    @State private var isLoading = true
+    @State private var sortBy: SortOption = .name
+    @State private var productToDelete: Product?
+    @State private var showDeleteConfirm = false
+    @State private var successMessage: String?
 
-    private var groupedProducts: [ProductWithBatches] {
-        snapshot.products
+    enum SortOption: String, CaseIterable, Identifiable {
+        case name, expiry, quantity
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .name: return "Имя"
+            case .expiry: return "Срок"
+            case .quantity: return "Кол-во"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .name: return "textformat"
+            case .expiry: return "clock"
+            case .quantity: return "number"
+            }
+        }
     }
 
     var body: some View {
-        List {
-            locationSection
-            expiringSection
-            productsSection
+        ScrollView {
+            VStack(spacing: VaySpacing.lg) {
+                locationFilter
+                sortPicker
+
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                } else if filteredProducts.isEmpty {
+                    emptyState
+                } else {
+                    productsList
+                }
+
+                Color.clear.frame(height: VaySpacing.huge + VaySpacing.xxl)
+            }
+            .padding(.horizontal, VaySpacing.lg)
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Инвентарь")
-        .searchable(text: $searchText, prompt: "Поиск по товарам")
+        .background(Color.vayBackground)
+        .navigationTitle("Запасы")
+        .searchable(text: $searchText, prompt: "Поиск продуктов...")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Menu("Сканировать") {
-                    Button("Добавить по штрихкоду") {
-                        scannerMode = .add
-                        isPresentingScanner = true
-                    }
-
-                    Button("Списать по штрихкоду") {
-                        scannerMode = .writeOff
-                        isPresentingScanner = true
-                    }
+                Button(action: onOpenScanner) {
+                    Image(systemName: "barcode.viewfinder")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.vayPrimary)
                 }
+                .vayAccessibilityLabel("Сканировать товар", hint: "Открывает сканер штрихкодов")
 
-                Button("Добавить") {
-                    isPresentingAddProduct = true
+                Button {
+                    showAddProduct = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(Color.vayPrimary)
                 }
+                .vayAccessibilityLabel("Добавить вручную", hint: "Открывает форму нового продукта")
             }
         }
-        .sheet(isPresented: $isPresentingAddProduct) {
+        .sheet(isPresented: $showAddProduct) {
             NavigationStack {
-                AddProductView(inventoryService: inventoryService) { _ in
-                    Task { await reload() }
-                }
-            }
-        }
-        .sheet(isPresented: $isPresentingScanner) {
-            NavigationStack {
-                ScannerView(
+                AddProductView(
                     inventoryService: inventoryService,
-                    barcodeLookupService: barcodeLookupService,
-                    initialMode: scannerMode,
-                    onInventoryChanged: {
-                        await reload()
+                    initialName: nil,
+                    initialBarcode: nil,
+                    initialCategory: nil,
+                    initialUnit: nil,
+                    initialQuantity: nil,
+                    initialExpiryDate: nil,
+                    onSaved: { _ in
+                        Task { await loadData() }
                     }
                 )
             }
         }
-        .alert("Ошибка", isPresented: Binding(get: { errorMessage != nil }, set: { _ in errorMessage = nil })) {
-            Button("Ок", role: .cancel) {}
-        } message: {
-            Text(errorMessage ?? "Неизвестная ошибка")
-        }
-        .confirmationDialog(
-            "Списать партию?",
-            isPresented: Binding(
-                get: { batchPendingWriteOff != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        batchPendingWriteOff = nil
-                    }
-                }
-            ),
-            presenting: batchPendingWriteOff
-        ) { batch in
-            Button("Списать", role: .destructive) {
-                Task { await writeOff(batch: batch) }
-            }
-            Button("Отмена", role: .cancel) {}
-        } message: { batch in
-            Text("\(productName(for: batch.productId)), \(batch.quantity.formatted()) \(batch.unit.title)")
-        }
-        .task(id: reloadKey) {
-            await reload()
+        .task {
+            await loadData()
         }
         .refreshable {
-            await reload()
+            await loadData()
         }
-    }
-
-    @ViewBuilder
-    private var locationSection: some View {
-        Section {
-            Picker("Зона", selection: $selectedLocation) {
-                ForEach(InventoryLocation.allCases) { location in
-                    Text(location.title).tag(location)
-                }
+        .confirmationDialog(
+            "Удалить продукт?",
+            isPresented: $showDeleteConfirm,
+            presenting: productToDelete
+        ) { product in
+            Button("Удалить \(product.name)", role: .destructive) {
+                Task { await deleteProduct(product) }
             }
-            .pickerStyle(.segmented)
-            .padding(.vertical, 6)
+            Button("Отмена", role: .cancel) { }
+        } message: { product in
+            Text("Все партии и история \(product.name) будут удалены. Это действие нельзя отменить.")
+        }
+        .overlay(alignment: .top) {
+            if let msg = successMessage {
+                Text(msg)
+                    .font(VayFont.label(14))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, VaySpacing.lg)
+                    .padding(.vertical, VaySpacing.sm)
+                    .background(Color.vaySuccess)
+                    .clipShape(Capsule())
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .padding(.top, VaySpacing.md)
+            }
         }
     }
 
-    @ViewBuilder
-    private var expiringSection: some View {
-        if !snapshot.expiringSoon.isEmpty {
-            Section("Срочно использовать") {
-                ForEach(snapshot.expiringSoon) { batch in
-                    HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+    private var emptyState: some View {
+        Group {
+            if searchText.isEmpty, products.isEmpty {
+                EmptyStateView(
+                    icon: "barcode.viewfinder",
+                    title: "Инвентарь пуст",
+                    subtitle: "Сканируйте первый товар, чтобы начать отслеживание запасов.",
+                    actionTitle: "Сканировать первый товар",
+                    action: onOpenScanner
+                )
+            } else if !searchText.isEmpty {
+                EmptyStateView(
+                    icon: "magnifyingglass",
+                    title: "Ничего не найдено",
+                    subtitle: "По запросу «\(searchText)» совпадений нет. Попробуйте другое название или сбросьте поиск.",
+                    actionTitle: "Сбросить поиск",
+                    action: { searchText = "" }
+                )
+            } else {
+                EmptyStateView(
+                    icon: selectedLocation?.icon ?? "tray",
+                    title: "В этой зоне пока пусто",
+                    subtitle: "Поменяйте фильтр или добавьте продукты в выбранную зону.",
+                    actionTitle: "Снять фильтр",
+                    action: { selectedLocation = nil }
+                )
+            }
+        }
+    }
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(productName(for: batch.productId))
-                                .font(.headline)
-                            if let expiryDate = batch.expiryDate {
-                                Text("Срок: \(expiryDate.formatted(date: .abbreviated, time: .omitted))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+    private var locationFilter: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: VaySpacing.sm) {
+                filterChip(title: "Все", icon: "tray.full", isSelected: selectedLocation == nil) {
+                    withAnimation(VayAnimation.springSnappy) { selectedLocation = nil }
+                    VayHaptic.selection()
+                }
+
+                ForEach(InventoryLocation.allCases) { location in
+                    filterChip(
+                        title: location.title,
+                        icon: location.icon,
+                        isSelected: selectedLocation == location,
+                        color: location.color
+                    ) {
+                        withAnimation(VayAnimation.springSnappy) {
+                            selectedLocation = selectedLocation == location ? nil : location
                         }
+                        VayHaptic.selection()
                     }
                 }
             }
         }
+        .vayAccessibilityLabel("Фильтр по зонам хранения")
     }
 
-    @ViewBuilder
-    private var productsSection: some View {
-        if groupedProducts.isEmpty {
-            Section {
-                Text("В этой зоне пока нет товаров")
-                    .foregroundStyle(.secondary)
+    private func filterChip(
+        title: String,
+        icon: String,
+        isSelected: Bool,
+        color: Color = .vayPrimary,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: VaySpacing.xs) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(title)
+                    .font(VayFont.label(13))
             }
-        } else {
-            ForEach(groupedProducts) { item in
-                section(for: item)
-            }
+            .padding(.horizontal, VaySpacing.md)
+            .padding(.vertical, VaySpacing.sm)
+            .background(isSelected ? color.opacity(0.15) : Color.vayCardBackground)
+            .foregroundStyle(isSelected ? color : .secondary)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(isSelected ? color.opacity(0.3) : Color.clear, lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
+        .vayAccessibilityLabel(
+            "\(title)",
+            hint: isSelected ? "Фильтр активен" : "Нажмите чтобы выбрать"
+        )
     }
 
-    private func section(for item: ProductWithBatches) -> some View {
-        Section {
-            NavigationLink {
-                ProductDetailView(productID: item.product.id, inventoryService: inventoryService)
-            } label: {
-                Label("Открыть карточку товара", systemImage: "square.and.pencil")
-            }
-
-            if item.batches.isEmpty {
-                Text("Партии не добавлены")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(item.batches) { batch in
-                    batchRow(batch)
-                }
-            }
-        } header: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.product.name)
-                if let barcode = item.product.barcode {
-                    Text(barcode)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private func batchRow(_ batch: Batch) -> some View {
+    private var sortPicker: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(batch.quantity.formatted()) \(batch.unit.title)")
-                    .font(.subheadline)
-                Text(batch.isOpened ? "Открыто" : "Закрыто")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text("\(filteredProducts.count) продуктов")
+                .font(VayFont.caption(12))
+                .foregroundStyle(.tertiary)
+
             Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(batch.location.title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let expiryDate = batch.expiryDate {
-                    Text(expiryDate.formatted(date: .numeric, time: .omitted))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Без срока")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+            Menu {
+                ForEach(SortOption.allCases) { option in
+                    Button {
+                        withAnimation(VayAnimation.springSnappy) { sortBy = option }
+                    } label: {
+                        Label(option.title, systemImage: option.icon)
+                    }
+                }
+            } label: {
+                HStack(spacing: VaySpacing.xs) {
+                    Image(systemName: sortBy.icon)
+                    Text(sortBy.title)
+                }
+                .font(VayFont.caption(12))
+                .foregroundStyle(.secondary)
+            }
+            .vayAccessibilityLabel("Сортировка: \(sortBy.title)", hint: "Открывает меню сортировки")
+        }
+        .padding(.horizontal, VaySpacing.xs)
+    }
+
+    private var productsList: some View {
+        LazyVStack(spacing: VaySpacing.md) {
+            ForEach(filteredProducts) { product in
+                let productBatches = batches.filter { $0.productId == product.id }
+                let nearestExpiry = productBatches.compactMap(\.expiryDate).min()
+                let totalQty = productBatches.reduce(0.0) { $0 + $1.quantity }
+                let mainUnit = productBatches.first?.unit ?? .pcs
+
+                NavigationLink {
+                    ProductDetailView(
+                        productID: product.id,
+                        inventoryService: inventoryService
+                    )
+                } label: {
+                    productCard(product)
+                }
+                .buttonStyle(.plain)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        productToDelete = product
+                        showDeleteConfirm = true
+                    } label: {
+                        Label("Удалить", systemImage: "trash")
+                    }
+
+                    Button {
+                        Task { await writeOffProduct(product) }
+                    } label: {
+                        Label("Списать", systemImage: "minus.circle")
+                    }
+                    .tint(.vayWarning)
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button {
+                        Task { await consumeProduct(product) }
+                    } label: {
+                        Label("Съедено", systemImage: "checkmark.circle")
+                    }
+                    .tint(.vaySuccess)
+                }
+                .vayAccessibilityLabel(
+                    accessibilityLabel(for: product, qty: totalQty, unit: mainUnit, expiry: nearestExpiry),
+                    hint: "Нажмите для просмотра деталей. Смахните для действий."
+                )
+            }
+        }
+    }
+
+    private func productCard(_ product: Product) -> some View {
+        let productBatches = batches.filter { $0.productId == product.id }
+        let nearestExpiry = productBatches.compactMap(\.expiryDate).min()
+        let totalQty = productBatches.reduce(0.0) { $0 + $1.quantity }
+        let mainUnit = productBatches.first?.unit ?? .pcs
+        let locations = Set(productBatches.map(\.location))
+
+        return HStack(spacing: VaySpacing.md) {
+            VStack {
+                Image(systemName: iconForCategory(product.category))
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Color.vayPrimary)
+            }
+            .frame(width: 44, height: 44)
+            .background(Color.vayPrimary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous))
+
+            VStack(alignment: .leading, spacing: VaySpacing.xs) {
+                HStack {
+                    Text(product.name)
+                        .font(VayFont.label(15))
+                        .lineLimit(1)
+
+                    if product.disliked {
+                        Image(systemName: "hand.thumbsdown.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.vayWarning)
+                    }
+                }
+
+                HStack(spacing: VaySpacing.sm) {
+                    HStack(spacing: 2) {
+                        ForEach(Array(locations), id: \.self) { loc in
+                            Image(systemName: loc.icon)
+                                .font(.system(size: 10))
+                                .foregroundStyle(loc.color)
+                        }
+                    }
+
+                    Text(product.category)
+                        .font(VayFont.caption(11))
+                        .foregroundStyle(.tertiary)
+
+                    if product.nutrition.kcal != nil ||
+                        product.nutrition.protein != nil ||
+                        product.nutrition.fat != nil ||
+                        product.nutrition.carbs != nil {
+                        let nutrition = product.nutrition
+                        InlineMacros(
+                            kcal: nutrition.kcal,
+                            protein: nutrition.protein,
+                            fat: nutrition.fat,
+                            carbs: nutrition.carbs
+                        )
+                    }
                 }
             }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: VaySpacing.xs) {
+                Text("\(totalQty.formatted()) \(mainUnit.title)")
+                    .font(VayFont.label(13))
+                    .foregroundStyle(.primary)
+
+                if let expiry = nearestExpiry {
+                    Text(expiry.expiryLabel)
+                        .font(VayFont.caption(10))
+                        .foregroundStyle(expiry.expiryColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(expiry.expiryColor.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.quaternary)
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                batchPendingWriteOff = batch
-            } label: {
-                Label("Списать", systemImage: "trash")
+        .padding(VaySpacing.md)
+        .background(Color.vayCardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
+        .vayShadow(.subtle)
+    }
+
+    private var filteredProducts: [Product] {
+        var result = products
+
+        if let location = selectedLocation {
+            let productIds = Set(batches.filter { $0.location == location }.map(\.productId))
+            result = result.filter { productIds.contains($0.id) }
+        }
+
+        if !searchText.isEmpty {
+            let query = searchText.lowercased()
+            result = result.filter {
+                $0.name.lowercased().contains(query) ||
+                $0.category.lowercased().contains(query) ||
+                ($0.brand?.lowercased().contains(query) ?? false)
+            }
+        }
+
+        switch sortBy {
+        case .name:
+            result.sort { $0.name.localizedCompare($1.name) == .orderedAscending }
+        case .expiry:
+            result.sort { a, b in
+                let aExpiry = batches.filter { $0.productId == a.id }.compactMap(\.expiryDate).min() ?? .distantFuture
+                let bExpiry = batches.filter { $0.productId == b.id }.compactMap(\.expiryDate).min() ?? .distantFuture
+                return aExpiry < bExpiry
+            }
+        case .quantity:
+            result.sort { a, b in
+                let aQty = batches.filter { $0.productId == a.id }.reduce(0.0) { $0 + $1.quantity }
+                let bQty = batches.filter { $0.productId == b.id }.reduce(0.0) { $0 + $1.quantity }
+                return aQty > bQty
+            }
+        }
+
+        return result
+    }
+
+    private func iconForCategory(_ category: String) -> String {
+        let lower = category.lowercased()
+        if lower.contains("мясо") || lower.contains("птиц") || lower.contains("рыб") { return "fish" }
+        if lower.contains("молоч") || lower.contains("сыр") { return "cup.and.saucer" }
+        if lower.contains("овощ") || lower.contains("фрукт") { return "carrot" }
+        if lower.contains("круп") || lower.contains("макарон") || lower.contains("хлеб") { return "basket" }
+        if lower.contains("напит") { return "waterbottle" }
+        if lower.contains("заморож") { return "snowflake" }
+        if lower.contains("конс") { return "takeoutbag.and.cup.and.straw" }
+        if lower.contains("специ") || lower.contains("соус") { return "flame" }
+        return "fork.knife"
+    }
+
+    private func loadData() async {
+        do {
+            products = try await inventoryService.listProducts(location: nil, search: nil)
+            batches = try await inventoryService.listBatches(productId: nil)
+            isLoading = false
+        } catch {
+            isLoading = false
+        }
+    }
+
+    private func deleteProduct(_ product: Product) async {
+        do {
+            try await inventoryService.deleteProduct(id: product.id)
+            VayHaptic.success()
+            showSuccess("\(product.name) удалён")
+            await loadData()
+        } catch {
+            VayHaptic.error()
+        }
+    }
+
+    private func writeOffProduct(_ product: Product) async {
+        let productBatches = batches.filter { $0.productId == product.id }
+        guard let firstBatch = productBatches.first else { return }
+        do {
+            try await inventoryService.removeBatch(
+                id: firstBatch.id,
+                quantity: nil,
+                intent: .writeOff,
+                note: "Списано из списка запасов"
+            )
+            VayHaptic.impact(.medium)
+            showSuccess("\(product.name) списан")
+            await loadData()
+        } catch {
+            VayHaptic.error()
+        }
+    }
+
+    private func consumeProduct(_ product: Product) async {
+        let productBatches = batches.filter { $0.productId == product.id }
+        guard let firstBatch = productBatches.first else { return }
+        do {
+            try await inventoryService.removeBatch(
+                id: firstBatch.id,
+                quantity: nil,
+                intent: .consumed,
+                note: "Съедено"
+            )
+            VayHaptic.success()
+            showSuccess("👍 \(product.name) съедено")
+            await loadData()
+        } catch {
+            VayHaptic.error()
+        }
+    }
+
+    private func showSuccess(_ message: String) {
+        withAnimation(VayAnimation.springSnappy) {
+            successMessage = message
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation(VayAnimation.springSmooth) {
+                successMessage = nil
             }
         }
     }
 
-    private var reloadKey: String {
-        "\(selectedLocation.rawValue)-\(searchText)"
-    }
-
-    private func productName(for productID: UUID) -> String {
-        snapshot.productByID[productID]?.name ?? "Продукт"
-    }
-
-    private func writeOff(batch: Batch) async {
-        do {
-            try await inventoryService.removeBatch(id: batch.id)
-            batchPendingWriteOff = nil
-            await reload()
-        } catch {
-            errorMessage = error.localizedDescription
+    private func accessibilityLabel(for product: Product, qty: Double, unit: UnitType, expiry: Date?) -> String {
+        var parts = [product.name, "\(qty.formatted()) \(unit.title)"]
+        if let expiry {
+            let days = expiry.daysUntilExpiry
+            if days < 0 {
+                parts.append("просрочен")
+            } else if days == 0 {
+                parts.append("истекает сегодня")
+            } else if days == 1 {
+                parts.append("истекает завтра")
+            } else {
+                parts.append("годен \(days) дней")
+            }
         }
-    }
-
-    private func reload() async {
-        let useCase = LoadInventorySnapshotUseCase(inventoryService: inventoryService)
-        do {
-            snapshot = try await useCase.execute(location: selectedLocation, search: searchText)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        return parts.joined(separator: ", ")
     }
 }

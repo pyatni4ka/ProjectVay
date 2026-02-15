@@ -42,7 +42,10 @@ router.get("/recipes/search", (req, res) => {
 });
 
 router.post("/recipes/recommend", (req, res) => {
-  const payload = req.body as RecommendPayload;
+  const payload = normalizeRecommendPayload(req.body);
+  if (!payload) {
+    return res.status(400).json({ error: "invalid_recommend_payload" });
+  }
   const items = rankRecipes(recipeIndex.all(), payload);
   res.json({ items });
 });
@@ -117,7 +120,7 @@ router.get("/recipes/sources", (_req, res) => {
     sources: sourceWhitelist,
     cacheSize: recipeCache.size(),
     persistentCacheSize: persistentRecipeCache?.size() ?? 0,
-    persistentCacheEnabled: Boolean(persistentRecipeCache)
+    persistentCacheEnabled: persistentRecipeCache?.isPersistent ?? false
   });
 });
 
@@ -249,6 +252,43 @@ function normalizeMealPlanPayload(body: unknown): MealPlanRequest | null {
   };
 }
 
+function normalizeRecommendPayload(body: unknown): RecommendPayload | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+
+  const ingredientKeywords = toStringArray(body.ingredientKeywords);
+  const expiringSoonKeywords = toStringArray(body.expiringSoonKeywords);
+  if (ingredientKeywords.length === 0 && expiringSoonKeywords.length === 0) {
+    return null;
+  }
+
+  const targets = isRecord(body.targets) ? body.targets : {};
+  const limit = toOptionalNumber(body.limit);
+
+  return {
+    ingredientKeywords,
+    expiringSoonKeywords,
+    targets: {
+      kcal: toOptionalNumber(targets.kcal),
+      protein: toOptionalNumber(targets.protein),
+      fat: toOptionalNumber(targets.fat),
+      carbs: toOptionalNumber(targets.carbs)
+    },
+    budget: isRecord(body.budget)
+      ? {
+          perMeal: toOptionalNumber(body.budget.perMeal)
+        }
+      : undefined,
+    exclude: toOptionalStringArray(body.exclude),
+    avoidBones: toOptionalBoolean(body.avoidBones),
+    cuisine: toOptionalStringArray(body.cuisine),
+    limit: limit ? Math.max(1, Math.min(Math.floor(limit), 100)) : undefined,
+    strictNutrition: toOptionalBoolean(body.strictNutrition),
+    macroTolerancePercent: toOptionalNumber(body.macroTolerancePercent)
+  };
+}
+
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -273,6 +313,24 @@ function toOptionalNumber(value: unknown): number | undefined {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) {
       return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function toOptionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
     }
   }
 

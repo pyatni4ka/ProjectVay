@@ -28,6 +28,7 @@ final class InventoryRepositoryTests: XCTestCase {
             quantity: 2,
             unit: .pcs,
             expiryDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()),
+            purchasePriceMinor: 34900,
             isOpened: false
         )
         try repository.addBatch(batch)
@@ -38,6 +39,7 @@ final class InventoryRepositoryTests: XCTestCase {
         let batches = try repository.listBatches(productId: product.id)
         XCTAssertEqual(batches.count, 1)
         XCTAssertEqual(batches.first?.location, .fridge)
+        XCTAssertEqual(batches.first?.purchasePriceMinor, 34900)
 
         let expiring = try repository.expiringBatches(until: Calendar.current.date(byAdding: .day, value: 5, to: Date())!)
         XCTAssertEqual(expiring.count, 1)
@@ -73,5 +75,37 @@ final class InventoryRepositoryTests: XCTestCase {
         let history = try repository.listPriceHistory(productId: product.id)
         XCTAssertEqual(history.count, 2)
         XCTAssertEqual(history.first?.price, 170)
+    }
+
+    func testInventoryEventRoundtripWithReasonAndEstimatedValue() throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let repository = InventoryRepository(dbQueue: dbQueue)
+
+        let product = Product(
+            barcode: nil,
+            name: "Йогурт",
+            brand: nil,
+            category: "Молочные продукты",
+            defaultUnit: .pcs,
+            disliked: false,
+            mayContainBones: false
+        )
+        try repository.upsertProduct(product)
+
+        let event = InventoryEvent(
+            type: .remove,
+            productId: product.id,
+            batchId: nil,
+            quantityDelta: -1,
+            reason: .writeOff,
+            estimatedValueMinor: 9900,
+            note: "Списано"
+        )
+        try repository.saveInventoryEvent(event)
+
+        let events = try repository.listInventoryEvents(productId: product.id)
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.reason, .writeOff)
+        XCTAssertEqual(events.first?.estimatedValueMinor, 9900)
     }
 }

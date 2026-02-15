@@ -319,7 +319,7 @@ private final class MockInventoryService: InventoryServiceProtocol {
 
     func updateBatch(_ batch: Batch) async throws -> Batch { batch }
 
-    func removeBatch(id: UUID) async throws {}
+    func removeBatch(id: UUID, quantity: Double?, intent: InventoryRemovalIntent, note: String?) async throws {}
 
     func listProducts(location: InventoryLocation?, search: String?) async throws -> [Product] {
         Array(productsByBarcode.values)

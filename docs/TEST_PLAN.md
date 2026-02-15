@@ -133,6 +133,7 @@ npm run build
 - `PersistentRecipeCache` сохраняет/читает recipe и удаляет просроченные записи.
 - `mealPlan` генерирует 3 приёма в день и корректно ограничивает диапазон дней (1..7).
 - `recommendation` усиливает приоритет рецептов, ближе попадающих в целевое КБЖУ (учитывается штраф macro deviation).
+- `recommendation` применяет strict nutrition filter при `strictNutrition=true` и `macroTolerancePercent`.
 
 ### API/Integration
 - `POST /recipes/fetch`:
@@ -142,4 +143,36 @@ npm run build
 - `GET /recipes/search` ищет по индексу (включая ранее fetched рецепты).
 - `GET /recipes/sources` возвращает активный whitelist и размер кэша.
 - `POST /recipes/recommend` ранжирует текущий индекс (seed + fetched).
+- `POST /recipes/recommend` валидирует payload и поддерживает strict-параметры КБЖУ.
 - `POST /meal-plan/generate` строит день/неделю, возвращает shopping list и estimate стоимости.
+
+## 7) Manual smoke checklist (Simulator + iPhone)
+
+Базовая матрица:
+- Симулятор: `iPhone 17 (iOS 26.2)`
+- Устройство: реальный iPhone (iOS 26+)
+
+Preflight:
+- backend поднят на `:8080`;
+- `GET /health` возвращает `{ "ok": true }`;
+- в схеме iOS задан корректный `RECIPE_SERVICE_BASE_URL`:
+  - симулятор: `http://127.0.0.1:8080`
+  - iPhone: `http://<LAN-IP-Mac>:8080`
+
+Ключевые smoke-сценарии:
+- Онбординг сохраняет настройки и больше не показывается.
+- Инвентарь: CRUD товара/партии, списание, поиск, фильтры зон.
+- Уведомления: планирование 5/3/1 с корректным quiet-hours переносом.
+- Сканер:
+  - симулятор: fallback (ручной ввод);
+  - iPhone: live camera scan + быстрые действия add/write-off.
+- Настройки: экспорт/импорт/очистка локальных данных.
+- Home/План:
+  - при backend online: получаются рекомендации и meal plan;
+  - при backend offline: отображается контролируемое сообщение об ошибке.
+- HealthKit:
+  - запрашиваются права;
+  - при наличии данных в Apple Health/Yazio обновляются КБЖУ и таргет следующего приёма.
+
+Подробный чек-лист с полями `PASS/FAIL/BLOCKED`:
+- `/Users/antonpyatnica/Downloads/ProjectVay/docs/MANUAL_TEST_CHECKLIST.md`

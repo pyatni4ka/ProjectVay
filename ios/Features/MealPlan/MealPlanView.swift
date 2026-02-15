@@ -9,19 +9,15 @@ struct MealPlanView: View {
 
         var title: String {
             switch self {
-            case .day:
-                return "День"
-            case .week:
-                return "Неделя"
+            case .day: return "День"
+            case .week: return "Неделя"
             }
         }
 
         var daysCount: Int {
             switch self {
-            case .day:
-                return 1
-            case .week:
-                return 7
+            case .day: return 1
+            case .week: return 7
             }
         }
     }
@@ -33,23 +29,17 @@ struct MealPlanView: View {
 
         var title: String {
             switch self {
-            case .breakfast:
-                return "Завтрак"
-            case .lunch:
-                return "Обед"
-            case .dinner:
-                return "Ужин"
+            case .breakfast: return "Завтрак"
+            case .lunch: return "Обед"
+            case .dinner: return "Ужин"
             }
         }
 
         var remainingMealsCount: Int {
             switch self {
-            case .breakfast:
-                return 3
-            case .lunch:
-                return 2
-            case .dinner:
-                return 1
+            case .breakfast: return 3
+            case .lunch: return 2
+            case .dinner: return 1
             }
         }
 
@@ -83,15 +73,11 @@ struct MealPlanView: View {
         let statusMessage: String?
     }
 
-    private struct MacroFilterOutcome {
-        let items: [RecommendResponse.RankedRecipe]
-        let note: String?
-    }
-
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
     let recipeServiceClient: RecipeServiceClient?
+    var onOpenScanner: () -> Void = {}
 
     @State private var selectedRange: PlanRange = .day
     @State private var mealPlan: MealPlanGenerateResponse?
@@ -106,19 +92,56 @@ struct MealPlanView: View {
     @State private var nextMealRecommendations: [RecommendResponse.RankedRecipe] = []
     @State private var healthStatusMessage: String?
     @State private var hasRequestedHealthAccess = false
+    @State private var hasInventoryProducts = true
+    @State private var availableIngredients: Set<String> = []
 
     var body: some View {
-        List {
-            periodSection
-            nutritionSection
-            nextMealRecommendationsSection
-            loadingSection
-            mealPlanSections
-            errorSection
+        ScrollView {
+            VStack(spacing: VaySpacing.lg) {
+                periodCard
+                nutritionCard
+
+                if isLoading {
+                    loadingCard
+                }
+
+                if !hasInventoryProducts, !isLoading {
+                    EmptyStateView(
+                        icon: "fork.knife",
+                        title: "Нет продуктов для генерации плана",
+                        subtitle: "Добавьте хотя бы один продукт в инвентарь, чтобы построить персональный план.",
+                        actionTitle: "Сканировать товар",
+                        action: onOpenScanner
+                    )
+                } else {
+                    if !nextMealRecommendations.isEmpty {
+                        recommendationsSection
+                    }
+
+                    if let mealPlan {
+                        mealPlanSection(mealPlan)
+                    }
+                }
+
+                if let errorMessage {
+                    errorCard(errorMessage)
+                }
+
+                Color.clear.frame(height: VaySpacing.huge + VaySpacing.xxl)
+            }
+            .padding(.horizontal, VaySpacing.lg)
         }
+        .background(Color.vayBackground)
         .navigationTitle("План питания")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button(action: onOpenScanner) {
+                    Image(systemName: "barcode.viewfinder")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.vayPrimary)
+                }
+                .vayAccessibilityLabel("Открыть сканер", hint: "Добавить продукты для плана")
+
                 Button("Сгенерировать") {
                     Task { await generatePlan() }
                 }
@@ -133,19 +156,46 @@ struct MealPlanView: View {
         }
     }
 
-    private var periodSection: some View {
-        Section {
+    private var periodCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            Text("Период")
+                .font(VayFont.heading(16))
+
             Picker("Период", selection: $selectedRange) {
                 ForEach(PlanRange.allCases) { range in
                     Text(range.title).tag(range)
                 }
             }
             .pickerStyle(.segmented)
+            .vayAccessibilityLabel("Выбор периода плана", hint: "День или неделя")
         }
+        .vayCard()
     }
 
-    private var nutritionSection: some View {
-        Section("КБЖУ (Apple Health / Yazio)") {
+    private var nutritionCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack {
+                Text("КБЖУ (Apple Health / Yazio)")
+                    .font(VayFont.heading(16))
+                Spacer()
+                Text(nextMealSlot.title)
+                    .font(VayFont.caption(12))
+                    .foregroundStyle(.secondary)
+            }
+
+            NutritionRingGroup(
+                kcal: resolved(consumedTodayNutrition.kcal),
+                protein: resolved(consumedTodayNutrition.protein),
+                fat: resolved(consumedTodayNutrition.fat),
+                carbs: resolved(consumedTodayNutrition.carbs),
+                kcalGoal: resolved(dayTargetNutrition.kcal),
+                proteinGoal: resolved(dayTargetNutrition.protein),
+                fatGoal: resolved(dayTargetNutrition.fat),
+                carbsGoal: resolved(dayTargetNutrition.carbs)
+            )
+            .frame(maxWidth: .infinity)
+            .vayAccessibilityLabel("Кольца КБЖУ: съедено сегодня относительно цели")
+
             nutritionRow(title: "Цель на день", nutrition: dayTargetNutrition)
             nutritionRow(title: "Съедено сегодня", nutrition: consumedTodayNutrition)
             nutritionRow(title: "Остаток на сегодня", nutrition: remainingTodayNutrition)
@@ -153,113 +203,207 @@ struct MealPlanView: View {
 
             if let healthStatusMessage {
                 Text(healthStatusMessage)
-                    .font(.caption)
+                    .font(VayFont.caption(11))
                     .foregroundStyle(.secondary)
             }
         }
+        .vayCard()
     }
 
-    @ViewBuilder
-    private var nextMealRecommendationsSection: some View {
-        if !nextMealRecommendations.isEmpty {
-            Section("Рекомендации на \(nextMealSlot.title.lowercased())") {
-                ForEach(Array(nextMealRecommendations.prefix(5)), id: \.recipe.id) { item in
+    private var loadingCard: some View {
+        HStack(spacing: VaySpacing.sm) {
+            SwiftUI.ProgressView()
+            Text("Генерируем план...")
+                .font(VayFont.body(14))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(VaySpacing.lg)
+        .vayCard()
+    }
+
+    private var recommendationsSection: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            Text("Рекомендации на \(nextMealSlot.title.lowercased())")
+                .font(VayFont.heading(16))
+
+            ForEach(Array(nextMealRecommendations.prefix(5)), id: \.recipe.id) { item in
+                NavigationLink {
+                    RecipeView(
+                        recipe: item.recipe,
+                        availableIngredients: availableIngredients,
+                        inventoryService: inventoryService,
+                        onInventoryChanged: {}
+                    )
+                } label: {
                     recommendationRow(item)
                 }
+                .buttonStyle(.plain)
             }
         }
+        .vayCard()
     }
 
-    @ViewBuilder
-    private var loadingSection: some View {
-        if isLoading {
-            Section {
-                HStack {
-                    SwiftUI.ProgressView()
-                    Text("Генерируем план...")
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var mealPlanSections: some View {
-        if let mealPlan {
+    private func mealPlanSection(_ mealPlan: MealPlanGenerateResponse) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
             ForEach(mealPlan.days) { day in
-                Section(day.date) {
+                VStack(alignment: .leading, spacing: VaySpacing.md) {
+                    HStack {
+                        Text(day.date)
+                            .font(VayFont.heading(16))
+                        Spacer()
+                        Text("~\(day.totals.estimatedCost.formatted(.number.precision(.fractionLength(0)))) ₽")
+                            .font(VayFont.caption(12))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(VaySpacing.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(VayGradient.cool.opacity(0.35))
+                    .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
+
                     ForEach(day.entries) { entry in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(mealTypeTitle(entry.mealType)): \(entry.recipe.title)")
-                                .font(.headline)
-                            Text("\(entry.kcal.formatted(.number.precision(.fractionLength(0)))) ккал · ~\(entry.estimatedCost.formatted(.number.precision(.fractionLength(0)))) ₽")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        NavigationLink {
+                            RecipeView(
+                                recipe: entry.recipe,
+                                availableIngredients: availableIngredients,
+                                inventoryService: inventoryService,
+                                onInventoryChanged: {}
+                            )
+                        } label: {
+                            mealEntryCard(entry)
                         }
+                        .buttonStyle(.plain)
                     }
 
                     if !day.missingIngredients.isEmpty {
                         Text("Не хватает: \(day.missingIngredients.joined(separator: ", "))")
-                            .font(.caption)
+                            .font(VayFont.caption(11))
                             .foregroundStyle(.secondary)
+                            .vayAccessibilityLabel("Не хватает ингредиентов: \(day.missingIngredients.joined(separator: ", "))")
                     }
                 }
+                .padding(VaySpacing.md)
+                .background(Color.vayCardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: VayRadius.xl, style: .continuous))
             }
 
             if !mealPlan.shoppingList.isEmpty {
-                Section("Покупки") {
+                VStack(alignment: .leading, spacing: VaySpacing.sm) {
+                    Text("Покупки")
+                        .font(VayFont.heading(15))
                     ForEach(mealPlan.shoppingList, id: \.self) { item in
-                        Text(item)
+                        Label(item, systemImage: "cart")
+                            .font(VayFont.body(14))
+                            .foregroundStyle(.secondary)
                     }
                 }
+                .padding(VaySpacing.md)
+                .background(Color.vayPrimaryLight.opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
             }
 
-            Section("Итоги") {
+            VStack(alignment: .leading, spacing: VaySpacing.xs) {
                 Text("Оценка стоимости: \(mealPlan.estimatedTotalCost.formatted(.number.precision(.fractionLength(0)))) ₽")
+                    .font(VayFont.body(14))
                 if let lastGeneratedAt {
                     Text("Обновлено: \(lastGeneratedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption)
+                        .font(VayFont.caption(11))
                         .foregroundStyle(.secondary)
                 }
                 if !mealPlan.warnings.isEmpty {
                     ForEach(mealPlan.warnings, id: \.self) { warning in
                         Text(warning)
-                            .font(.caption)
+                            .font(VayFont.caption(11))
                             .foregroundStyle(.orange)
                     }
                 }
             }
+            .vayAccessibilityLabel("Итоги плана и предупреждения")
         }
+        .vayCard()
     }
 
-    @ViewBuilder
-    private var errorSection: some View {
-        if let errorMessage {
-            Section("Статус") {
-                Text(errorMessage)
-                    .foregroundStyle(.red)
-            }
+    private func errorCard(_ text: String) -> some View {
+        HStack(spacing: VaySpacing.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.vayDanger)
+            Text(text)
+                .font(VayFont.body(14))
+                .foregroundStyle(Color.vayDanger)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(VaySpacing.md)
+        .background(Color.vayDanger.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
+        .vayAccessibilityLabel("Ошибка генерации плана: \(text)")
     }
 
     private func nutritionRow(title: String, nutrition: Nutrition) -> some View {
         HStack {
             Text(title)
+                .font(VayFont.body(14))
             Spacer()
             Text(nutritionSummary(nutrition))
+                .font(VayFont.caption(12))
+                .foregroundStyle(.secondary)
         }
+        .vayAccessibilityLabel("\(title): \(nutritionSummary(nutrition))")
     }
 
     private func recommendationRow(_ item: RecommendResponse.RankedRecipe) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(item.recipe.title)
-                .font(.headline)
+        VStack(alignment: .leading, spacing: VaySpacing.sm) {
+            HStack {
+                Text(item.recipe.title)
+                    .font(VayFont.heading(15))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("\(item.score.formatted(.number.precision(.fractionLength(2))))")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
+            }
+
             Text(nutritionSummary(item.recipe.nutrition ?? .empty))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("Скор: \(item.score.formatted(.number.precision(.fractionLength(2))))")
-                .font(.caption2)
+                .font(VayFont.caption(12))
                 .foregroundStyle(.secondary)
         }
+        .padding(VaySpacing.md)
+        .background(Color.vayCardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous)
+                .stroke(Color.vayPrimary.opacity(0.15), lineWidth: 1)
+        )
+        .vayAccessibilityLabel("\(item.recipe.title), \(nutritionSummary(item.recipe.nutrition ?? .empty))")
+    }
+
+    private func mealEntryCard(_ entry: MealPlanGenerateResponse.Day.Entry) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.sm) {
+            HStack {
+                Text(mealTypeTitle(entry.mealType))
+                    .font(VayFont.caption(12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(entry.kcal.formatted(.number.precision(.fractionLength(0)))) ккал")
+                    .font(VayFont.caption(12))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(entry.recipe.title)
+                .font(VayFont.heading(15))
+
+            Text("~\(entry.estimatedCost.formatted(.number.precision(.fractionLength(0)))) ₽")
+                .font(VayFont.caption(12))
+                .foregroundStyle(.secondary)
+        }
+        .padding(VaySpacing.md)
+        .background(
+            LinearGradient(
+                colors: [Color.vayPrimaryLight.opacity(0.55), Color.vayCardBackground],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
+        .vayAccessibilityLabel("\(mealTypeTitle(entry.mealType)): \(entry.recipe.title), \(entry.kcal.formatted(.number.precision(.fractionLength(0)))) ккал")
     }
 
     private func generatePlan() async {
@@ -291,6 +435,7 @@ struct MealPlanView: View {
 
             let productsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
             let ingredientKeywords = Array(Set(products.map { $0.name.lowercased() })).sorted()
+            availableIngredients = Set(ingredientKeywords)
             let expiringSoonKeywords = Array(
                 Set(
                     expiringBatches.compactMap { batch in
@@ -300,11 +445,14 @@ struct MealPlanView: View {
             ).sorted()
 
             guard !ingredientKeywords.isEmpty else {
+                hasInventoryProducts = false
                 mealPlan = nil
                 nextMealRecommendations = []
-                errorMessage = "Добавьте продукты в инвентарь, чтобы сгенерировать план."
+                errorMessage = nil
                 return
             }
+
+            hasInventoryProducts = true
 
             let budgetPerDay = NSDecimalNumber(decimal: settings.budgetDay).doubleValue
             let payload = MealPlanGenerateRequest(
@@ -332,13 +480,19 @@ struct MealPlanView: View {
                     exclude: settings.dislikedList,
                     avoidBones: settings.avoidBones,
                     cuisine: [],
-                    limit: 25
+                    limit: 25,
+                    strictNutrition: settings.strictMacroTracking,
+                    macroTolerancePercent: settings.macroTolerancePercent
                 )
                 let recommended = try await recipeServiceClient.recommend(payload: recommendPayload)
-                let macroFiltered = applyMacroFilter(
-                    recommended.items,
+                let macroFiltered = MacroRecommendationFilterUseCase().execute(
+                    items: recommended.items,
                     target: nutritionSnapshot.nextMealTarget,
-                    settings: settings
+                    strictTracking: settings.strictMacroTracking,
+                    tolerancePercent: settings.macroTolerancePercent,
+                    strictAppliedNote: "Рекомендации отфильтрованы строго по КБЖУ (±\(Int(settings.macroTolerancePercent))%).",
+                    fallbackNote: "Строгий фильтр КБЖУ не дал точных совпадений, показаны ближайшие блюда.",
+                    fallbackLimit: 10
                 )
                 nextMealRecommendations = macroFiltered.items
 
@@ -488,98 +642,5 @@ struct MealPlanView: View {
         default:
             return raw
         }
-    }
-
-    private func applyMacroFilter(
-        _ items: [RecommendResponse.RankedRecipe],
-        target: Nutrition,
-        settings: AppSettings
-    ) -> MacroFilterOutcome {
-        guard !items.isEmpty else {
-            return MacroFilterOutcome(items: items, note: nil)
-        }
-
-        guard settings.strictMacroTracking else {
-            return MacroFilterOutcome(items: items, note: nil)
-        }
-
-        let tolerance = settings.macroTolerancePercent / 100
-        let sortedByMacroDistance = items.sorted {
-            macroDistance(recipeNutrition: $0.recipe.nutrition, target: target) <
-                macroDistance(recipeNutrition: $1.recipe.nutrition, target: target)
-        }
-
-        let strict = sortedByMacroDistance.filter {
-            isWithinTolerance(recipeNutrition: $0.recipe.nutrition, target: target, tolerance: tolerance)
-        }
-
-        if !strict.isEmpty {
-            return MacroFilterOutcome(
-                items: strict,
-                note: "Рекомендации отфильтрованы строго по КБЖУ (±\(Int(settings.macroTolerancePercent))%)."
-            )
-        }
-
-        return MacroFilterOutcome(
-            items: Array(sortedByMacroDistance.prefix(10)),
-            note: "Строгий фильтр КБЖУ не дал точных совпадений, показаны ближайшие блюда."
-        )
-    }
-
-    private func isWithinTolerance(recipeNutrition: Nutrition?, target: Nutrition, tolerance: Double) -> Bool {
-        guard let recipeNutrition else { return false }
-
-        let checks: [(Double?, Double?)] = [
-            (target.kcal, recipeNutrition.kcal),
-            (target.protein, recipeNutrition.protein),
-            (target.fat, recipeNutrition.fat),
-            (target.carbs, recipeNutrition.carbs)
-        ]
-
-        for (targetValue, actualValue) in checks {
-            guard let targetValue, targetValue > 0 else {
-                continue
-            }
-            guard let actualValue, actualValue >= 0 else {
-                return false
-            }
-
-            let deviation = abs(actualValue - targetValue) / max(targetValue, 1)
-            if deviation > tolerance {
-                return false
-            }
-        }
-
-        return true
-    }
-
-    private func macroDistance(recipeNutrition: Nutrition?, target: Nutrition) -> Double {
-        guard let recipeNutrition else {
-            return 10
-        }
-
-        let checks: [(Double?, Double?)] = [
-            (target.kcal, recipeNutrition.kcal),
-            (target.protein, recipeNutrition.protein),
-            (target.fat, recipeNutrition.fat),
-            (target.carbs, recipeNutrition.carbs)
-        ]
-
-        var sum = 0.0
-        var count = 0.0
-        for (targetValue, actualValue) in checks {
-            guard let targetValue, targetValue > 0 else {
-                continue
-            }
-            guard let actualValue else {
-                return 9
-            }
-            let deviation = abs(actualValue - targetValue) / max(targetValue, 1)
-            sum += deviation
-            count += 1
-        }
-
-        guard count > 0 else { return 8 }
-        return sum / count
     }
 }

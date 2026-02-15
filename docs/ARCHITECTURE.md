@@ -1,5 +1,8 @@
 # Архитектура проекта (после Этапов 1 + 2 hardening + расширенного 3)
 
+Канонический Xcode entrypoint: `/Users/antonpyatnica/Downloads/ProjectVay/ios/InventoryAI.xcodeproj`.
+Legacy-корневые артефакты (`.xcodeproj`, старый `project.yml`) перенесены в `/Users/antonpyatnica/Downloads/ProjectVay/legacy/` и выведены из использования, чтобы исключить расхождение состава файлов при сборке.
+
 ## 1) Структура модулей
 
 ```text
@@ -12,7 +15,8 @@ ProjectVay/
 │   │   ├── InventoryAIApp.swift
 │   │   ├── AppCoordinator.swift
 │   │   ├── AppDependencies.swift
-│   │   └── RootTabView.swift
+│   │   ├── RootTabView.swift
+│   │   └── InventoryAI.entitlements
 │   ├── Models/
 │   │   ├── DomainModels.swift
 │   │   └── DTOs.swift
@@ -33,7 +37,8 @@ ProjectVay/
 │   │   ├── ScannerService.swift
 │   │   └── RecipeServiceClient.swift
 │   ├── UseCases/
-│   │   └── InventoryUseCases.swift
+│   │   ├── InventoryUseCases.swift
+│   │   └── MacroRecommendationFilterUseCase.swift
 │   ├── Features/
 │   │   ├── Onboarding/OnboardingFlowView.swift
 │   │   ├── Inventory/{InventoryView,ProductDetailView,EditBatchView,AddProductView}.swift
@@ -149,12 +154,14 @@ ProjectVay/
 2. Кэш:
    - L1: `CacheStore` (in-memory TTL + ограничение размера);
    - L2: `PersistentRecipeCache` (SQLite через `node:sqlite`, TTL и bootstrap индекса после рестарта).
+   - если `node:sqlite` недоступен в runtime, `PersistentRecipeCache` автоматически переключается в in-memory режим.
 3. Успешно распарсенный рецепт индексируется в `RecipeIndex`.
 4. `GET /api/v1/recipes/search` ищет по объединённому индексу (seed + fetched).
 5. `POST /api/v1/recipes/recommend` ранжирует текущий индекс:
    - приоритет сроков и наличия дома;
    - nutrition-fit по целевому КБЖУ;
    - дополнительный штраф за сильное отклонение от целевых макросов.
+   - поддерживает строгий режим через payload (`strictNutrition`, `macroTolerancePercent`).
 6. `POST /api/v1/meal-plan/generate` строит план на 1..7 дней:
    - 3 приёма пищи/день (завтрак/обед/ужин),
    - учитывает цели, бюджет, исключения, expiring/in-stock сигналы,
@@ -200,6 +207,7 @@ ProjectVay/
 - `Services` — бизнес-операции, правила, уведомления.
   `NotificationScheduler` реализует `NotificationScheduling` для тестируемой интеграции `InventoryService`.
 - `UseCases` — сценарии UI (композиция сервисов).
+- `UseCases` — сценарии UI (композиция сервисов), включая `MacroRecommendationFilterUseCase` для строгого КБЖУ-фильтра.
 - `Features` — SwiftUI экраны и пользовательские потоки.
 
 ## 7) Что остаётся следующими этапами

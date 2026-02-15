@@ -114,6 +114,7 @@ struct Batch: Identifiable, Codable, Equatable {
     var quantity: Double
     var unit: UnitType
     var expiryDate: Date?
+    var purchasePriceMinor: Int64?
     var isOpened: Bool
     var createdAt: Date
     var updatedAt: Date
@@ -125,6 +126,7 @@ struct Batch: Identifiable, Codable, Equatable {
         quantity: Double,
         unit: UnitType,
         expiryDate: Date? = nil,
+        purchasePriceMinor: Int64? = nil,
         isOpened: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -135,10 +137,23 @@ struct Batch: Identifiable, Codable, Equatable {
         self.quantity = quantity
         self.unit = unit
         self.expiryDate = expiryDate
+        self.purchasePriceMinor = purchasePriceMinor
         self.isOpened = isOpened
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
+}
+
+enum InventoryRemovalIntent: String, Codable {
+    case consumed
+    case writeOff
+}
+
+enum InventoryEventReason: String, Codable {
+    case consumed
+    case writeOff
+    case expired
+    case unknown
 }
 
 struct PriceEntry: Identifiable, Codable, Equatable {
@@ -180,6 +195,8 @@ struct InventoryEvent: Identifiable, Codable, Equatable {
     var productId: UUID
     var batchId: UUID?
     var quantityDelta: Double
+    var reason: InventoryEventReason
+    var estimatedValueMinor: Int64?
     var timestamp: Date
     var note: String?
 
@@ -189,6 +206,8 @@ struct InventoryEvent: Identifiable, Codable, Equatable {
         productId: UUID,
         batchId: UUID? = nil,
         quantityDelta: Double,
+        reason: InventoryEventReason = .unknown,
+        estimatedValueMinor: Int64? = nil,
         timestamp: Date = Date(),
         note: String? = nil
     ) {
@@ -197,8 +216,50 @@ struct InventoryEvent: Identifiable, Codable, Equatable {
         self.productId = productId
         self.batchId = batchId
         self.quantityDelta = quantityDelta
+        self.reason = reason
+        self.estimatedValueMinor = estimatedValueMinor
         self.timestamp = timestamp
         self.note = note
+    }
+}
+
+extension InventoryEvent {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case type
+        case productId
+        case batchId
+        case quantityDelta
+        case reason
+        case estimatedValueMinor
+        case timestamp
+        case note
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        type = try container.decode(EventType.self, forKey: .type)
+        productId = try container.decode(UUID.self, forKey: .productId)
+        batchId = try container.decodeIfPresent(UUID.self, forKey: .batchId)
+        quantityDelta = try container.decode(Double.self, forKey: .quantityDelta)
+        reason = try container.decodeIfPresent(InventoryEventReason.self, forKey: .reason) ?? .unknown
+        estimatedValueMinor = try container.decodeIfPresent(Int64.self, forKey: .estimatedValueMinor)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(productId, forKey: .productId)
+        try container.encodeIfPresent(batchId, forKey: .batchId)
+        try container.encode(quantityDelta, forKey: .quantityDelta)
+        try container.encode(reason, forKey: .reason)
+        try container.encodeIfPresent(estimatedValueMinor, forKey: .estimatedValueMinor)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encodeIfPresent(note, forKey: .note)
     }
 }
 
@@ -264,6 +325,13 @@ struct AppSettings: Codable, Equatable {
     var aiDataConsentAcceptedAt: Date?
     var aiDataCollectionMode: AIDataCollectionMode = .maximal
 
+    // Nutrition goals
+    var kcalGoal: Double?
+    var proteinGoalGrams: Double?
+    var fatGoalGrams: Double?
+    var carbsGoalGrams: Double?
+    var weightGoalKg: Double?
+
     static let defaultStores: [Store] = [.pyaterochka, .yandexLavka, .chizhik, .auchan]
 
     static let `default` = AppSettings(
@@ -306,7 +374,7 @@ struct AppSettings: Codable, Equatable {
         let normalizedBodyRangeMonths = min(max(bodyMetricsRangeMonths, 1), 60)
         let normalizedBodyRangeYear = min(max(bodyMetricsRangeYear, 1970), currentYear)
 
-        return AppSettings(
+        var result = AppSettings(
             quietStartMinute: Self.clampMinute(quietStartMinute),
             quietEndMinute: Self.clampMinute(quietEndMinute),
             expiryAlertsDays: normalizedDays.isEmpty ? [5, 3, 1] : normalizedDays,
@@ -327,6 +395,12 @@ struct AppSettings: Codable, Equatable {
             aiDataConsentAcceptedAt: aiDataConsentAcceptedAt,
             aiDataCollectionMode: aiDataCollectionMode
         )
+        result.kcalGoal = kcalGoal
+        result.proteinGoalGrams = proteinGoalGrams
+        result.fatGoalGrams = fatGoalGrams
+        result.carbsGoalGrams = carbsGoalGrams
+        result.weightGoalKg = weightGoalKg
+        return result
     }
 
     var quietStartComponents: DateComponents { DateComponents.from(minutes: quietStartMinute) }
@@ -359,6 +433,11 @@ extension AppSettings {
         case aiRuOnlyStorage
         case aiDataConsentAcceptedAt
         case aiDataCollectionMode
+        case kcalGoal
+        case proteinGoalGrams
+        case fatGoalGrams
+        case carbsGoalGrams
+        case weightGoalKg
     }
 
     init(from decoder: Decoder) throws {
@@ -397,6 +476,11 @@ extension AppSettings {
         } else {
             aiDataCollectionMode = .maximal
         }
+        kcalGoal = try container.decodeIfPresent(Double.self, forKey: .kcalGoal)
+        proteinGoalGrams = try container.decodeIfPresent(Double.self, forKey: .proteinGoalGrams)
+        fatGoalGrams = try container.decodeIfPresent(Double.self, forKey: .fatGoalGrams)
+        carbsGoalGrams = try container.decodeIfPresent(Double.self, forKey: .carbsGoalGrams)
+        weightGoalKg = try container.decodeIfPresent(Double.self, forKey: .weightGoalKg)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -420,6 +504,11 @@ extension AppSettings {
         try container.encode(aiRuOnlyStorage, forKey: .aiRuOnlyStorage)
         try container.encodeIfPresent(aiDataConsentAcceptedAt, forKey: .aiDataConsentAcceptedAt)
         try container.encode(aiDataCollectionMode.rawValue, forKey: .aiDataCollectionMode)
+        try container.encodeIfPresent(kcalGoal, forKey: .kcalGoal)
+        try container.encodeIfPresent(proteinGoalGrams, forKey: .proteinGoalGrams)
+        try container.encodeIfPresent(fatGoalGrams, forKey: .fatGoalGrams)
+        try container.encodeIfPresent(carbsGoalGrams, forKey: .carbsGoalGrams)
+        try container.encodeIfPresent(weightGoalKg, forKey: .weightGoalKg)
     }
 }
 
@@ -472,6 +561,19 @@ struct InternalCodeMapping: Identifiable, Codable, Equatable {
 extension DateComponents {
     static func from(minutes: Int) -> DateComponents {
         DateComponents(hour: minutes / 60, minute: minutes % 60)
+    }
+
+    var asDate: Date {
+        let cal = Calendar.current
+        let now = Date()
+        let today = cal.dateComponents([.year, .month, .day], from: now)
+        var c = DateComponents()
+        c.year = today.year
+        c.month = today.month
+        c.day = today.day
+        c.hour = hour
+        c.minute = minute
+        return cal.date(from: c) ?? now
     }
 }
 

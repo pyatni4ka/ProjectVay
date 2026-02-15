@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 @MainActor
 final class AppCoordinator: ObservableObject {
@@ -15,6 +16,8 @@ final class AppCoordinator: ObservableObject {
     func bootstrap() async {
         guard !isInitialized else { return }
 
+        registerNotificationCategories()
+
         do {
             isOnboardingCompleted = try await settingsService.isOnboardingCompleted()
         } catch {
@@ -26,6 +29,30 @@ final class AppCoordinator: ObservableObject {
 
     func completeOnboarding() {
         isOnboardingCompleted = true
+    }
+
+    // MARK: - Notification Categories
+
+    private func registerNotificationCategories() {
+        let consumedAction = UNNotificationAction(
+            identifier: "CONSUMED_ACTION",
+            title: "✅ Съедено",
+            options: [.destructive]
+        )
+        let snoozeAction = UNNotificationAction(
+            identifier: "SNOOZE_ACTION",
+            title: "⏰ Напомнить через день",
+            options: []
+        )
+        let expiryCategory = UNNotificationCategory(
+            identifier: "EXPIRY_ALERT",
+            actions: [consumedAction, snoozeAction],
+            intentIdentifiers: [],
+            hiddenPreviewsBodyPlaceholder: "Истекает срок годности",
+            categorySummaryFormat: "%u продуктов скоро просрочатся",
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([expiryCategory])
     }
 }
 

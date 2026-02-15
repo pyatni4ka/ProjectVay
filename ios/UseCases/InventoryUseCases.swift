@@ -304,18 +304,22 @@ struct ApplyRecipeWriteOffUseCase {
         var updatedBatches = 0
 
         for (batchID, entries) in groupedByBatch {
-            guard var batch = batchByID[batchID] else { continue }
+            guard let batch = batchByID[batchID] else { continue }
             let quantityToWriteOff = entries.reduce(0) { $0 + $1.quantity }
             if quantityToWriteOff <= 0 {
                 continue
             }
 
+            try await inventoryService.removeBatch(
+                id: batch.id,
+                quantity: quantityToWriteOff,
+                intent: .consumed,
+                note: "Съедено по рецепту"
+            )
+
             if batch.quantity <= quantityToWriteOff + 0.000_001 {
-                try await inventoryService.removeBatch(id: batch.id)
                 removedBatches += 1
             } else {
-                batch.quantity -= quantityToWriteOff
-                _ = try await inventoryService.updateBatch(batch)
                 updatedBatches += 1
             }
         }

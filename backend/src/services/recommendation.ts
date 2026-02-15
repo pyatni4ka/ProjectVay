@@ -9,8 +9,9 @@ export type RankedRecipe = {
 
 export function rankRecipes(candidates: Recipe[], payload: RecommendPayload): RankedRecipe[] {
   const excludes = new Set((payload.exclude ?? []).map((e) => e.toLowerCase()));
+  const limit = payload.limit ?? 30;
 
-  return candidates
+  const ranked = candidates
     .map((recipe) => {
       const expiry = overlapScore(recipe.ingredients, payload.expiringSoonKeywords);
       const inStock = overlapScore(recipe.ingredients, payload.ingredientKeywords);
@@ -56,8 +57,17 @@ export function rankRecipes(candidates: Recipe[], payload: RecommendPayload): Ra
         }
       };
     })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, payload.limit ?? 30);
+    .sort((a, b) => b.score - a.score);
+
+  if (payload.strictNutrition) {
+    const tolerance = (clamp(payload.macroTolerancePercent ?? 25, 5, 60)) / 100;
+    const strictMatches = ranked.filter((item) => isWithinTolerance(item.recipe.nutrition, payload.targets, tolerance));
+    if (strictMatches.length > 0) {
+      return strictMatches.slice(0, limit);
+    }
+  }
+
+  return ranked.slice(0, limit);
 }
 
 function averageMacroDeviation(targets: RecommendPayload["targets"], nutrition: Recipe["nutrition"]): number {
@@ -89,4 +99,41 @@ function averageMacroDeviation(targets: RecommendPayload["targets"], nutrition: 
   }
 
   return sum / count;
+}
+
+function isWithinTolerance(
+  nutrition: Recipe["nutrition"],
+  targets: RecommendPayload["targets"],
+  tolerance: number
+): boolean {
+  if (!nutrition) {
+    return false;
+  }
+
+  const checks: Array<[number | undefined, number | undefined]> = [
+    [targets.kcal, nutrition.kcal],
+    [targets.protein, nutrition.protein],
+    [targets.fat, nutrition.fat],
+    [targets.carbs, nutrition.carbs]
+  ];
+
+  for (const [target, actual] of checks) {
+    if (!target || target <= 0) {
+      continue;
+    }
+    if (!actual || actual < 0) {
+      return false;
+    }
+
+    const deviation = Math.abs(actual - target) / Math.max(target, 1);
+    if (deviation > tolerance) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function clamp(value: number, minValue: number, maxValue: number): number {
+  return Math.min(Math.max(value, minValue), maxValue);
 }

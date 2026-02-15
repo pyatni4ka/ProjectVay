@@ -25,7 +25,10 @@ let package = Package(
                 "Features",
                 "Shared",
                 "Tests",
+                "InventoryAI.xcodeproj",
                 "Package.swift",
+                "project.yml",
+                "scripts",
                 ".DS_Store"
             ],
             sources: [

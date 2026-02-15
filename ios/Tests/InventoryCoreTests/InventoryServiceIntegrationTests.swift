@@ -41,7 +41,7 @@ final class InventoryServiceIntegrationTests: XCTestCase {
         let secondExpiry = Calendar.current.date(byAdding: .day, value: 7, to: Date())!
         batch.expiryDate = secondExpiry
         _ = try await service.updateBatch(batch)
-        try await service.removeBatch(id: batch.id)
+        try await service.removeBatch(id: batch.id, quantity: nil, intent: .writeOff, note: nil)
 
         let calls = await scheduler.snapshot()
         XCTAssertEqual(calls.scheduledBatchIDs, [batch.id])
@@ -51,6 +51,166 @@ final class InventoryServiceIntegrationTests: XCTestCase {
         XCTAssertEqual(try countEvents(dbQueue, type: "add"), 1)
         XCTAssertEqual(try countEvents(dbQueue, type: "adjust"), 1)
         XCTAssertEqual(try countEvents(dbQueue, type: "remove"), 1)
+    }
+
+    func testPartialConsumeUpdatesBatchAndWritesProportionalValue() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let repository = InventoryRepository(dbQueue: dbQueue)
+        let settingsRepository = SettingsRepository(dbQueue: dbQueue)
+        let scheduler = NotificationSchedulerSpy()
+        let service = InventoryService(
+            repository: repository,
+            settingsRepository: settingsRepository,
+            notificationScheduler: scheduler
+        )
+
+        let product = try await service.createProduct(
+            Product(
+                barcode: nil,
+                name: "Творог",
+                brand: nil,
+                category: "Молочные продукты",
+                defaultUnit: .pcs,
+                disliked: false,
+                mayContainBones: false
+            )
+        )
+
+        let batch = try await service.addBatch(
+            Batch(
+                productId: product.id,
+                location: .fridge,
+                quantity: 4,
+                unit: .pcs,
+                expiryDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()),
+                purchasePriceMinor: 20000,
+                isOpened: false
+            )
+        )
+
+        try await service.removeBatch(
+            id: batch.id,
+            quantity: 1,
+            intent: .consumed,
+            note: nil
+        )
+
+        let updatedBatch = try repository.listBatches(productId: product.id).first
+        XCTAssertNotNil(updatedBatch)
+        XCTAssertEqual(updatedBatch?.quantity ?? 0, 3, accuracy: 0.000_1)
+        XCTAssertEqual(updatedBatch?.purchasePriceMinor, 15000)
+
+        let removeEvent = try repository.listInventoryEvents(productId: product.id)
+            .first(where: { $0.type == .remove })
+        XCTAssertEqual(removeEvent?.reason, .consumed)
+        XCTAssertEqual(removeEvent?.estimatedValueMinor, 5000)
+
+        let calls = await scheduler.snapshot()
+        XCTAssertEqual(calls.scheduledBatchIDs, [batch.id])
+        XCTAssertEqual(calls.rescheduledBatchIDs, [batch.id])
+        XCTAssertTrue(calls.canceledBatchIDs.isEmpty)
+    }
+
+    func testRemoveBatchFallbacksToLatestPriceWhenBatchPriceMissing() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let repository = InventoryRepository(dbQueue: dbQueue)
+        let settingsRepository = SettingsRepository(dbQueue: dbQueue)
+        let scheduler = NotificationSchedulerSpy()
+        let service = InventoryService(
+            repository: repository,
+            settingsRepository: settingsRepository,
+            notificationScheduler: scheduler
+        )
+
+        let product = try await service.createProduct(
+            Product(
+                barcode: nil,
+                name: "Кефир",
+                brand: nil,
+                category: "Молочные продукты",
+                defaultUnit: .pcs,
+                disliked: false,
+                mayContainBones: false
+            )
+        )
+        let batch = try await service.addBatch(
+            Batch(
+                productId: product.id,
+                location: .fridge,
+                quantity: 2,
+                unit: .pcs,
+                expiryDate: Calendar.current.date(byAdding: .day, value: 4, to: Date()),
+                isOpened: false
+            )
+        )
+
+        try await service.savePriceEntry(
+            PriceEntry(
+                productId: product.id,
+                store: .pyaterochka,
+                price: 123
+            )
+        )
+
+        try await service.removeBatch(
+            id: batch.id,
+            quantity: nil,
+            intent: .writeOff,
+            note: nil
+        )
+
+        let removeEvent = try repository.listInventoryEvents(productId: product.id)
+            .first(where: { $0.type == .remove })
+        XCTAssertEqual(removeEvent?.reason, .writeOff)
+        XCTAssertEqual(removeEvent?.estimatedValueMinor, 24600)
+    }
+
+    func testWriteOffExpiredBatchMarksExpiredReason() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let repository = InventoryRepository(dbQueue: dbQueue)
+        let settingsRepository = SettingsRepository(dbQueue: dbQueue)
+        let scheduler = NotificationSchedulerSpy()
+        let service = InventoryService(
+            repository: repository,
+            settingsRepository: settingsRepository,
+            notificationScheduler: scheduler
+        )
+
+        let product = try await service.createProduct(
+            Product(
+                barcode: nil,
+                name: "Салат",
+                brand: nil,
+                category: "Овощи",
+                defaultUnit: .pcs,
+                disliked: false,
+                mayContainBones: false
+            )
+        )
+
+        let expiredBatch = try await service.addBatch(
+            Batch(
+                productId: product.id,
+                location: .fridge,
+                quantity: 1,
+                unit: .pcs,
+                expiryDate: Calendar.current.date(byAdding: .day, value: -1, to: Date()),
+                purchasePriceMinor: 4500,
+                isOpened: false
+            )
+        )
+
+        try await service.removeBatch(
+            id: expiredBatch.id,
+            quantity: nil,
+            intent: .writeOff,
+            note: nil
+        )
+
+        let removeEvent = try repository.listInventoryEvents(productId: product.id)
+            .first(where: { $0.type == .remove })
+        XCTAssertEqual(removeEvent?.reason, .expired)
+        XCTAssertEqual(removeEvent?.estimatedValueMinor, 4500)
     }
 
     func testDeleteProductCancelsNotificationsForAllBatches() async throws {

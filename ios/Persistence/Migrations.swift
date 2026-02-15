@@ -128,6 +128,17 @@ enum AppMigrations {
             }
 
             try db.create(index: "idx_price_entries_date", on: "price_entries", columns: ["date"])
+        migrator.registerMigration("v5_batch_purchase_price") { db in
+            try db.alter(table: "batches") { table in
+                table.add(column: "purchase_price_minor", .integer)
+            }
+        }
+
+        migrator.registerMigration("v6_event_reason_and_value") { db in
+            try db.alter(table: "inventory_events") { table in
+                table.add(column: "reason", .text).notNull().defaults(to: "unknown")
+                table.add(column: "estimated_value_minor", .integer)
+            }
         }
 
         return migrator

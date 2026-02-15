@@ -10,6 +10,7 @@ struct BatchRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var quantity: Double
     var unit: String
     var expiryDate: Date?
+    var purchasePriceMinor: Int64?
     var isOpened: Bool
     var createdAt: Date
     var updatedAt: Date
@@ -21,6 +22,7 @@ struct BatchRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case quantity
         case unit
         case expiryDate = "expiry_date"
+        case purchasePriceMinor = "purchase_price_minor"
         case isOpened = "is_opened"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -35,6 +37,7 @@ extension BatchRecord {
         quantity = batch.quantity
         unit = batch.unit.rawValue
         expiryDate = batch.expiryDate
+        purchasePriceMinor = batch.purchasePriceMinor
         isOpened = batch.isOpened
         createdAt = batch.createdAt
         updatedAt = batch.updatedAt
@@ -48,6 +51,7 @@ extension BatchRecord {
             quantity: quantity,
             unit: UnitType(rawValue: unit) ?? .pcs,
             expiryDate: expiryDate,
+            purchasePriceMinor: purchasePriceMinor,
             isOpened: isOpened,
             createdAt: createdAt,
             updatedAt: updatedAt
