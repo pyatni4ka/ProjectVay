@@ -1,10 +1,17 @@
 import Foundation
 
 struct AppConfig {
+    let enableLocalBarcodeDB: Bool
+    let localBarcodeDBPath: String?
+    let includeOffFoodBulk: Bool
     let enableEANDB: Bool
     let enableRFProvider: Bool
     let enableOpenFoodFacts: Bool
+    let enableOpenBeautyFacts: Bool
+    let enableOpenPetFoodFacts: Bool
+    let enableOpenProductsFacts: Bool
     let enableBarcodeListRu: Bool
+    let enableGoUPC: Bool
     let allowInsecureLookupEndpoints: Bool
     let recipeServiceBaseURL: URL?
     let allowInsecureRecipeServiceURL: Bool
@@ -14,6 +21,20 @@ struct AppConfig {
 
     static func live(bundle: Bundle = .main, env: [String: String] = ProcessInfo.processInfo.environment) -> AppConfig {
         let info = bundle.infoDictionary ?? [:]
+
+        let enableLocalBarcodeDB = boolValue(
+            env["ENABLE_LOCAL_BARCODE_DB"] ?? stringValue(info["EnableLocalBarcodeDB"]),
+            fallback: false
+        )
+
+        let localBarcodeDBPath = nonEmpty(
+            env["LOCAL_BARCODE_DB_PATH"] ?? stringValue(info["LocalBarcodeDBPath"])
+        )
+
+        let includeOffFoodBulk = boolValue(
+            env["INCLUDE_OFF_FOOD_BULK"] ?? stringValue(info["IncludeOffFoodBulk"]),
+            fallback: false
+        )
 
         let enableEANDB = boolValue(
             env["ENABLE_EANDB_LOOKUP"] ?? stringValue(info["EnableEANDBLookup"]),
@@ -30,8 +51,28 @@ struct AppConfig {
             fallback: true
         )
 
+        let enableOpenBeautyFacts = boolValue(
+            env["ENABLE_OPEN_BEAUTY_FACTS_LOOKUP"] ?? stringValue(info["EnableOpenBeautyFactsLookup"]),
+            fallback: true
+        )
+
+        let enableOpenPetFoodFacts = boolValue(
+            env["ENABLE_OPEN_PET_FOOD_FACTS_LOOKUP"] ?? stringValue(info["EnableOpenPetFoodFactsLookup"]),
+            fallback: true
+        )
+
+        let enableOpenProductsFacts = boolValue(
+            env["ENABLE_OPEN_PRODUCTS_FACTS_LOOKUP"] ?? stringValue(info["EnableOpenProductsFactsLookup"]),
+            fallback: true
+        )
+
         let enableBarcodeListRu = boolValue(
             env["ENABLE_BARCODE_LIST_RU"] ?? stringValue(info["EnableBarcodeListRu"]),
+            fallback: true
+        )
+
+        let enableGoUPC = boolValue(
+            env["ENABLE_GO_UPC_LOOKUP"] ?? stringValue(info["EnableGoUPCLookup"]),
             fallback: true
         )
 
@@ -94,10 +135,17 @@ struct AppConfig {
         )
 
         return AppConfig(
+            enableLocalBarcodeDB: enableLocalBarcodeDB,
+            localBarcodeDBPath: localBarcodeDBPath,
+            includeOffFoodBulk: includeOffFoodBulk,
             enableEANDB: enableEANDB,
             enableRFProvider: enableRFProvider,
             enableOpenFoodFacts: enableOpenFoodFacts,
+            enableOpenBeautyFacts: enableOpenBeautyFacts,
+            enableOpenPetFoodFacts: enableOpenPetFoodFacts,
+            enableOpenProductsFacts: enableOpenProductsFacts,
             enableBarcodeListRu: enableBarcodeListRu,
+            enableGoUPC: enableGoUPC,
             allowInsecureLookupEndpoints: allowInsecureLookupEndpoints,
             recipeServiceBaseURL: recipeServiceBaseURL,
             allowInsecureRecipeServiceURL: allowInsecureRecipeServiceURL,

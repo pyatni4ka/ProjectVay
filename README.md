@@ -14,7 +14,7 @@
 - планирование/отмена/перепланирование уведомлений сроков.
 - автоматическое перепланирование уведомлений при изменении quiet hours/шаблона дней в настройках.
 - live-сканер через `VisionKit DataScannerViewController` (EAN-13/DataMatrix/internal);
-- lookup pipeline: локальная база -> бесплатные RU-источники (`barcode-list.ru`, `Open Food Facts`) -> автошаблон товара;
+- lookup pipeline: локальная база -> RU fallback-каталог + бесплатные базы (`barcode-list.ru`, `Open Food Facts`, `Open Beauty Facts`, `Open Pet Food Facts`, `Open Products Facts`) -> автошаблон товара;
 - локальное маппирование внутренних кодов товара (`internal_code_mappings`) для повторных сканов.
 - hardening lookup: `negative cache`, `circuit breaker` для провайдеров, retry/timeout/cooldown policy и безопасная валидация endpoint'ов.
 - one-shot режим сканера: после первого чтения код фиксируется, поиск идёт в фоне и камеру можно сразу убрать.

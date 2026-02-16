@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 enum BarcodeLookupServiceError: Error {
     case timeout
@@ -30,6 +31,9 @@ final class BarcodeLookupService {
     private let providers: [any BarcodeLookupProvider]
     private let policy: BarcodeLookupPolicy
     private let runtimeGuard = LookupRuntimeGuard()
+#if DEBUG
+    private static let logger = Logger(subsystem: "com.projectvay.inventoryai", category: "barcode_lookup")
+#endif
 
     init(
         inventoryService: any InventoryServiceProtocol,
@@ -78,28 +82,48 @@ final class BarcodeLookupService {
         parsedWeightGrams: Double?,
         allowCreate: Bool
     ) async -> ScanResolution {
+        debugLog("resolve barcode=\(barcode) allowCreate=\(allowCreate)")
         do {
-            if !allowCreate, await runtimeGuard.isNegativeCached(barcode: barcode) {
-                return .notFound(barcode: barcode, internalCode: nil, parsedWeightGrams: parsedWeightGrams, suggestedExpiry: suggestedExpiry)
-            }
-
             if let product = try await inventoryService.findProduct(by: barcode) {
+                if
+                    shouldEnrichLocalProduct(product: product, barcode: barcode),
+                    case .hit(let payload, _) = await lookupProvidersParallelFirstHit(barcode: barcode)
+                {
+                    var updated = product
+                    updated.name = payload.name
+                    updated.brand = payload.brand
+                    updated.category = payload.category
+                    updated.nutrition = payload.nutrition
+                    let saved = try await inventoryService.updateProduct(updated)
+                    await runtimeGuard.clearNegativeCache(barcode: barcode)
+                    debugLog("enriched existing product barcode=\(barcode) newName=\"\(payload.name)\"")
+                    return .found(product: saved, suggestedExpiry: suggestedExpiry, parsedWeightGrams: parsedWeightGrams)
+                }
+
                 await runtimeGuard.clearNegativeCache(barcode: barcode)
+                debugLog("local product hit barcode=\(barcode) no remote enrichment")
                 return .found(product: product, suggestedExpiry: suggestedExpiry, parsedWeightGrams: parsedWeightGrams)
             }
 
-            guard allowCreate else {
-                await runtimeGuard.saveNegativeCache(barcode: barcode, ttlSeconds: policy.negativeCacheSeconds)
-                return .notFound(
-                    barcode: barcode,
-                    internalCode: nil,
-                    parsedWeightGrams: parsedWeightGrams,
-                    suggestedExpiry: suggestedExpiry
-                )
+            if !allowCreate, await runtimeGuard.isNegativeCached(barcode: barcode) {
+                debugLog("negative cache hit barcode=\(barcode) in write-off mode")
+                return .notFound(barcode: barcode, internalCode: nil, parsedWeightGrams: parsedWeightGrams, suggestedExpiry: suggestedExpiry)
             }
 
             let providerResolution = await lookupProvidersParallelFirstHit(barcode: barcode)
             if case .hit(let payload, let providerID) = providerResolution {
+                debugLog("provider hit provider=\(providerID) barcode=\(barcode) name=\"\(payload.name)\"")
+                guard allowCreate else {
+                    await runtimeGuard.clearNegativeCache(barcode: barcode)
+                    debugLog("provider result ignored in write-off mode provider=\(providerID) barcode=\(barcode)")
+                    return .notFound(
+                        barcode: barcode,
+                        internalCode: nil,
+                        parsedWeightGrams: parsedWeightGrams,
+                        suggestedExpiry: suggestedExpiry
+                    )
+                }
+
                 let creationResult = try await createOrLoadProduct(
                     Product(
                         barcode: payload.barcode,
@@ -116,6 +140,7 @@ final class BarcodeLookupService {
                 await runtimeGuard.clearNegativeCache(barcode: barcode)
                 switch creationResult {
                 case .created(let product):
+                    debugLog("created product from provider provider=\(providerID) barcode=\(barcode)")
                     return .created(
                         product: product,
                         suggestedExpiry: suggestedExpiry,
@@ -123,8 +148,20 @@ final class BarcodeLookupService {
                         provider: providerID
                     )
                 case .existing(let product):
+                    debugLog("provider returned existing product provider=\(providerID) barcode=\(barcode)")
                     return .found(product: product, suggestedExpiry: suggestedExpiry, parsedWeightGrams: parsedWeightGrams)
                 }
+            }
+
+            guard allowCreate else {
+                await runtimeGuard.saveNegativeCache(barcode: barcode, ttlSeconds: policy.negativeCacheSeconds)
+                debugLog("provider miss in write-off mode barcode=\(barcode), saved negative cache")
+                return .notFound(
+                    barcode: barcode,
+                    internalCode: nil,
+                    parsedWeightGrams: parsedWeightGrams,
+                    suggestedExpiry: suggestedExpiry
+                )
             }
 
             let templateResult = try await createOrLoadProduct(
@@ -143,6 +180,7 @@ final class BarcodeLookupService {
 
             switch templateResult {
             case .created(let product):
+                debugLog("auto_template created barcode=\(barcode)")
                 return .created(
                     product: product,
                     suggestedExpiry: suggestedExpiry,
@@ -150,11 +188,14 @@ final class BarcodeLookupService {
                     provider: "auto_template"
                 )
             case .existing(let product):
+                debugLog("auto_template resolved existing barcode=\(barcode)")
                 return .found(product: product, suggestedExpiry: suggestedExpiry, parsedWeightGrams: parsedWeightGrams)
             }
         } catch {
+            debugLog("resolve error barcode=\(barcode) error=\(String(describing: error))")
             if allowCreate {
                 if let product = try? await inventoryService.findProduct(by: barcode) {
+                    debugLog("resolve error fallback to existing product barcode=\(barcode)")
                     return .found(product: product, suggestedExpiry: suggestedExpiry, parsedWeightGrams: parsedWeightGrams)
                 }
 
@@ -179,6 +220,7 @@ final class BarcodeLookupService {
                 }
             } else {
                 await runtimeGuard.saveNegativeCache(barcode: barcode, ttlSeconds: policy.negativeCacheSeconds)
+                debugLog("resolve error in write-off mode, saved negative cache barcode=\(barcode)")
             }
 
             return .notFound(barcode: barcode, internalCode: nil, parsedWeightGrams: parsedWeightGrams, suggestedExpiry: suggestedExpiry)
@@ -205,14 +247,18 @@ final class BarcodeLookupService {
                 providerID: provider.providerID,
                 failureThreshold: policy.circuitBreakerFailureThreshold
             ) else {
+                debugLog("skip provider due circuit breaker provider=\(provider.providerID) barcode=\(barcode)")
                 continue
             }
             eligibleProviders.append(provider)
         }
 
         guard !eligibleProviders.isEmpty else {
+            debugLog("no eligible providers barcode=\(barcode)")
             return .miss
         }
+        let providerIDs = eligibleProviders.map { $0.providerID }.joined(separator: ",")
+        debugLog("query providers barcode=\(barcode) providers=\(providerIDs)")
 
         return await withTaskGroup(of: ProviderLookupTaskResult.self) { group in
             for provider in eligibleProviders {
@@ -242,15 +288,22 @@ final class BarcodeLookupService {
             while let taskResult = await group.next() {
                 switch taskResult {
                 case .hit(let payload, let providerID):
+                    debugLog("provider completed hit provider=\(providerID) barcode=\(barcode) name=\"\(payload.name)\"")
                     group.cancelAll()
                     return .hit(payload: payload, providerID: providerID)
-                case .failed:
+                case .failed(let providerID):
+                    debugLog("provider completed failed provider=\(providerID) barcode=\(barcode)")
                     hasFailure = true
-                case .miss, .cancelled:
+                case .miss(let providerID):
+                    debugLog("provider completed miss provider=\(providerID) barcode=\(barcode)")
+                    continue
+                case .cancelled(let providerID):
+                    debugLog("provider completed cancelled provider=\(providerID) barcode=\(barcode)")
                     continue
                 }
             }
 
+            debugLog("providers completed barcode=\(barcode) aggregate=\(hasFailure ? "failed" : "miss")")
             return hasFailure ? .failed : .miss
         }
     }
@@ -274,27 +327,44 @@ final class BarcodeLookupService {
         var hadTransportError = false
 
         for attempt in 1...policy.maxAttempts {
+            let startedAt = Date()
             await runtimeGuard.waitForProviderCooldown(
                 providerID: provider.providerID,
                 minimumDelayMilliseconds: policy.providerCooldownMilliseconds
             )
 
             do {
-                let payload = try await withTimeout(seconds: policy.timeoutSeconds) {
+                let providerTimeout = timeoutSeconds(for: provider)
+                let payload = try await withTimeout(seconds: providerTimeout) {
                     try await provider.lookup(barcode: barcode)
                 }
 
-                if let payload {
+                if
+                    let payload,
+                    BarcodeLookupPayloadValidator.isValidPayload(payload, requestedBarcode: barcode)
+                {
+                    let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+                    debugLog("attempt hit provider=\(provider.providerID) barcode=\(barcode) attempt=\(attempt) elapsedMs=\(elapsedMs)")
                     return .hit(payload)
                 }
 
+                if let payload {
+                    let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+                    debugLog("attempt invalid payload provider=\(provider.providerID) barcode=\(barcode) attempt=\(attempt) elapsedMs=\(elapsedMs) name=\"\(payload.name)\"")
+                } else {
+                    let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+                    debugLog("attempt miss provider=\(provider.providerID) barcode=\(barcode) attempt=\(attempt) elapsedMs=\(elapsedMs)")
+                }
                 return hadTransportError ? .failed : .miss
             } catch {
                 if error is CancellationError {
+                    debugLog("attempt cancelled provider=\(provider.providerID) barcode=\(barcode) attempt=\(attempt)")
                     return .cancelled
                 }
 
                 hadTransportError = true
+                let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+                debugLog("attempt failed provider=\(provider.providerID) barcode=\(barcode) attempt=\(attempt) elapsedMs=\(elapsedMs) error=\(String(describing: error))")
 
                 guard attempt < policy.maxAttempts else {
                     return .failed
@@ -306,6 +376,12 @@ final class BarcodeLookupService {
         }
 
         return hadTransportError ? .failed : .miss
+    }
+
+    private func debugLog(_ message: String) {
+#if DEBUG
+        Self.logger.debug("\(message, privacy: .public)")
+#endif
     }
 
     private func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
@@ -330,6 +406,16 @@ final class BarcodeLookupService {
         }
     }
 
+    private func timeoutSeconds(for provider: any BarcodeLookupProvider) -> Double {
+        switch provider.providerID {
+        case "barcode_list_ru":
+            // Remote HTML/markdown mirror can be slower than JSON APIs.
+            return max(policy.timeoutSeconds, 9.0)
+        default:
+            return policy.timeoutSeconds
+        }
+    }
+
     private func normalizeDataMatrixGTIN(_ gtin: String) -> String? {
         let digitsOnly = gtin.filter(\.isNumber)
         guard !digitsOnly.isEmpty else { return nil }
@@ -343,6 +429,25 @@ final class BarcodeLookupService {
         }
 
         return digitsOnly
+    }
+
+    private func shouldEnrichLocalProduct(product: Product, barcode: String) -> Bool {
+        if !BarcodeLookupPayloadValidator.isMeaningfulName(product.name, barcode: barcode) {
+            return true
+        }
+
+        let normalized = product.name
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let templatePrefix = "товар \(barcode)"
+        if normalized.hasPrefix(templatePrefix.lowercased()) {
+            return true
+        }
+
+        let looksGenericCategory = product.category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "продукты"
+        let missingBrand = (product.brand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let emptyNutrition = product.nutrition == .empty
+        return looksGenericCategory && missingBrand && emptyNutrition && normalized.contains(barcode)
     }
 }
 

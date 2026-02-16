@@ -22,3 +22,6 @@ backend/dist/
 
 # Local backups
 legacy/
+
+# Local external barcode datasets
+ios/DataSources/External/

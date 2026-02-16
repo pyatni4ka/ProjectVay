@@ -8,7 +8,7 @@
 Параметры задаются через `Info.plist`/environment (`ios/App/AppConfig.swift`):
 - `RecipeServiceBaseURL` / `RECIPE_SERVICE_BASE_URL`
 - `BarcodeProxyBaseURL` / `RF_LOOKUP_BASE_URL`
-- `EnableEANDBLookup`, `EnableRFLookup`, `EnableOpenFoodFactsLookup`
+- `EnableEANDBLookup`, `EnableRFLookup`, `EnableOpenFoodFactsLookup`, `EnableOpenBeautyFactsLookup`, `EnableOpenPetFoodFactsLookup`, `EnableOpenProductsFactsLookup`, `EnableBarcodeListRu`
 - `EANDBApiKey` / `EAN_DB_API_KEY`
 
 Рекомендации:

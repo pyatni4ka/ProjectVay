@@ -283,7 +283,7 @@ final class BarcodeLookupServiceTests: XCTestCase {
         }
 
         let calls = await nilProvider.callCount()
-        XCTAssertEqual(calls, 0)
+        XCTAssertEqual(calls, 1)
     }
 
     func testResolveCreatesAutoTemplateWhenProvidersMissInAddMode() async {
@@ -380,7 +380,7 @@ final class BarcodeLookupServiceTests: XCTestCase {
         XCTAssertEqual(providerID, "auto_template")
         XCTAssertEqual(product.name, "Товар 4601234567890")
         let calls = await nilProvider.callCount()
-        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(calls, 2)
     }
 
     func testResolveSkipsProviderWhenCircuitBreakerOpen() async {
@@ -422,6 +422,287 @@ final class BarcodeLookupServiceTests: XCTestCase {
         let successCalls = await successProvider.callCount()
         XCTAssertEqual(failingCalls, 1)
         XCTAssertEqual(successCalls, 2)
+    }
+
+    func testResolveSkipsInvalidFirstProviderAndUsesSecondValidProvider() async {
+        let inventory = MockInventoryService(productsByBarcode: [:])
+        let invalidLocalPayload = BarcodeLookupPayload(
+            barcode: "4601576009686",
+            name: "4601576009686",
+            brand: nil,
+            category: "Продукты",
+            nutrition: .empty
+        )
+        let validPayload = BarcodeLookupPayload(
+            barcode: "4601576009686",
+            name: "МАЙОНЕЗ ПРОВАНСАЛЬ",
+            brand: nil,
+            category: "Продукты",
+            nutrition: .empty
+        )
+
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [
+                MockProvider(providerID: "local_barcode_db", payload: invalidLocalPayload),
+                MockProvider(providerID: "barcode_list_ru", payload: validPayload)
+            ],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 1.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 60
+            )
+        )
+
+        let result = await service.resolve(rawCode: "4601576009686", allowCreate: true)
+
+        guard case .created(let product, _, _, let providerID) = result else {
+            XCTFail("Expected created resolution")
+            return
+        }
+
+        XCTAssertEqual(providerID, "barcode_list_ru")
+        XCTAssertEqual(product.name, "МАЙОНЕЗ ПРОВАНСАЛЬ")
+    }
+
+    func testResolveSkipsSearchPlaceholderNameAndUsesNextValidProvider() async {
+        let inventory = MockInventoryService(productsByBarcode: [:])
+        let invalidPayload = BarcodeLookupPayload(
+            barcode: "4680017928991",
+            name: "Поиск:4680017928991",
+            brand: nil,
+            category: "Продукты",
+            nutrition: .empty
+        )
+        let validPayload = BarcodeLookupPayload(
+            barcode: "4680017928991",
+            name: "Йогурт питьевой",
+            brand: "Бренд",
+            category: "Продукты",
+            nutrition: .empty
+        )
+
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [
+                MockProvider(providerID: "barcode_list_ru", payload: invalidPayload),
+                MockProvider(providerID: "go_upc", payload: validPayload)
+            ],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 1.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 60
+            )
+        )
+
+        let result = await service.resolve(rawCode: "4680017928991", allowCreate: true)
+        guard case .created(let product, _, _, let providerID) = result else {
+            XCTFail("Expected created resolution")
+            return
+        }
+
+        XCTAssertEqual(providerID, "go_upc")
+        XCTAssertEqual(product.name, "Йогурт питьевой")
+    }
+
+    func testResolveFallsBackToGoUPCWhenBarcodeListMisses() async {
+        let inventory = MockInventoryService(productsByBarcode: [:])
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [
+                AlwaysNilProvider(providerID: "barcode_list_ru"),
+                MockProvider(
+                    providerID: "go_upc",
+                    payload: BarcodeLookupPayload(
+                        barcode: "4607001771562",
+                        name: "Jacobs Кофе Растворимый Monarch",
+                        brand: "Jacobs",
+                        category: "Продукты",
+                        nutrition: .empty
+                    )
+                )
+            ],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 1.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 60
+            )
+        )
+
+        let result = await service.resolve(rawCode: "4607001771562", allowCreate: true)
+        guard case .created(let product, _, _, let providerID) = result else {
+            XCTFail("Expected created resolution")
+            return
+        }
+
+        XCTAssertEqual(providerID, "go_upc")
+        XCTAssertEqual(product.name, "Jacobs Кофе Растворимый Monarch")
+        XCTAssertEqual(product.brand, "Jacobs")
+    }
+
+    func testResolvePrefersLocalDatabaseProviderOverSlowerNetworkProvider() async {
+        let inventory = MockInventoryService(productsByBarcode: [:])
+        let localPayload = BarcodeLookupPayload(
+            barcode: "4601576009686",
+            name: "Майонез МЖК",
+            brand: "МЖК",
+            category: "Продукты",
+            nutrition: .empty
+        )
+        let slowNetworkProvider = DelayedSuccessProvider(
+            providerID: "barcode_list_ru",
+            delayNanoseconds: 700_000_000,
+            payload: BarcodeLookupPayload(
+                barcode: "4601576009686",
+                name: "Сетевой майонез",
+                brand: nil,
+                category: "Продукты",
+                nutrition: .empty
+            )
+        )
+
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [
+                MockProvider(providerID: "local_barcode_db", payload: localPayload),
+                slowNetworkProvider
+            ],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 2.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 0
+            )
+        )
+
+        let result = await service.resolve(rawCode: "4601576009686")
+
+        guard case .created(let product, _, _, let providerID) = result else {
+            XCTFail("Expected created resolution")
+            return
+        }
+
+        XCTAssertEqual(providerID, "local_barcode_db")
+        XCTAssertEqual(product.name, "Майонез МЖК")
+    }
+
+    func testResolveEnrichesExistingProductWhenNameIsBarcode() async {
+        let existing = Product(
+            barcode: "4607001771562",
+            name: "4607001771562",
+            brand: "Неизвестно",
+            category: "Напитки",
+            defaultUnit: .pcs,
+            nutrition: .empty,
+            disliked: false,
+            mayContainBones: false
+        )
+        let inventory = MockInventoryService(productsByBarcode: ["4607001771562": existing])
+
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [
+                MockProvider(
+                    providerID: "barcode_list_ru",
+                    payload: BarcodeLookupPayload(
+                        barcode: "4607001771562",
+                        name: "Кофе ЯКОБС Крема Сублмирован. 95гр",
+                        brand: "JACOBS",
+                        category: "Кофе",
+                        nutrition: .empty
+                    )
+                )
+            ],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 1.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 0
+            )
+        )
+
+        let result = await service.resolve(rawCode: "4607001771562", allowCreate: true)
+        guard case .found(let product, _, _) = result else {
+            XCTFail("Expected found resolution")
+            return
+        }
+
+        XCTAssertEqual(product.barcode, "4607001771562")
+        XCTAssertEqual(product.name, "Кофе ЯКОБС Крема Сублмирован. 95гр")
+        XCTAssertEqual(product.brand, "JACOBS")
+        XCTAssertEqual(product.category, "Кофе")
+    }
+
+    func testResolveEnrichesExistingInvalidProductInWriteOffMode() async {
+        let existing = Product(
+            barcode: "4607001771562",
+            name: "4607001771562",
+            brand: nil,
+            category: "Напитки",
+            defaultUnit: .pcs,
+            nutrition: .empty,
+            disliked: false,
+            mayContainBones: false
+        )
+        let inventory = MockInventoryService(productsByBarcode: ["4607001771562": existing])
+
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [
+                MockProvider(
+                    providerID: "barcode_list_ru",
+                    payload: BarcodeLookupPayload(
+                        barcode: "4607001771562",
+                        name: "Кофе ЯКОБС Крема Сублмирован. 95гр",
+                        brand: nil,
+                        category: "Кофе",
+                        nutrition: .empty
+                    )
+                )
+            ],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 1.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 0
+            )
+        )
+
+        let result = await service.resolve(rawCode: "4607001771562", allowCreate: false)
+        guard case .found(let product, _, _) = result else {
+            XCTFail("Expected found resolution")
+            return
+        }
+
+        XCTAssertEqual(product.name, "Кофе ЯКОБС Крема Сублмирован. 95гр")
+        XCTAssertEqual(product.category, "Кофе")
     }
 }
 

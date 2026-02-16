@@ -119,6 +119,39 @@ struct ScannerView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
+                if let errorMessage {
+                    HStack(alignment: .top, spacing: VaySpacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.white)
+                            .padding(.top, 2)
+
+                        Text(errorMessage)
+                            .font(VayFont.label(13))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Button {
+                            withAnimation(VayAnimation.springSmooth) {
+                                self.errorMessage = nil
+                            }
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .padding(6)
+                                .background(.white.opacity(0.15))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, VaySpacing.md)
+                    .padding(.vertical, VaySpacing.sm)
+                    .background(.red.opacity(0.78))
+                    .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
                 if scannerGate.isLocked {
                     HStack(spacing: VaySpacing.sm) {
                         Image(systemName: "scope")
@@ -164,6 +197,7 @@ struct ScannerView: View {
             .padding(.bottom, VaySpacing.xxl)
             .animation(VayAnimation.springSmooth, value: resolution != nil)
             .animation(VayAnimation.springSmooth, value: quickActionMessage)
+            .animation(VayAnimation.springSmooth, value: errorMessage != nil)
         }
         .navigationTitle("Сканер")
         .navigationBarTitleDisplayMode(.inline)
@@ -228,11 +262,6 @@ struct ScannerView: View {
                     }
                 }
             }
-        }
-        .alert("Ошибка", isPresented: Binding(get: { errorMessage != nil }, set: { _ in errorMessage = nil })) {
-            Button("Ок", role: .cancel) {}
-        } message: {
-            Text(errorMessage ?? "Неизвестная ошибка")
         }
     }
 
@@ -716,10 +745,20 @@ struct ScannerView: View {
 
     private func providerTitle(_ provider: String) -> String {
         switch provider {
+        case "local_barcode_db":
+            return "Локальная база"
         case "barcode_list_ru":
             return "barcode-list.ru"
+        case "go_upc":
+            return "Go-UPC"
         case "open_food_facts":
             return "Open Food Facts"
+        case "open_beauty_facts":
+            return "Open Beauty Facts"
+        case "open_pet_food_facts":
+            return "Open Pet Food Facts"
+        case "open_products_facts":
+            return "Open Products Facts"
         case "ean_db":
             return "EAN-DB"
         case "rf_source":

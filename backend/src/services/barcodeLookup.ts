@@ -29,6 +29,33 @@ type FetchLike = typeof fetch;
 const DEFAULT_EAN_DB_API_URL = "https://ean-db.com/api";
 const DEFAULT_TIMEOUT_MS = 3_000;
 
+const INVALID_NAME_PATTERNS = [
+  /barcode/i,
+  /штрих-код/i,
+  /штрихкод/i,
+  /поиск/i,
+  /search/i,
+  /not found/i,
+  /не найден/i,
+  /^\d+$/
+];
+
+function isMeaningfulName(name: string, barcode: string): boolean {
+  if (!name || name.length < 3) return false;
+
+  const lower = name.toLowerCase();
+  if (lower.includes(barcode)) {
+    // If the name is just the barcode, it's not meaningful
+    const cleaned = name.replace(barcode, "").trim();
+    if (cleaned.length < 3) return false;
+  }
+
+  for (const pattern of INVALID_NAME_PATTERNS) {
+    if (pattern.test(name)) return false;
+  }
+  return true;
+}
+
 export async function lookupBarcode(options: BarcodeLookupOptions): Promise<BarcodeLookupResult> {
   const code = normalizeCode(options.code);
   if (!code) {
@@ -124,12 +151,84 @@ type BarcodeListRuLookupInput = {
 };
 
 async function lookupBarcodeListRu(input: BarcodeListRuLookupInput): Promise<BarcodeLookupProduct | null> {
-  const searchURL = `https://barcode-list.ru/barcode/RU/%D0%9F%D0%BE%D0%B8%D1%81%D0%BA.htm?barcode=${encodeURIComponent(input.code)}`;
-  const html = await fetchHTML(searchURL, input.fetchImpl, input.timeoutMs);
-  if (!html) {
+  const encodedCode = encodeURIComponent(input.code);
+  const originalUrl = `https://barcode-list.ru/barcode/RU/%D0%9F%D0%BE%D0%B8%D1%81%D0%BA.htm?barcode=${encodedCode}`;
+
+  // Try direct lookup first
+  try {
+    const html = await fetchHTML(originalUrl, input.fetchImpl, 5000); // 5s timeout for direct
+    if (html) {
+      const result = parseBarcodeListRuHTML(html, input.code);
+      if (result) return result;
+    }
+  } catch (e) {
+    console.warn("barcode-list.ru direct lookup failed:", e);
+  }
+
+  // Fallback to r.jina.ai mirror
+  // Note: We use http for the target because barcode-list.ru often has cert issues or requires it
+  const mirrorUrl = `https://r.jina.ai/http://barcode-list.ru/barcode/RU/%D0%9F%D0%BE%D0%B8%D1%81%D0%BA.htm?barcode=${encodedCode}`;
+
+  try {
+    const markdown = await fetchHTML(mirrorUrl, input.fetchImpl, input.timeoutMs);
+    if (markdown) {
+      return parseBarcodeListRuMarkdown(markdown, input.code);
+    }
+  } catch (e) {
+    console.warn("barcode-list.ru mirror lookup failed:", e);
+  }
+
+  return null;
+}
+
+function parseBarcodeListRuMarkdown(markdown: string, fallbackBarcode: string): BarcodeLookupProduct | null {
+  // Jina returns markdown. The title is usually at the top as "Title: ..." or first line # ...
+
+  // 1. Extract Title
+  let name: string | null = null;
+  const titleMatch = markdown.match(/Title:\s*(.+)/i) || markdown.match(/^#\s+(.+)/m);
+
+  if (titleMatch) {
+    name = titleMatch[1].trim();
+  }
+
+  // Look for a line that might be the name if title is not found or not meaningful
+  if (!name || !isMeaningfulName(name, fallbackBarcode)) {
+    const lines = markdown.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length > 3 && isMeaningfulName(trimmed, fallbackBarcode) && !trimmed.startsWith("Link:") && !trimmed.startsWith("URL:")) {
+        name = trimmed;
+        break;
+      }
+    }
+  }
+
+  if (!name || !isMeaningfulName(name, fallbackBarcode)) {
     return null;
   }
-  return parseBarcodeListRuHTML(html, input.code);
+
+  // 2. Extract Brand/Category if possible from markdown table
+  // Markdown tables often look like | Key | Value |
+  let brand: string | undefined;
+  let category: string = "Продукты";
+
+  const brandMatch = markdown.match(/\|\s*Brand\s*\|\s*([^|]+)\|/i) || markdown.match(/\|\s*Производитель\s*\|\s*([^|]+)\|/i);
+  if (brandMatch) {
+    brand = brandMatch[1].trim();
+  }
+
+  const categoryMatch = markdown.match(/\|\s*Category\s*\|\s*([^|]+)\|/i) || markdown.match(/\|\s*Категория\s*\|\s*([^|]+)\|/i);
+  if (categoryMatch) {
+    category = categoryMatch[1].trim();
+  }
+
+  return {
+    barcode: fallbackBarcode,
+    name,
+    brand,
+    category
+  };
 }
 
 export function parseBarcodeListRuHTML(html: string, fallbackBarcode: string): BarcodeLookupProduct | null {

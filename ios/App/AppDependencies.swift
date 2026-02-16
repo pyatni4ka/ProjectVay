@@ -32,18 +32,33 @@ struct AppDependencies {
         let scannerService = ScannerService()
 
         var providers: [any BarcodeLookupProvider] = []
-        // Free public sources are primary defaults; optional providers remain opt-in.
+        if
+            config.enableLocalBarcodeDB,
+            let localBarcodeDBPath = config.localBarcodeDBPath,
+            FileManager.default.fileExists(atPath: localBarcodeDBPath),
+            let localProvider = try? LocalBarcodeDatabaseProvider(databasePath: localBarcodeDBPath)
+        {
+            providers.append(localProvider)
+        }
+
+        // Free public sources are primary defaults.
         if config.enableOpenFoodFacts {
             providers.append(OpenFoodFactsBarcodeProvider())
+        }
+        if config.enableOpenBeautyFacts {
+            providers.append(OpenBeautyFactsBarcodeProvider())
+        }
+        if config.enableOpenPetFoodFacts {
+            providers.append(OpenPetFoodFactsBarcodeProvider())
+        }
+        if config.enableOpenProductsFacts {
+            providers.append(OpenProductsFactsBarcodeProvider())
         }
         if config.enableBarcodeListRu {
             providers.append(BarcodeListRuProvider())
         }
-        if config.enableEANDB {
-            providers.append(EANDBBarcodeProvider(apiKey: config.eanDBApiKey))
-        }
-        if config.enableRFProvider, let rfLookupBaseURL = config.rfLookupBaseURL {
-            providers.append(RFBarcodeProvider(endpoint: rfLookupBaseURL))
+        if config.enableGoUPC {
+            providers.append(GoUPCBarcodeProvider())
         }
 
         let barcodeLookupService = BarcodeLookupService(
