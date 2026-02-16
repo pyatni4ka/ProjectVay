@@ -141,6 +141,22 @@ enum AppMigrations {
             }
         }
 
+        migrator.registerMigration("v7_settings_extended") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "kcal_goal", .double)
+                table.add(column: "protein_goal_grams", .double)
+                table.add(column: "fat_goal_grams", .double)
+                table.add(column: "carbs_goal_grams", .double)
+                table.add(column: "weight_goal_kg", .double)
+                table.add(column: "preferred_color_scheme", .integer)
+                table.add(column: "healthkit_read_enabled", .boolean).notNull().defaults(to: true)
+                table.add(column: "healthkit_write_enabled", .boolean).notNull().defaults(to: false)
+                table.add(column: "enable_animations", .boolean).notNull().defaults(to: true)
+                table.add(column: "macro_goal_source", .text).notNull().defaults(to: "automatic")
+                table.add(column: "recipe_service_base_url", .text)
+            }
+        }
+
         return migrator
     }
 }

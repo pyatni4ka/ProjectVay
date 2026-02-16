@@ -60,6 +60,57 @@ final class BarcodeLookupServiceTests: XCTestCase {
         XCTAssertEqual(inventory.createdProducts.count, 1)
     }
 
+    func testResolveUsesParallelFirstHitAndPrefersFastProvider() async {
+        let inventory = MockInventoryService(productsByBarcode: [:])
+        let slowProvider = DelayedSuccessProvider(
+            providerID: "slow_provider",
+            delayNanoseconds: 700_000_000,
+            payload: BarcodeLookupPayload(
+                barcode: "4601234567890",
+                name: "Медленный",
+                brand: nil,
+                category: "Продукты",
+                nutrition: .empty
+            )
+        )
+        let fastProvider = DelayedSuccessProvider(
+            providerID: "fast_provider",
+            delayNanoseconds: 10_000_000,
+            payload: BarcodeLookupPayload(
+                barcode: "4601234567890",
+                name: "Быстрый",
+                brand: nil,
+                category: "Продукты",
+                nutrition: .empty
+            )
+        )
+
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [slowProvider, fastProvider],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 2.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 60
+            )
+        )
+
+        let result = await service.resolve(rawCode: "4601234567890")
+
+        guard case .created(let product, _, _, let providerID) = result else {
+            XCTFail("Expected created resolution")
+            return
+        }
+
+        XCTAssertEqual(providerID, "fast_provider")
+        XCTAssertEqual(product.name, "Быстрый")
+    }
+
     func testResolveInternalCodeByMapping() async {
         let mappedProduct = Product(
             barcode: nil,
@@ -199,7 +250,7 @@ final class BarcodeLookupServiceTests: XCTestCase {
         XCTAssertEqual(weight, 350)
     }
 
-    func testResolveUsesNegativeCacheForRepeatedNotFoundBarcode() async {
+    func testResolveUsesNegativeCacheForRepeatedNotFoundBarcodeInWriteOffMode() async {
         let inventory = MockInventoryService(productsByBarcode: [:])
         let nilProvider = AlwaysNilProvider(providerID: "nil_provider")
 
@@ -218,8 +269,8 @@ final class BarcodeLookupServiceTests: XCTestCase {
             )
         )
 
-        let first = await service.resolve(rawCode: "4601234567890")
-        let second = await service.resolve(rawCode: "4601234567890")
+        let first = await service.resolve(rawCode: "4601234567890", allowCreate: false)
+        let second = await service.resolve(rawCode: "4601234567890", allowCreate: false)
 
         guard case .notFound = first else {
             XCTFail("Expected notFound for first lookup")
@@ -231,6 +282,103 @@ final class BarcodeLookupServiceTests: XCTestCase {
             return
         }
 
+        let calls = await nilProvider.callCount()
+        XCTAssertEqual(calls, 0)
+    }
+
+    func testResolveCreatesAutoTemplateWhenProvidersMissInAddMode() async {
+        let inventory = MockInventoryService(productsByBarcode: [:])
+        let nilProvider = AlwaysNilProvider(providerID: "nil_provider")
+
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [nilProvider],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 1.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 60
+            )
+        )
+
+        let result = await service.resolve(rawCode: "4601234567890", allowCreate: true)
+
+        guard case .created(let product, _, _, let providerID) = result else {
+            XCTFail("Expected auto-template creation")
+            return
+        }
+
+        XCTAssertEqual(providerID, "auto_template")
+        XCTAssertEqual(product.barcode, "4601234567890")
+        XCTAssertEqual(product.name, "Товар 4601234567890")
+    }
+
+    func testResolveKeepsNotFoundInWriteOffModeWhenProvidersMiss() async {
+        let inventory = MockInventoryService(productsByBarcode: [:])
+        let nilProvider = AlwaysNilProvider(providerID: "nil_provider")
+
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [nilProvider],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 1.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 60
+            )
+        )
+
+        let result = await service.resolve(rawCode: "4601234567890", allowCreate: false)
+
+        guard case .notFound(let barcode, _, _, _) = result else {
+            XCTFail("Expected notFound resolution")
+            return
+        }
+
+        XCTAssertEqual(barcode, "4601234567890")
+    }
+
+    func testResolveIgnoreNegativeCacheInAddModeAndCreatesTemplate() async {
+        let inventory = MockInventoryService(productsByBarcode: [:])
+        let nilProvider = AlwaysNilProvider(providerID: "nil_provider")
+
+        let service = BarcodeLookupService(
+            inventoryService: inventory,
+            scannerService: ScannerService(),
+            providers: [nilProvider],
+            policy: BarcodeLookupPolicy(
+                timeoutSeconds: 1.0,
+                maxAttempts: 1,
+                retryDelayMilliseconds: 0,
+                providerCooldownMilliseconds: 0,
+                circuitBreakerFailureThreshold: 3,
+                circuitBreakerCooldownSeconds: 60,
+                negativeCacheSeconds: 300
+            )
+        )
+
+        let writeOffResult = await service.resolve(rawCode: "4601234567890", allowCreate: false)
+        guard case .notFound = writeOffResult else {
+            XCTFail("Expected notFound in write-off mode")
+            return
+        }
+
+        let addModeResult = await service.resolve(rawCode: "4601234567890", allowCreate: true)
+        guard case .created(let product, _, _, let providerID) = addModeResult else {
+            XCTFail("Expected auto-template creation in add mode")
+            return
+        }
+
+        XCTAssertEqual(providerID, "auto_template")
+        XCTAssertEqual(product.name, "Товар 4601234567890")
         let calls = await nilProvider.callCount()
         XCTAssertEqual(calls, 1)
     }
@@ -432,6 +580,29 @@ private final actor DynamicSuccessProvider: BarcodeLookupProvider {
             category: "Продукты",
             nutrition: .empty
         )
+    }
+
+    func callCount() -> Int {
+        calls
+    }
+}
+
+private final actor DelayedSuccessProvider: BarcodeLookupProvider {
+    let providerID: String
+    private let delayNanoseconds: UInt64
+    private let payload: BarcodeLookupPayload
+    private(set) var calls: Int = 0
+
+    init(providerID: String, delayNanoseconds: UInt64, payload: BarcodeLookupPayload) {
+        self.providerID = providerID
+        self.delayNanoseconds = delayNanoseconds
+        self.payload = payload
+    }
+
+    func lookup(barcode: String) async throws -> BarcodeLookupPayload? {
+        calls += 1
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        return payload
     }
 
     func callCount() -> Int {

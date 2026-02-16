@@ -1,6 +1,20 @@
 import Charts
 import SwiftUI
 
+private enum ProgressChartAnimationScope {
+    case element
+}
+
+private extension View {
+    @ViewBuilder
+    func chartAnimate(by scope: ProgressChartAnimationScope) -> some View {
+        switch scope {
+        case .element:
+            self.transition(.opacity.combined(with: .scale(scale: 0.98)))
+        }
+    }
+}
+
 struct ProgressTrackingView: View {
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
@@ -29,6 +43,7 @@ struct ProgressTrackingView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: VaySpacing.xl) {
+                progressHeaderSection
                 periodPicker
 
                 if isLoading {
@@ -41,6 +56,7 @@ struct ProgressTrackingView: View {
                         subtitle: "Добавляйте продукты и операции, чтобы видеть динамику расходов, потерь и потребления."
                     )
                 } else {
+                    summaryOverviewCard
                     nutritionGoalsCard
                     inventoryTrendCard
                     consumptionStatsCard
@@ -61,6 +77,39 @@ struct ProgressTrackingView: View {
         .refreshable {
             await loadData()
         }
+    }
+
+    private var progressHeaderSection: some View {
+        HStack(alignment: .top, spacing: VaySpacing.md) {
+            ZStack {
+                RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [.vayInfo.opacity(0.2), .vayPrimary.opacity(0.18)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+
+                Image(systemName: "chart.line.uptrend.xyaxis.circle.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Color.vayInfo)
+            }
+
+            VStack(alignment: .leading, spacing: VaySpacing.xs) {
+                Text("Аналитика запасов")
+                    .font(VayFont.heading(19))
+                Text("Следите за расходом, списаниями и динамикой категорий за выбранный период.")
+                    .font(VayFont.body(14))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .vayCard()
+        .vayAccessibilityLabel("Аналитика запасов: расход, списания и динамика категорий")
     }
 
     private var periodPicker: some View {
@@ -90,6 +139,69 @@ struct ProgressTrackingView: View {
         .vayAccessibilityLabel("Период статистики: \(selectedPeriod.title)")
     }
 
+    private var summaryOverviewCard: some View {
+        let addEvents = filteredEvents.filter { $0.type == .add }
+        let writeOffEvents = filteredEvents.filter { $0.type == .remove && ($0.reason == .expired || $0.reason == .writeOff) }
+        let totalSpendingMinor = filteredPriceEntries.reduce(Int64.zero) { $0 + $1.price.asMinorUnits }
+        let writeOffMinor = lossTotalMinor(events: writeOffEvents)
+        let addedMinor = lossTotalMinor(events: addEvents)
+        let addedValueText = addedMinor > 0 ? rubText(fromMinor: addedMinor) : "\(addEvents.count)"
+        let addedCaption = addedMinor > 0 ? "оценка пополнения" : "операций добавления"
+
+        return VStack(alignment: .leading, spacing: VaySpacing.md) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "sparkles.rectangle.stack.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.vayPrimary)
+                Text("Итоги периода")
+                    .font(VayFont.heading(16))
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: VaySpacing.sm) {
+                summaryMetric(
+                    title: "Потрачено",
+                    value: rubText(fromMinor: totalSpendingMinor),
+                    caption: "по чекам и ценам",
+                    color: .vayWarning,
+                    icon: "rublesign.circle.fill"
+                )
+
+                summaryMetric(
+                    title: "Списано",
+                    value: rubText(fromMinor: writeOffMinor),
+                    caption: "просрочка и write-off",
+                    color: .vayDanger,
+                    icon: "trash.slash.fill"
+                )
+
+                summaryMetric(
+                    title: "Добавлено",
+                    value: addedValueText,
+                    caption: addedCaption,
+                    color: .vaySuccess,
+                    icon: "plus.circle.fill"
+                )
+            }
+        }
+        .padding(VaySpacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: VayRadius.xl, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.vayPrimaryLight, .vayInfo.opacity(0.1), .vayAccent.opacity(0.12)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: VayRadius.xl, style: .continuous)
+                .stroke(Color.vayPrimary.opacity(0.12), lineWidth: 1)
+        )
+        .vayShadow(.card)
+        .vayAccessibilityLabel("Итоги периода: потрачено \(rubText(fromMinor: totalSpendingMinor)), списано \(rubText(fromMinor: writeOffMinor)), добавлено \(addedValueText)")
+    }
+
     private var nutritionGoalsCard: some View {
         VStack(alignment: .leading, spacing: VaySpacing.md) {
             HStack(spacing: VaySpacing.sm) {
@@ -117,7 +229,9 @@ struct ProgressTrackingView: View {
     }
 
     private var inventoryTrendCard: some View {
-        VStack(alignment: .leading, spacing: VaySpacing.md) {
+        let averageCount = averageInventoryCount
+
+        return VStack(alignment: .leading, spacing: VaySpacing.md) {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .foregroundStyle(Color.vayInfo)
@@ -130,14 +244,32 @@ struct ProgressTrackingView: View {
                     .foregroundStyle(.tertiary)
             }
 
+            Text("Кривая показывает динамику количества товаров, пунктир — среднее значение за период.")
+                .font(VayFont.caption(11))
+                .foregroundStyle(.secondary)
+
             if inventoryChartData.count >= 2 {
                 Chart(inventoryChartData, id: \.date) { point in
                     LineMark(
                         x: .value("Дата", point.date),
                         y: .value("Количество", point.count)
                     )
-                    .foregroundStyle(Color.vayInfo)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.vayInfo, .vayPrimary],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
                     .interpolationMethod(.catmullRom)
+                    .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+
+                    PointMark(
+                        x: .value("Дата", point.date),
+                        y: .value("Количество", point.count)
+                    )
+                    .foregroundStyle(Color.vayInfo)
+                    .symbolSize(48)
 
                     AreaMark(
                         x: .value("Дата", point.date),
@@ -145,12 +277,27 @@ struct ProgressTrackingView: View {
                     )
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [.vayInfo.opacity(0.2), .clear],
+                            colors: [.vayInfo.opacity(0.28), .vayPrimary.opacity(0.12), .clear],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                     )
                     .interpolationMethod(.catmullRom)
+
+                    if averageCount > 0 {
+                        RuleMark(y: .value("Среднее", averageCount))
+                            .foregroundStyle(Color.vayInfo.opacity(0.75))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                            .annotation(position: .top, alignment: .leading) {
+                                Text("Среднее \(averageCount.formatted(.number.precision(.fractionLength(1))))")
+                                    .font(VayFont.caption(9))
+                                    .foregroundStyle(Color.vayInfo)
+                                    .padding(.horizontal, VaySpacing.xs)
+                                    .padding(.vertical, VaySpacing.xxs)
+                                    .background(Color.vayInfo.opacity(0.08))
+                                    .clipShape(Capsule())
+                            }
+                    }
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading) { _ in
@@ -164,7 +311,17 @@ struct ProgressTrackingView: View {
                             .font(VayFont.caption(9))
                     }
                 }
+                .chartPlotStyle { plotArea in
+                    plotArea
+                        .background(
+                            RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous)
+                                .fill(Color.vayInfo.opacity(0.06))
+                        )
+                }
                 .frame(height: 160)
+                .chartAnimate(by: .element)
+                .id(selectedPeriod)
+                .animation(VayAnimation.springSmooth, value: selectedPeriod)
                 .vayAccessibilityLabel("График динамики инвентаря")
             } else {
                 Text("Недостаточно данных для графика")
@@ -177,7 +334,10 @@ struct ProgressTrackingView: View {
     }
 
     private var consumptionStatsCard: some View {
-        VStack(alignment: .leading, spacing: VaySpacing.md) {
+        let averageAdded = averageDailyAdded
+        let averageRemoved = averageDailyRemoved
+
+        return VStack(alignment: .leading, spacing: VaySpacing.md) {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "arrow.down.circle.fill")
                     .foregroundStyle(Color.vayDanger)
@@ -214,15 +374,39 @@ struct ProgressTrackingView: View {
                         x: .value("Дата", point.date, unit: .day),
                         y: .value("Добавлено", point.added)
                     )
-                    .foregroundStyle(Color.vaySuccess.opacity(0.7))
-                    .cornerRadius(4)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.vaySuccess, .vayPrimary],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .cornerRadius(8)
 
                     BarMark(
                         x: .value("Дата", point.date, unit: .day),
                         y: .value("Списано", -point.removed)
                     )
-                    .foregroundStyle(Color.vayDanger.opacity(0.7))
-                    .cornerRadius(4)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.vayDanger, .vayWarning],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .cornerRadius(8)
+
+                    if averageAdded > 0 {
+                        RuleMark(y: .value("Среднее добавлено", averageAdded))
+                            .foregroundStyle(Color.vaySuccess.opacity(0.75))
+                            .lineStyle(StrokeStyle(lineWidth: 1.25, dash: [4, 4]))
+                    }
+
+                    if averageRemoved > 0 {
+                        RuleMark(y: .value("Среднее списано", -averageRemoved))
+                            .foregroundStyle(Color.vayDanger.opacity(0.75))
+                            .lineStyle(StrokeStyle(lineWidth: 1.25, dash: [4, 4]))
+                    }
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading) { _ in
@@ -236,7 +420,17 @@ struct ProgressTrackingView: View {
                             .font(VayFont.caption(9))
                     }
                 }
+                .chartPlotStyle { plotArea in
+                    plotArea
+                        .background(
+                            RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous)
+                                .fill(Color.vayPrimary.opacity(0.06))
+                        )
+                }
                 .frame(height: 140)
+                .chartAnimate(by: .element)
+                .id(selectedPeriod)
+                .animation(VayAnimation.springSmooth, value: selectedPeriod)
                 .vayAccessibilityLabel("График расхода и пополнения")
             }
         }
@@ -248,6 +442,7 @@ struct ProgressTrackingView: View {
         let writeOffEvents = filteredEvents.filter { $0.type == .remove && $0.reason == .writeOff }
         let consumedEvents = filteredEvents.filter { $0.type == .remove && $0.reason == .consumed }
         let totalLossMinor = lossTotalMinor(events: expiredEvents + writeOffEvents)
+        let averageLoss = averageWasteLoss
 
         return VStack(alignment: .leading, spacing: VaySpacing.md) {
             HStack(spacing: VaySpacing.sm) {
@@ -293,8 +488,22 @@ struct ProgressTrackingView: View {
                         x: .value("Дата", point.date),
                         y: .value("Потери", point.lossRub)
                     )
-                    .foregroundStyle(Color.vayDanger)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.vayDanger, .vayWarning],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
                     .interpolationMethod(.catmullRom)
+                    .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+
+                    PointMark(
+                        x: .value("Дата", point.date),
+                        y: .value("Потери", point.lossRub)
+                    )
+                    .foregroundStyle(Color.vayDanger)
+                    .symbolSize(42)
 
                     AreaMark(
                         x: .value("Дата", point.date),
@@ -302,11 +511,17 @@ struct ProgressTrackingView: View {
                     )
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [.vayDanger.opacity(0.25), .clear],
+                            colors: [.vayDanger.opacity(0.3), .vayWarning.opacity(0.14), .clear],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                     )
+
+                    if averageLoss > 0 {
+                        RuleMark(y: .value("Средние потери", averageLoss))
+                            .foregroundStyle(Color.vayDanger.opacity(0.75))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    }
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading) { _ in
@@ -320,7 +535,17 @@ struct ProgressTrackingView: View {
                             .font(VayFont.caption(9))
                     }
                 }
+                .chartPlotStyle { plotArea in
+                    plotArea
+                        .background(
+                            RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous)
+                                .fill(Color.vayDanger.opacity(0.06))
+                        )
+                }
                 .frame(height: 140)
+                .chartAnimate(by: .element)
+                .id(selectedPeriod)
+                .animation(VayAnimation.springSmooth, value: selectedPeriod)
                 .vayAccessibilityLabel("График потерь в рублях")
             }
         }
@@ -375,21 +600,35 @@ struct ProgressTrackingView: View {
 
             if categories.count >= 2 {
                 Chart(categories, id: \.category) { item in
+                    let style = categoryStyle(for: item.category)
                     SectorMark(
                         angle: .value("Количество", item.count),
                         innerRadius: .ratio(0.6),
                         angularInset: 2
                     )
-                    .foregroundStyle(by: .value("Категория", item.category))
-                    .cornerRadius(4)
+                    .foregroundStyle(style.color.gradient)
+                    .cornerRadius(6)
                 }
-                .chartLegend(position: .bottom)
+                .chartLegend(.hidden)
                 .frame(height: 180)
+                .chartAnimate(by: .element)
+                .id(selectedPeriod)
+                .animation(VayAnimation.springSmooth, value: selectedPeriod)
                 .vayAccessibilityLabel("Диаграмма категорий продуктов")
             }
 
             ForEach(categories.prefix(6), id: \.category) { item in
-                HStack {
+                let style = categoryStyle(for: item.category)
+                HStack(spacing: VaySpacing.sm) {
+                    ZStack {
+                        Circle()
+                            .fill(style.color.opacity(0.14))
+                            .frame(width: 24, height: 24)
+                        Image(systemName: style.icon)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(style.color)
+                    }
+
                     Text(item.category)
                         .font(VayFont.body(14))
                     Spacer()
@@ -400,6 +639,33 @@ struct ProgressTrackingView: View {
             }
         }
         .vayCard()
+    }
+
+    private func summaryMetric(title: String, value: String, caption: String, color: Color, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.xs) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(color)
+
+            Text(value)
+                .font(VayFont.title(22))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Text(title)
+                .font(VayFont.label(12))
+
+            Text(caption)
+                .font(VayFont.caption(10))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(VaySpacing.md)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
     }
 
     private func wasteMiniCard(icon: String, title: String, count: Int, amountMinor: Int64, color: Color) -> some View {
@@ -462,8 +728,13 @@ struct ProgressTrackingView: View {
         let lossRub: Double
     }
 
+    private struct CategoryVisual {
+        let icon: String
+        let color: Color
+    }
+
     private var inventoryChartData: [ChartPoint] {
-        let grouped = Dictionary(grouping: events) { event in
+        let grouped = Dictionary(grouping: filteredEvents) { event in
             Calendar.current.startOfDay(for: event.timestamp)
         }
 
@@ -508,6 +779,38 @@ struct ProgressTrackingView: View {
             let totalMinor = lossTotalMinor(events: dayEvents)
             return WastePoint(date: date, lossRub: Double(totalMinor) / 100)
         }
+    }
+
+    private var averageInventoryCount: Double {
+        guard !inventoryChartData.isEmpty else {
+            return 0
+        }
+        let total = inventoryChartData.reduce(0) { $0 + Double($1.count) }
+        return total / Double(inventoryChartData.count)
+    }
+
+    private var averageDailyAdded: Double {
+        guard !activityChartData.isEmpty else {
+            return 0
+        }
+        let total = activityChartData.reduce(0) { $0 + Double($1.added) }
+        return total / Double(activityChartData.count)
+    }
+
+    private var averageDailyRemoved: Double {
+        guard !activityChartData.isEmpty else {
+            return 0
+        }
+        let total = activityChartData.reduce(0) { $0 + Double($1.removed) }
+        return total / Double(activityChartData.count)
+    }
+
+    private var averageWasteLoss: Double {
+        guard !wasteChartData.isEmpty else {
+            return 0
+        }
+        let total = wasteChartData.reduce(0) { $0 + $1.lossRub }
+        return total / Double(wasteChartData.count)
     }
 
     private var filteredEvents: [InventoryEvent] {
@@ -560,6 +863,35 @@ struct ProgressTrackingView: View {
     private func rubText(fromMinor minor: Int64) -> String {
         let value = Double(minor) / 100
         return "\(value.formatted(.number.precision(.fractionLength(0)))) ₽"
+    }
+
+    private func categoryStyle(for category: String) -> CategoryVisual {
+        let lower = category.lowercased()
+        if lower.contains("мясо") || lower.contains("птиц") || lower.contains("рыб") {
+            return CategoryVisual(icon: "fish", color: .vayInfo)
+        }
+        if lower.contains("молоч") || lower.contains("сыр") {
+            return CategoryVisual(icon: "cup.and.saucer.fill", color: .vaySecondary)
+        }
+        if lower.contains("овощ") || lower.contains("фрукт") {
+            return CategoryVisual(icon: "carrot.fill", color: .vaySuccess)
+        }
+        if lower.contains("круп") || lower.contains("макарон") || lower.contains("хлеб") {
+            return CategoryVisual(icon: "basket.fill", color: .vayWarning)
+        }
+        if lower.contains("напит") {
+            return CategoryVisual(icon: "waterbottle.fill", color: .vayInfo)
+        }
+        if lower.contains("заморож") {
+            return CategoryVisual(icon: "snowflake", color: .vayFreezer)
+        }
+        if lower.contains("конс") {
+            return CategoryVisual(icon: "takeoutbag.and.cup.and.straw.fill", color: .vayAccent)
+        }
+        if lower.contains("специ") || lower.contains("соус") {
+            return CategoryVisual(icon: "flame.fill", color: .vayCalories)
+        }
+        return CategoryVisual(icon: "fork.knife.circle.fill", color: .vayPrimary)
     }
 
     private func loadData() async {

@@ -18,14 +18,17 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var dinnerMinute: Int
     var strictMacroTracking: Bool
     var macroTolerancePercent: Double
-    var bodyMetricsRangeMode: String
-    var bodyMetricsRangeMonths: Int
-    var bodyMetricsRangeYear: Int
-    var aiPersonalizationEnabled: Bool
-    var aiCloudAssistEnabled: Bool
-    var aiRuOnlyStorage: Bool
-    var aiDataConsentAcceptedAt: Date?
-    var aiDataCollectionMode: String
+    var macroGoalSource: String
+    var kcalGoal: Double?
+    var proteinGoalGrams: Double?
+    var fatGoalGrams: Double?
+    var carbsGoalGrams: Double?
+    var weightGoalKg: Double?
+    var preferredColorScheme: Int?
+    var healthKitReadEnabled: Bool
+    var healthKitWriteEnabled: Bool
+    var enableAnimations: Bool
+    var recipeServiceBaseURL: String?
     var onboardingCompleted: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -43,14 +46,17 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case dinnerMinute = "dinner_minute"
         case strictMacroTracking = "strict_macro_tracking"
         case macroTolerancePercent = "macro_tolerance_percent"
-        case bodyMetricsRangeMode = "body_metrics_range_mode"
-        case bodyMetricsRangeMonths = "body_metrics_range_months"
-        case bodyMetricsRangeYear = "body_metrics_range_year"
-        case aiPersonalizationEnabled = "ai_personalization_enabled"
-        case aiCloudAssistEnabled = "ai_cloud_assist_enabled"
-        case aiRuOnlyStorage = "ai_ru_only_storage"
-        case aiDataConsentAcceptedAt = "ai_data_consent_accepted_at"
-        case aiDataCollectionMode = "ai_data_collection_mode"
+        case macroGoalSource = "macro_goal_source"
+        case kcalGoal = "kcal_goal"
+        case proteinGoalGrams = "protein_goal_grams"
+        case fatGoalGrams = "fat_goal_grams"
+        case carbsGoalGrams = "carbs_goal_grams"
+        case weightGoalKg = "weight_goal_kg"
+        case preferredColorScheme = "preferred_color_scheme"
+        case healthKitReadEnabled = "healthkit_read_enabled"
+        case healthKitWriteEnabled = "healthkit_write_enabled"
+        case enableAnimations = "enable_animations"
+        case recipeServiceBaseURL = "recipe_service_base_url"
         case onboardingCompleted = "onboarding_completed"
     }
 }
@@ -74,14 +80,17 @@ extension AppSettingsRecord {
         dinnerMinute = normalized.mealSchedule.dinnerMinute
         strictMacroTracking = normalized.strictMacroTracking
         macroTolerancePercent = normalized.macroTolerancePercent
-        bodyMetricsRangeMode = normalized.bodyMetricsRangeMode.rawValue
-        bodyMetricsRangeMonths = normalized.bodyMetricsRangeMonths
-        bodyMetricsRangeYear = normalized.bodyMetricsRangeYear
-        aiPersonalizationEnabled = normalized.aiPersonalizationEnabled
-        aiCloudAssistEnabled = normalized.aiCloudAssistEnabled
-        aiRuOnlyStorage = normalized.aiRuOnlyStorage
-        aiDataConsentAcceptedAt = normalized.aiDataConsentAcceptedAt
-        aiDataCollectionMode = normalized.aiDataCollectionMode.rawValue
+        macroGoalSource = normalized.macroGoalSource.rawValue
+        kcalGoal = normalized.kcalGoal
+        proteinGoalGrams = normalized.proteinGoalGrams
+        fatGoalGrams = normalized.fatGoalGrams
+        carbsGoalGrams = normalized.carbsGoalGrams
+        weightGoalKg = normalized.weightGoalKg
+        preferredColorScheme = normalized.preferredColorScheme
+        healthKitReadEnabled = normalized.healthKitReadEnabled
+        healthKitWriteEnabled = normalized.healthKitWriteEnabled
+        enableAnimations = normalized.enableAnimations
+        recipeServiceBaseURL = normalized.recipeServiceBaseURLOverride
         self.onboardingCompleted = onboardingCompleted
     }
 
@@ -90,8 +99,7 @@ extension AppSettingsRecord {
         let parsedStoresRaw = (try? Self.decodeJSON([String].self, from: storesJSON)) ?? AppSettings.default.stores.map(\.rawValue)
         let parsedStores = parsedStoresRaw.compactMap(Store.init(rawValue:))
         let parsedDisliked = (try? Self.decodeJSON([String].self, from: dislikedListJSON)) ?? AppSettings.default.dislikedList
-        let parsedRangeMode = AppSettings.BodyMetricsRangeMode(rawValue: bodyMetricsRangeMode) ?? .lastMonths
-        let parsedDataCollectionMode = AppSettings.AIDataCollectionMode(rawValue: aiDataCollectionMode) ?? .maximal
+        let parsedMacroGoalSource = AppSettings.MacroGoalSource(rawValue: macroGoalSource) ?? .automatic
 
         return AppSettings(
             quietStartMinute: quietStartMinute,
@@ -109,14 +117,17 @@ extension AppSettingsRecord {
             ),
             strictMacroTracking: strictMacroTracking,
             macroTolerancePercent: macroTolerancePercent,
-            bodyMetricsRangeMode: parsedRangeMode,
-            bodyMetricsRangeMonths: bodyMetricsRangeMonths,
-            bodyMetricsRangeYear: bodyMetricsRangeYear,
-            aiPersonalizationEnabled: aiPersonalizationEnabled,
-            aiCloudAssistEnabled: aiCloudAssistEnabled,
-            aiRuOnlyStorage: aiRuOnlyStorage,
-            aiDataConsentAcceptedAt: aiDataConsentAcceptedAt,
-            aiDataCollectionMode: parsedDataCollectionMode
+            macroGoalSource: parsedMacroGoalSource,
+            kcalGoal: kcalGoal,
+            proteinGoalGrams: proteinGoalGrams,
+            fatGoalGrams: fatGoalGrams,
+            carbsGoalGrams: carbsGoalGrams,
+            weightGoalKg: weightGoalKg,
+            preferredColorScheme: preferredColorScheme,
+            healthKitReadEnabled: healthKitReadEnabled,
+            healthKitWriteEnabled: healthKitWriteEnabled,
+            enableAnimations: enableAnimations,
+            recipeServiceBaseURLOverride: recipeServiceBaseURL
         ).normalized()
     }
 

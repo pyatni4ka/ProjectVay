@@ -40,8 +40,6 @@ final class NotificationScheduler: NotificationScheduling, @unchecked Sendable {
             content.sound = .default
             // Группировка уведомлений
             content.threadIdentifier = "expiry-alerts"
-            content.summaryArgument = product.name
-            content.summaryArgumentCount = 1
             // Actionable notification с кнопками
             content.categoryIdentifier = "EXPIRY_ALERT"
             content.userInfo = [

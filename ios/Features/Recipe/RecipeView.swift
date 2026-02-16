@@ -46,7 +46,7 @@ struct RecipeView: View {
                     statusBanner(statusText)
                 }
 
-                Color.clear.frame(height: VaySpacing.xxl)
+
             }
             .padding(.horizontal, VaySpacing.lg)
             .padding(.top, VaySpacing.md)

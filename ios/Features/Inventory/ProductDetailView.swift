@@ -237,6 +237,12 @@ struct ProductDetailView: View {
                         .font(VayFont.label())
                     }
                 }
+
+                // Bottom spacer so tab bar doesn't obscure content
+                Section {
+                    Color.clear.frame(height: 60)
+                        .listRowBackground(Color.clear)
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -273,11 +279,11 @@ struct ProductDetailView: View {
         .task {
             await loadData()
         }
-        .confirmationDialog(
+        .alert(
             "Удалить товар?",
             isPresented: $showDeleteProductConfirm
         ) {
-            Button("Удалить навсегда", role: .destructive) {
+            Button("Удалить", role: .destructive) {
                 Task { await deleteProduct() }
             }
             Button("Отмена", role: .cancel) { }

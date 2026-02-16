@@ -2,6 +2,7 @@ name: InventoryAI
 options:
   createIntermediateGroups: true
   minimumXcodeGenVersion: 2.38.0
+  xcodeVersion: "26.2"
 
 settings:
   base:
@@ -33,6 +34,7 @@ targets:
       - path: Services
       - path: Shared
       - path: UseCases
+      - path: Assets.xcassets
     dependencies:
       - package: GRDB
         product: GRDB
@@ -50,6 +52,7 @@ targets:
         INFOPLIST_KEY_NSHealthShareUsageDescription: Нужно для чтения веса, жира и КБЖУ из Apple Health.
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: Нужно для синхронизации данных питания и прогресса.
         INFOPLIST_KEY_NSCameraUsageDescription: Камера нужна для сканирования штрихкодов и DataMatrix.
+        INFOPLIST_KEY_NSSiriUsageDescription: "Siri поможет быстро добавлять продукты и проверять сроки годности."
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
         INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_localhost_NSExceptionAllowsInsecureHTTPLoads: YES
         INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_localhost_NSIncludesSubdomains: YES
@@ -57,10 +60,15 @@ targets:
         INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_127.0.0.1_NSIncludesSubdomains: YES
         INFOPLIST_KEY_RecipeServiceBaseURL: "http://127.0.0.1:8080"
         INFOPLIST_KEY_AllowInsecureRecipeServiceURL: YES
+        INFOPLIST_KEY_AllowInsecureLookupEndpoints: YES
+        INFOPLIST_KEY_BarcodeProxyBaseURL: "http://127.0.0.1:8080/api/v1"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         SUPPORTS_MACCATALYST: NO
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
       configs:
         Debug:
           CODE_SIGN_ENTITLEMENTS: App/InventoryAI.entitlements

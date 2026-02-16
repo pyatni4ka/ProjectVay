@@ -107,3 +107,24 @@ final class ScannerService {
         return Double(digits.suffix(3))
     }
 }
+
+struct ScannerOneShotGate {
+    private(set) var lockedCode: String?
+
+    var isLocked: Bool {
+        lockedCode != nil
+    }
+
+    mutating func capture(_ rawCode: String) -> String? {
+        let normalized = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        guard lockedCode == nil else { return nil }
+
+        lockedCode = normalized
+        return normalized
+    }
+
+    mutating func reset() {
+        lockedCode = nil
+    }
+}

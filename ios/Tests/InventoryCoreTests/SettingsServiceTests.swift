@@ -242,12 +242,8 @@ final class SettingsServiceTests: XCTestCase {
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(legacyJSON.utf8))
         XCTAssertTrue(settings.strictMacroTracking)
         XCTAssertEqual(settings.macroTolerancePercent, 25)
-        XCTAssertEqual(settings.bodyMetricsRangeMode, .lastMonths)
-        XCTAssertEqual(settings.bodyMetricsRangeMonths, 12)
-        XCTAssertTrue(settings.aiPersonalizationEnabled)
-        XCTAssertTrue(settings.aiCloudAssistEnabled)
-        XCTAssertTrue(settings.aiRuOnlyStorage)
-        XCTAssertEqual(settings.aiDataCollectionMode, .maximal)
+        XCTAssertEqual(settings.macroGoalSource, .automatic)
+        XCTAssertNil(settings.recipeServiceBaseURLOverride)
     }
 
     func testSettingsNormalizationClampsMacroTolerance() {
@@ -268,42 +264,50 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(settings.macroTolerancePercent, 5)
     }
 
-    func testDecodeSettingsWithInvalidModeRawValuesFallsBackToDefaults() throws {
-        let json = """
-        {
-          "quietStartMinute": 60,
-          "quietEndMinute": 360,
-          "expiryAlertsDays": [5,3,1],
-          "budgetDay": 800,
-          "budgetWeek": null,
-          "stores": ["pyaterochka","yandexLavka"],
-          "dislikedList": ["кускус"],
-          "avoidBones": true,
-          "mealSchedule": {
-            "breakfastMinute": 480,
-            "lunchMinute": 780,
-            "dinnerMinute": 1140
-          },
-          "strictMacroTracking": true,
-          "macroTolerancePercent": 25,
-          "bodyMetricsRangeMode": "invalid_mode",
-          "bodyMetricsRangeMonths": 120,
-          "bodyMetricsRangeYear": 1900,
-          "aiPersonalizationEnabled": true,
-          "aiCloudAssistEnabled": false,
-          "aiRuOnlyStorage": true,
-          "aiDataCollectionMode": "unknown_mode"
-        }
-        """
+    func testExtendedSettingsRoundtrip() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let settingsRepository = SettingsRepository(dbQueue: dbQueue)
+        let service = SettingsService(repository: settingsRepository)
 
-        let decoded = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8)).normalized()
-        let currentYear = Calendar.current.component(.year, from: Date())
+        let source = AppSettings(
+            quietStartMinute: 120,
+            quietEndMinute: 420,
+            expiryAlertsDays: [7, 3, 1],
+            budgetDay: 950,
+            budgetWeek: 5_500,
+            stores: [.auchan, .pyaterochka],
+            dislikedList: ["корица"],
+            avoidBones: false,
+            mealSchedule: .init(breakfastMinute: 9 * 60, lunchMinute: 14 * 60, dinnerMinute: 20 * 60),
+            strictMacroTracking: false,
+            macroTolerancePercent: 30,
+            macroGoalSource: .manual,
+            kcalGoal: 1800,
+            proteinGoalGrams: 135,
+            fatGoalGrams: 55,
+            carbsGoalGrams: 160,
+            weightGoalKg: 72,
+            preferredColorScheme: 2,
+            healthKitReadEnabled: false,
+            healthKitWriteEnabled: true,
+            enableAnimations: false,
+            recipeServiceBaseURLOverride: "http://192.168.0.15:8080"
+        )
 
-        XCTAssertEqual(decoded.bodyMetricsRangeMode, .lastMonths)
-        XCTAssertEqual(decoded.bodyMetricsRangeMonths, 60)
-        XCTAssertEqual(decoded.bodyMetricsRangeYear, currentYear >= 1970 ? currentYear : 1970)
-        XCTAssertEqual(decoded.aiDataCollectionMode, .maximal)
-        XCTAssertFalse(decoded.aiCloudAssistEnabled)
+        _ = try await service.saveSettings(source)
+        let loaded = try await service.loadSettings()
+
+        XCTAssertEqual(loaded.macroGoalSource, .manual)
+        XCTAssertEqual(loaded.kcalGoal, 1800)
+        XCTAssertEqual(loaded.proteinGoalGrams, 135)
+        XCTAssertEqual(loaded.fatGoalGrams, 55)
+        XCTAssertEqual(loaded.carbsGoalGrams, 160)
+        XCTAssertEqual(loaded.weightGoalKg, 72)
+        XCTAssertEqual(loaded.preferredColorScheme, 2)
+        XCTAssertFalse(loaded.healthKitReadEnabled)
+        XCTAssertTrue(loaded.healthKitWriteEnabled)
+        XCTAssertFalse(loaded.enableAnimations)
+        XCTAssertEqual(loaded.recipeServiceBaseURLOverride, "http://192.168.0.15:8080")
     }
 }
 

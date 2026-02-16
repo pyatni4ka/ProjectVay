@@ -79,7 +79,7 @@ final class BarcodeLookupService {
         allowCreate: Bool
     ) async -> ScanResolution {
         do {
-            if await runtimeGuard.isNegativeCached(barcode: barcode) {
+            if !allowCreate, await runtimeGuard.isNegativeCached(barcode: barcode) {
                 return .notFound(barcode: barcode, internalCode: nil, parsedWeightGrams: parsedWeightGrams, suggestedExpiry: suggestedExpiry)
             }
 
@@ -98,22 +98,10 @@ final class BarcodeLookupService {
                 )
             }
 
-            for provider in providers {
-                guard await runtimeGuard.canQueryProvider(
-                    providerID: provider.providerID,
-                    failureThreshold: policy.circuitBreakerFailureThreshold
-                ) else {
-                    continue
-                }
-
-                let lookupResult = await lookupWithRetry(provider: provider, barcode: barcode)
-
-                switch lookupResult {
-                case .hit(let payload):
-                    await runtimeGuard.markProviderSuccess(providerID: provider.providerID)
-                    await runtimeGuard.clearNegativeCache(barcode: barcode)
-
-                    let product = Product(
+            let providerResolution = await lookupProvidersParallelFirstHit(barcode: barcode)
+            if case .hit(let payload, let providerID) = providerResolution {
+                let creationResult = try await createOrLoadProduct(
+                    Product(
                         barcode: payload.barcode,
                         name: payload.name,
                         brand: payload.brand,
@@ -123,29 +111,76 @@ final class BarcodeLookupService {
                         disliked: false,
                         mayContainBones: false
                     )
+                )
 
-                    let saved = try await inventoryService.createProduct(product)
+                await runtimeGuard.clearNegativeCache(barcode: barcode)
+                switch creationResult {
+                case .created(let product):
                     return .created(
-                        product: saved,
+                        product: product,
                         suggestedExpiry: suggestedExpiry,
                         parsedWeightGrams: parsedWeightGrams,
-                        provider: provider.providerID
+                        provider: providerID
                     )
-                case .miss:
-                    await runtimeGuard.markProviderSuccess(providerID: provider.providerID)
-                    continue
-                case .failed:
-                    await runtimeGuard.markProviderFailure(
-                        providerID: provider.providerID,
-                        failureThreshold: policy.circuitBreakerFailureThreshold,
-                        cooldownSeconds: policy.circuitBreakerCooldownSeconds
-                    )
+                case .existing(let product):
+                    return .found(product: product, suggestedExpiry: suggestedExpiry, parsedWeightGrams: parsedWeightGrams)
                 }
             }
 
-            await runtimeGuard.saveNegativeCache(barcode: barcode, ttlSeconds: policy.negativeCacheSeconds)
-            return .notFound(barcode: barcode, internalCode: nil, parsedWeightGrams: parsedWeightGrams, suggestedExpiry: suggestedExpiry)
+            let templateResult = try await createOrLoadProduct(
+                Product(
+                    barcode: barcode,
+                    name: "Товар \(barcode)",
+                    brand: nil,
+                    category: "Продукты",
+                    defaultUnit: .pcs,
+                    nutrition: .empty,
+                    disliked: false,
+                    mayContainBones: false
+                )
+            )
+            await runtimeGuard.clearNegativeCache(barcode: barcode)
+
+            switch templateResult {
+            case .created(let product):
+                return .created(
+                    product: product,
+                    suggestedExpiry: suggestedExpiry,
+                    parsedWeightGrams: parsedWeightGrams,
+                    provider: "auto_template"
+                )
+            case .existing(let product):
+                return .found(product: product, suggestedExpiry: suggestedExpiry, parsedWeightGrams: parsedWeightGrams)
+            }
         } catch {
+            if allowCreate {
+                if let product = try? await inventoryService.findProduct(by: barcode) {
+                    return .found(product: product, suggestedExpiry: suggestedExpiry, parsedWeightGrams: parsedWeightGrams)
+                }
+
+                if let fallback = try? await inventoryService.createProduct(
+                    Product(
+                        barcode: barcode,
+                        name: "Товар \(barcode)",
+                        brand: nil,
+                        category: "Продукты",
+                        defaultUnit: .pcs,
+                        nutrition: .empty,
+                        disliked: false,
+                        mayContainBones: false
+                    )
+                ) {
+                    return .created(
+                        product: fallback,
+                        suggestedExpiry: suggestedExpiry,
+                        parsedWeightGrams: parsedWeightGrams,
+                        provider: "auto_template"
+                    )
+                }
+            } else {
+                await runtimeGuard.saveNegativeCache(barcode: barcode, ttlSeconds: policy.negativeCacheSeconds)
+            }
+
             return .notFound(barcode: barcode, internalCode: nil, parsedWeightGrams: parsedWeightGrams, suggestedExpiry: suggestedExpiry)
         }
     }
@@ -160,6 +195,78 @@ final class BarcodeLookupService {
             return .notFound(barcode: nil, internalCode: code, parsedWeightGrams: resolvedWeight, suggestedExpiry: nil)
         } catch {
             return .notFound(barcode: nil, internalCode: code, parsedWeightGrams: parsedWeightGrams, suggestedExpiry: nil)
+        }
+    }
+
+    private func lookupProvidersParallelFirstHit(barcode: String) async -> ProviderLookupAggregateResult {
+        var eligibleProviders: [any BarcodeLookupProvider] = []
+        for provider in providers {
+            guard await runtimeGuard.canQueryProvider(
+                providerID: provider.providerID,
+                failureThreshold: policy.circuitBreakerFailureThreshold
+            ) else {
+                continue
+            }
+            eligibleProviders.append(provider)
+        }
+
+        guard !eligibleProviders.isEmpty else {
+            return .miss
+        }
+
+        return await withTaskGroup(of: ProviderLookupTaskResult.self) { group in
+            for provider in eligibleProviders {
+                group.addTask { [self] in
+                    let result = await lookupWithRetry(provider: provider, barcode: barcode)
+                    switch result {
+                    case .hit(let payload):
+                        await runtimeGuard.markProviderSuccess(providerID: provider.providerID)
+                        return .hit(payload: payload, providerID: provider.providerID)
+                    case .miss:
+                        await runtimeGuard.markProviderSuccess(providerID: provider.providerID)
+                        return .miss(providerID: provider.providerID)
+                    case .failed:
+                        await runtimeGuard.markProviderFailure(
+                            providerID: provider.providerID,
+                            failureThreshold: policy.circuitBreakerFailureThreshold,
+                            cooldownSeconds: policy.circuitBreakerCooldownSeconds
+                        )
+                        return .failed(providerID: provider.providerID)
+                    case .cancelled:
+                        return .cancelled(providerID: provider.providerID)
+                    }
+                }
+            }
+
+            var hasFailure = false
+            while let taskResult = await group.next() {
+                switch taskResult {
+                case .hit(let payload, let providerID):
+                    group.cancelAll()
+                    return .hit(payload: payload, providerID: providerID)
+                case .failed:
+                    hasFailure = true
+                case .miss, .cancelled:
+                    continue
+                }
+            }
+
+            return hasFailure ? .failed : .miss
+        }
+    }
+
+    private func createOrLoadProduct(_ product: Product) async throws -> ProductCreationResult {
+        do {
+            let saved = try await inventoryService.createProduct(product)
+            return .created(saved)
+        } catch {
+            if
+                let barcode = product.barcode,
+                let existing = try await inventoryService.findProduct(by: barcode)
+            {
+                return .existing(existing)
+            }
+            throw error
         }
     }
 
@@ -183,6 +290,10 @@ final class BarcodeLookupService {
 
                 return hadTransportError ? .failed : .miss
             } catch {
+                if error is CancellationError {
+                    return .cancelled
+                }
+
                 hadTransportError = true
 
                 guard attempt < policy.maxAttempts else {
@@ -239,6 +350,25 @@ private enum ProviderLookupResult {
     case hit(BarcodeLookupPayload)
     case miss
     case failed
+    case cancelled
+}
+
+private enum ProviderLookupAggregateResult {
+    case hit(payload: BarcodeLookupPayload, providerID: String)
+    case miss
+    case failed
+}
+
+private enum ProviderLookupTaskResult {
+    case hit(payload: BarcodeLookupPayload, providerID: String)
+    case miss(providerID: String)
+    case failed(providerID: String)
+    case cancelled(providerID: String)
+}
+
+private enum ProductCreationResult {
+    case created(Product)
+    case existing(Product)
 }
 
 private actor LookupRuntimeGuard {

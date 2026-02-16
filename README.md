@@ -14,9 +14,10 @@
 - планирование/отмена/перепланирование уведомлений сроков.
 - автоматическое перепланирование уведомлений при изменении quiet hours/шаблона дней в настройках.
 - live-сканер через `VisionKit DataScannerViewController` (EAN-13/DataMatrix/internal);
-- lookup pipeline: локальная база -> провайдеры (`EAN-DB`, `RF proxy`, `Open Food Facts`) -> ручное создание;
+- lookup pipeline: локальная база -> бесплатные RU-источники (`barcode-list.ru`, `Open Food Facts`) -> автошаблон товара;
 - локальное маппирование внутренних кодов товара (`internal_code_mappings`) для повторных сканов.
 - hardening lookup: `negative cache`, `circuit breaker` для провайдеров, retry/timeout/cooldown policy и безопасная валидация endpoint'ов.
+- one-shot режим сканера: после первого чтения код фиксируется, поиск идёт в фоне и камеру можно сразу убрать.
 - backend `/recipes/fetch`: парсинг schema.org JSON-LD, whitelist доменов источников, кэш и индексация рецептов для `/recipes/search`.
 - backend persistent cache рецептов на SQLite (`node:sqlite`) + endpoint `/meal-plan/generate` (день/неделя, 3 приёма, shopping list, cost estimate).
 - сканер поддерживает отдельный режим `Списание` (быстрый сценарий `Быстро −1` по штрихкоду), включая явный запуск из инвентаря;
@@ -37,7 +38,7 @@
 
 ## Ограничения текущего этапа
 
-- `EAN-DB` и RF-провайдер подключены как опциональные (нужны реальные ключи/endpoint);
+- `EAN-DB` и RF-провайдер подключены как опциональные (по умолчанию выключены, включаются через env/Info.plist);
 - whitelist источников рецептов нужно актуализировать под production-домены;
 - iOS `План` подключён к backend `meal-plan` endpoint и учитывает КБЖУ для следующего приёма;
 - backend не получает полный инвентарь и не блокирует работу локального MVP.

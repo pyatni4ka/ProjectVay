@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=development
+      - PORT=8080
+      - LOG_LEVEL=info
+      - LOG_PRETTY=true
+      - RECIPE_CACHE_TTL_SECONDS=604800
+      - RECIPE_FETCH_RATE_WINDOW_MS=60000
+      - RECIPE_FETCH_RATE_MAX=30
+      - BARCODE_LOOKUP_RATE_WINDOW_MS=60000
+      - BARCODE_LOOKUP_RATE_MAX=120
+      - BARCODE_ENABLE_OPEN_FOOD_FACTS=true
+      - CORS_ORIGIN=*
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - LOG_LEVEL=info
+      - LOG_PRETTY=false
+      - RECIPE_CACHE_TTL_SECONDS=604800
+      - CORS_ORIGIN=https://yourdomain.com
+    volumes:
+      - recipe-cache:/app/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  recipe-cache:

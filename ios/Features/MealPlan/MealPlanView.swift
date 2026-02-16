@@ -22,57 +22,6 @@ struct MealPlanView: View {
         }
     }
 
-    private enum MealSlot: String {
-        case breakfast
-        case lunch
-        case dinner
-
-        var title: String {
-            switch self {
-            case .breakfast: return "Завтрак"
-            case .lunch: return "Обед"
-            case .dinner: return "Ужин"
-            }
-        }
-
-        var remainingMealsCount: Int {
-            switch self {
-            case .breakfast: return 3
-            case .lunch: return 2
-            case .dinner: return 1
-            }
-        }
-
-        static func next(for date: Date, schedule: AppSettings.MealSchedule) -> MealSlot {
-            let calendar = Calendar.current
-            let minute = (calendar.component(.hour, from: date) * 60) + calendar.component(.minute, from: date)
-            let normalized = schedule.normalized()
-
-            if minute < normalized.breakfastMinute {
-                return .breakfast
-            }
-            if minute < normalized.lunchMinute {
-                return .lunch
-            }
-            if minute < normalized.dinnerMinute {
-                return .dinner
-            }
-
-            return .breakfast
-        }
-    }
-
-    private struct NutritionSnapshot {
-        let baselineDayTarget: Nutrition
-        let planDayTarget: Nutrition
-        let consumedToday: Nutrition
-        let remainingToday: Nutrition
-        let nextMealTarget: Nutrition
-        let nextMealSlot: MealSlot
-        let remainingMealsCount: Int
-        let statusMessage: String?
-    }
-
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
@@ -81,6 +30,7 @@ struct MealPlanView: View {
 
     @State private var selectedRange: PlanRange = .day
     @State private var mealPlan: MealPlanGenerateResponse?
+    @State private var macroGoalSource: AppSettings.MacroGoalSource = .automatic
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var lastGeneratedAt: Date?
@@ -88,9 +38,10 @@ struct MealPlanView: View {
     @State private var consumedTodayNutrition = Nutrition(kcal: 0, protein: 0, fat: 0, carbs: 0)
     @State private var remainingTodayNutrition = Nutrition(kcal: 2200, protein: 140, fat: 70, carbs: 220)
     @State private var nextMealTargetNutrition = Nutrition(kcal: 730, protein: 47, fat: 23, carbs: 73)
-    @State private var nextMealSlot: MealSlot = .breakfast
+    @State private var nextMealSlot: AdaptiveNutritionUseCase.MealSlot = .breakfast
     @State private var nextMealRecommendations: [RecommendResponse.RankedRecipe] = []
     @State private var healthStatusMessage: String?
+    @State private var offlineStatusMessage: String?
     @State private var hasRequestedHealthAccess = false
     @State private var hasInventoryProducts = true
     @State private var availableIngredients: Set<String> = []
@@ -100,6 +51,9 @@ struct MealPlanView: View {
             VStack(spacing: VaySpacing.lg) {
                 periodCard
                 nutritionCard
+                if let offlineStatusMessage {
+                    offlineBanner(offlineStatusMessage)
+                }
 
                 if isLoading {
                     loadingCard
@@ -127,7 +81,8 @@ struct MealPlanView: View {
                     errorCard(errorMessage)
                 }
 
-                Color.clear.frame(height: VaySpacing.huge + VaySpacing.xxl)
+
+                Color.clear.frame(height: 100)
             }
             .padding(.horizontal, VaySpacing.lg)
         }
@@ -175,7 +130,7 @@ struct MealPlanView: View {
     private var nutritionCard: some View {
         VStack(alignment: .leading, spacing: VaySpacing.md) {
             HStack {
-                Text("КБЖУ (Apple Health / Yazio)")
+                Text(nutritionCardTitle)
                     .font(VayFont.heading(16))
                 Spacer()
                 Text(nextMealSlot.title)
@@ -219,6 +174,36 @@ struct MealPlanView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(VaySpacing.lg)
         .vayCard()
+    }
+
+    private var nutritionCardTitle: String {
+        switch macroGoalSource {
+        case .automatic:
+            return "КБЖУ (Apple Health / Yazio)"
+        case .manual:
+            return "КБЖУ (ручная цель)"
+        }
+    }
+
+    private func offlineBanner(_ text: String) -> some View {
+        HStack(spacing: VaySpacing.md) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundStyle(Color.vayWarning)
+            Text(text)
+                .font(VayFont.body(13))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Повторить") {
+                Task { await generatePlan() }
+            }
+            .font(VayFont.label(12))
+            .buttonStyle(.borderedProminent)
+            .tint(Color.vayPrimary)
+        }
+        .padding(VaySpacing.md)
+        .background(Color.vayPrimaryLight.opacity(0.4))
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
+        .vayAccessibilityLabel("Оффлайн-режим: \(text)")
     }
 
     private var recommendationsSection: some View {
@@ -407,11 +392,6 @@ struct MealPlanView: View {
     }
 
     private func generatePlan() async {
-        guard let recipeServiceClient else {
-            errorMessage = "Сервис рецептов недоступен. Укажите `RecipeServiceBaseURL` в конфиге приложения."
-            return
-        }
-
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
@@ -424,7 +404,13 @@ struct MealPlanView: View {
             let products = try await productsTask
             let expiringBatches = try await expiringBatchesTask
             let settings = try await settingsTask
-            let nutritionSnapshot = try await computeAdaptiveNutritionSnapshot(settings: settings)
+            macroGoalSource = settings.macroGoalSource
+
+            if let recipeServiceClient {
+                recipeServiceClient.updateBaseURL(validRecipeServiceURL(from: settings.recipeServiceBaseURLOverride))
+            }
+
+            let nutritionSnapshot = await computeAdaptiveNutritionSnapshot(settings: settings)
 
             dayTargetNutrition = selectedRange == .day ? nutritionSnapshot.planDayTarget : nutritionSnapshot.baselineDayTarget
             consumedTodayNutrition = nutritionSnapshot.consumedToday
@@ -448,11 +434,18 @@ struct MealPlanView: View {
                 hasInventoryProducts = false
                 mealPlan = nil
                 nextMealRecommendations = []
+                offlineStatusMessage = nil
                 errorMessage = nil
                 return
             }
 
             hasInventoryProducts = true
+
+            guard let recipeServiceClient else {
+                offlineStatusMessage = "Сервер рецептов не настроен. Укажите URL сервера в настройках."
+                errorMessage = nil
+                return
+            }
 
             let budgetPerDay = NSDecimalNumber(decimal: settings.budgetDay).doubleValue
             let payload = MealPlanGenerateRequest(
@@ -469,6 +462,7 @@ struct MealPlanView: View {
 
             let generated = try await recipeServiceClient.generateMealPlan(payload: payload)
             mealPlan = generated
+            offlineStatusMessage = nil
 
             let nextMealBudget = budgetPerDay > 0 ? budgetPerDay / Double(max(1, nutritionSnapshot.remainingMealsCount)) : nil
             do {
@@ -511,112 +505,100 @@ struct MealPlanView: View {
                 } else {
                     healthStatusMessage = fallback
                 }
+                if let offlineMessage = offlineMessage(for: error, hasCachedPlan: mealPlan != nil) {
+                    offlineStatusMessage = offlineMessage
+                }
             }
 
             errorMessage = nil
             lastGeneratedAt = Date()
         } catch {
-            errorMessage = "Не удалось сгенерировать план: \(error.localizedDescription)"
+            if let offlineMessage = offlineMessage(for: error, hasCachedPlan: mealPlan != nil) {
+                offlineStatusMessage = offlineMessage
+                errorMessage = nil
+            } else {
+                offlineStatusMessage = nil
+                errorMessage = "Не удалось сгенерировать план: \(userFacingErrorMessage(error))"
+            }
         }
     }
 
-    private func computeAdaptiveNutritionSnapshot(settings: AppSettings) async throws -> NutritionSnapshot {
-        let nextMealSlot = MealSlot.next(for: Date(), schedule: settings.mealSchedule)
-        let remainingMealsCount = max(1, nextMealSlot.remainingMealsCount)
-
-        if !hasRequestedHealthAccess {
+    private func computeAdaptiveNutritionSnapshot(settings: AppSettings) async -> AdaptiveNutritionUseCase.Output {
+        if settings.healthKitReadEnabled, !hasRequestedHealthAccess {
             hasRequestedHealthAccess = true
             _ = try? await healthKitService.requestReadAccess()
         }
 
-        let metrics = try await healthKitService.fetchLatestMetrics()
-        let baselineKcal = Double(healthKitService.calculateDailyCalories(metrics: metrics, targetLossPerWeek: 0.5))
-        let baselineTarget = nutritionForTargetKcal(baselineKcal, weightKG: metrics.weightKG)
-
-        var consumedToday = Nutrition(kcal: 0, protein: 0, fat: 0, carbs: 0)
-        var healthMessage = "Таргет на следующий приём делится по оставшимся приёмам: \(remainingMealsCount)."
-
-        do {
-            let healthValues = try await healthKitService.fetchTodayConsumedNutrition()
-            let hasAnyValue = [healthValues.kcal, healthValues.protein, healthValues.fat, healthValues.carbs]
-                .contains { $0 != nil && ($0 ?? 0) > 0 }
-            if hasAnyValue {
-                consumedToday = normalizeNutrition(healthValues)
-                healthMessage = "Меню адаптировано по съеденному КБЖУ из Apple Health."
-            } else {
-                healthMessage = "Apple Health не вернул КБЖУ за сегодня. Используется базовый таргет."
+        var automaticDailyCalories: Double?
+        var weightKG: Double?
+        if settings.healthKitReadEnabled, settings.macroGoalSource == .automatic {
+            do {
+                let metrics = try await healthKitService.fetchLatestMetrics()
+                automaticDailyCalories = Double(healthKitService.calculateDailyCalories(metrics: metrics, targetLossPerWeek: 0.5))
+                weightKG = metrics.weightKG
+            } catch {
+                automaticDailyCalories = nil
+                weightKG = nil
             }
-        } catch {
-            healthMessage = "Не удалось прочитать КБЖУ из Apple Health. Используется базовый таргет."
         }
 
-        let remainingToday = subtractNutrition(baselineTarget, consumedToday)
-        let nextMealTarget = divideNutrition(remainingToday, by: Double(remainingMealsCount))
-        let planDayTarget = selectedRange == .day ? remainingToday : baselineTarget
-
-        return NutritionSnapshot(
-            baselineDayTarget: baselineTarget,
-            planDayTarget: planDayTarget,
-            consumedToday: consumedToday,
-            remainingToday: remainingToday,
-            nextMealTarget: nextMealTarget,
-            nextMealSlot: nextMealSlot,
-            remainingMealsCount: remainingMealsCount,
-            statusMessage: healthMessage
-        )
-    }
-
-    private func nutritionForTargetKcal(_ kcal: Double, weightKG: Double?) -> Nutrition {
-        let baseKcal = max(900, kcal)
-
-        let protein: Double
-        if let weightKG {
-            protein = min(max(weightKG * 1.8, 90), 220)
-        } else {
-            protein = max(90, baseKcal * 0.28 / 4)
+        var consumedNutrition: Nutrition?
+        var consumedFetchFailed = false
+        if settings.healthKitReadEnabled {
+            do {
+                consumedNutrition = try await healthKitService.fetchTodayConsumedNutrition()
+            } catch {
+                consumedFetchFailed = true
+            }
         }
 
-        let fat: Double
-        if let weightKG {
-            fat = min(max(weightKG * 0.8, 45), 120)
-        } else {
-            fat = max(45, baseKcal * 0.28 / 9)
+        return AdaptiveNutritionUseCase().execute(
+            .init(
+                settings: settings,
+                range: selectedRange == .day ? .day : .week,
+                automaticDailyCalories: automaticDailyCalories,
+                weightKG: weightKG,
+                consumedNutrition: consumedNutrition,
+                consumedFetchFailed: consumedFetchFailed,
+                healthIntegrationEnabled: settings.healthKitReadEnabled
+            )
+        )
+    }
+
+    private func validRecipeServiceURL(from value: String?) -> URL? {
+        guard
+            let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !value.isEmpty,
+            let url = URL(string: value),
+            let scheme = url.scheme?.lowercased(),
+            scheme == "http" || scheme == "https"
+        else {
+            return nil
+        }
+        return url
+    }
+
+    private func offlineMessage(for error: Error, hasCachedPlan: Bool) -> String? {
+        guard let clientError = RecipeServiceClientError.from(error) else {
+            return nil
         }
 
-        let minCarbs = 80.0
-        let minRequiredKcal = protein * 4 + fat * 9 + minCarbs * 4
-        let adjustedKcal = max(baseKcal, minRequiredKcal)
-        let carbs = max(minCarbs, (adjustedKcal - protein * 4 - fat * 9) / 4)
+        guard clientError == .noConnection || clientError == .offlineMode else {
+            return nil
+        }
 
-        return Nutrition(kcal: adjustedKcal, protein: protein, fat: fat, carbs: carbs)
+        let baseText = clientError.errorDescription ?? "Нет подключения к серверу рецептов."
+        if hasCachedPlan {
+            return "\(baseText) Показываем последний доступный план."
+        }
+        return "\(baseText) Сохранённый план пока недоступен."
     }
 
-    private func normalizeNutrition(_ value: Nutrition) -> Nutrition {
-        Nutrition(
-            kcal: max(0, value.kcal ?? 0),
-            protein: max(0, value.protein ?? 0),
-            fat: max(0, value.fat ?? 0),
-            carbs: max(0, value.carbs ?? 0)
-        )
-    }
-
-    private func subtractNutrition(_ left: Nutrition, _ right: Nutrition) -> Nutrition {
-        Nutrition(
-            kcal: max(0, resolved(left.kcal) - resolved(right.kcal)),
-            protein: max(0, resolved(left.protein) - resolved(right.protein)),
-            fat: max(0, resolved(left.fat) - resolved(right.fat)),
-            carbs: max(0, resolved(left.carbs) - resolved(right.carbs))
-        )
-    }
-
-    private func divideNutrition(_ value: Nutrition, by divisor: Double) -> Nutrition {
-        let safeDivisor = max(divisor, 1)
-        return Nutrition(
-            kcal: resolved(value.kcal) / safeDivisor,
-            protein: resolved(value.protein) / safeDivisor,
-            fat: resolved(value.fat) / safeDivisor,
-            carbs: resolved(value.carbs) / safeDivisor
-        )
+    private func userFacingErrorMessage(_ error: Error) -> String {
+        if let clientError = RecipeServiceClientError.from(error) {
+            return clientError.errorDescription ?? "Ошибка сервера рецептов."
+        }
+        return error.localizedDescription
     }
 
     private func resolved(_ value: Double?) -> Double {

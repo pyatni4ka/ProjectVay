@@ -19,6 +19,7 @@ export type BarcodeLookupOptions = {
   eanDBApiKey?: string;
   eanDBApiURL?: string;
   enableOpenFoodFacts?: boolean;
+  enableBarcodeListRu?: boolean;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 };
@@ -67,6 +68,17 @@ export async function lookupBarcode(options: BarcodeLookupOptions): Promise<Barc
     }
   }
 
+  if (options.enableBarcodeListRu !== false) {
+    const barcodeListRuProduct = await lookupBarcodeListRu({ code, fetchImpl, timeoutMs });
+    if (barcodeListRuProduct) {
+      return {
+        found: true,
+        provider: "barcode_list_ru",
+        product: barcodeListRuProduct
+      };
+    }
+  }
+
   return notFound();
 }
 
@@ -103,6 +115,133 @@ async function lookupOpenFoodFacts(input: OFFLookupInput): Promise<BarcodeLookup
     return null;
   }
   return parseOpenFoodFactsProduct(data, input.code);
+}
+
+type BarcodeListRuLookupInput = {
+  code: string;
+  fetchImpl: FetchLike;
+  timeoutMs: number;
+};
+
+async function lookupBarcodeListRu(input: BarcodeListRuLookupInput): Promise<BarcodeLookupProduct | null> {
+  const searchURL = `https://barcode-list.ru/barcode/RU/%D0%9F%D0%BE%D0%B8%D1%81%D0%BA.htm?barcode=${encodeURIComponent(input.code)}`;
+  const html = await fetchHTML(searchURL, input.fetchImpl, input.timeoutMs);
+  if (!html) {
+    return null;
+  }
+  return parseBarcodeListRuHTML(html, input.code);
+}
+
+export function parseBarcodeListRuHTML(html: string, fallbackBarcode: string): BarcodeLookupProduct | null {
+  // Extract product name from <title> or og:title: "Штрихкод ... - ProductName"
+  const name = extractTitleProductName(html);
+  if (!name) {
+    return null;
+  }
+
+  const brand = extractMetaContent(html, "name", "brand");
+  const category = extractBreadcrumbCategory(html) ?? "Продукты";
+
+  return {
+    barcode: fallbackBarcode,
+    name,
+    brand: brand ?? undefined,
+    category
+  };
+}
+
+function extractTitleProductName(html: string): string | null {
+  // Common generic patterns to ignore
+  const isGeneric = (s: string) => {
+    const lower = s.toLowerCase();
+    return lower.startsWith("штрих-код") || lower.startsWith("штрихкод") || lower.startsWith("barcode") || lower === "поиск";
+  };
+
+  // Try og:title first: <meta property="og:title" content="Штрихкод 460... - Название">
+  const ogTitle = extractMetaContent(html, "property", "og:title");
+  if (ogTitle) {
+    const dashIndex = ogTitle.indexOf(" - ");
+    if (dashIndex >= 0) {
+      const name = ogTitle.slice(dashIndex + 3).trim();
+      if (name && !isGeneric(name)) return name;
+    }
+  }
+
+  // Fallback: <title> tag
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (titleMatch) {
+    const titleContent = titleMatch[1]!.trim();
+    // Check for " - " split first
+    const dashIndex = titleContent.indexOf(" - ");
+    if (dashIndex >= 0) {
+      const name = titleContent.slice(dashIndex + 3).trim();
+      if (name && !isGeneric(name)) return name;
+    }
+    // If no dash, check if the whole title is just a code
+    else if (!isGeneric(titleContent)) {
+      return titleContent;
+    }
+  }
+
+  // Fallback: <h1> tag
+  const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+  if (h1Match) {
+    const name = h1Match[1]!.trim();
+    if (name.length > 3 && !isGeneric(name)) return name;
+  }
+
+  return null;
+}
+
+function extractMetaContent(html: string, attrName: string, attrValue: string): string | null {
+  // Matches <meta property="og:title" content="..." /> or <meta name="brand" content="..." />
+  const pattern = new RegExp(`<meta[^>]+${attrName}="${attrValue}"[^>]+content="([^"]*)"`, "i");
+  const match = html.match(pattern);
+  if (!match) {
+    // Try reversed attribute order: content before property
+    const reversed = new RegExp(`<meta[^>]+content="([^"]*)"[^>]+${attrName}="${attrValue}"`, "i");
+    const revMatch = html.match(reversed);
+    if (revMatch) {
+      const value = revMatch[1]!.trim();
+      return value || null;
+    }
+    return null;
+  }
+  const value = match[1]!.trim();
+  return value || null;
+}
+
+function extractBreadcrumbCategory(html: string): string | null {
+  const pattern = /class="breadcrumb[^"]*"[^>]*>[^<]*<a[^>]*>([^<]+)<\/a>/gi;
+  let lastCategory: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(html)) !== null) {
+    const value = m[1]!.trim();
+    if (value) lastCategory = value;
+  }
+  return lastCategory;
+}
+
+async function fetchHTML(url: string, fetchImpl: FetchLike, timeoutMs: number): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      method: "GET",
+      signal: controller.signal,
+      headers: {
+        "Accept": "text/html",
+        "User-Agent": "Mozilla/5.0 (compatible; ProjectVay/1.0)",
+        "Accept-Language": "ru-RU,ru;q=0.9"
+      }
+    });
+    if (!response.ok) return null;
+    return await response.text();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function fetchJSON(url: string, fetchImpl: FetchLike, timeoutMs: number): Promise<unknown | null> {
@@ -156,11 +295,11 @@ export function parseOpenFoodFactsProduct(payload: unknown, fallbackBarcode: str
   const nutriments = isRecord(product.nutriments) ? product.nutriments : null;
   const nutrition: Nutrition | undefined = nutriments
     ? compactNutrition({
-        kcal: numericOrNull(nutriments["energy-kcal_100g"]),
-        protein: numericOrNull(nutriments.proteins_100g),
-        fat: numericOrNull(nutriments.fat_100g),
-        carbs: numericOrNull(nutriments.carbohydrates_100g)
-      })
+      kcal: numericOrNull(nutriments["energy-kcal_100g"]),
+      protein: numericOrNull(nutriments.proteins_100g),
+      fat: numericOrNull(nutriments.fat_100g),
+      carbs: numericOrNull(nutriments.carbohydrates_100g)
+    })
     : undefined;
 
   return {

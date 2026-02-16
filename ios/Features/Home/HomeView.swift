@@ -4,13 +4,16 @@ struct HomeView: View {
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
     var onOpenScanner: () -> Void = {}
+    var onOpenReceiptScan: () -> Void = {}
 
     @State private var products: [Product] = []
     @State private var batches: [Batch] = []
     @State private var events: [InventoryEvent] = []
+    @State private var priceEntries: [PriceEntry] = []
     @State private var settings: AppSettings?
     @State private var appeared = false
     @State private var isLoading = true
+    @State private var predictions: [ProductPrediction] = []
 
     var body: some View {
         ScrollView {
@@ -33,6 +36,7 @@ struct HomeView: View {
                     quickStatsSection
                     savingsMoneyCard
                     weeklyBreakdownCard
+                    progressSummaryCard
 
                     if !expiringSoonBatches.isEmpty {
                         expiringSoonSection
@@ -45,9 +49,14 @@ struct HomeView: View {
                     if !lowStockProducts.isEmpty {
                         lowStockSection
                     }
+                    
+                    if !predictions.isEmpty {
+                        predictionsSection
+                    }
                 }
 
-                Color.clear.frame(height: VaySpacing.huge)
+
+                Color.clear.frame(height: 100)
             }
             .padding(.horizontal, VaySpacing.lg)
         }
@@ -56,12 +65,23 @@ struct HomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onOpenScanner) {
-                    Image(systemName: "barcode.viewfinder")
+                Menu {
+                    Button {
+                        onOpenScanner()
+                    } label: {
+                        Label("Сканировать штрихкод", systemImage: "barcode.viewfinder")
+                    }
+                    
+                    Button {
+                        onOpenReceiptScan()
+                    } label: {
+                        Label("Сканировать чек", systemImage: "doc.text.viewfinder")
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(Color.vayPrimary)
                 }
-                .vayAccessibilityLabel("Открыть сканер", hint: "Быстрое добавление товаров")
             }
         }
         .task {
@@ -212,6 +232,48 @@ struct HomeView: View {
         .vayAccessibilityLabel("За неделю: съедено \(consumedCount), просрочено \(expiredCount), списано \(writeOffCount)")
     }
 
+    private var progressSummaryCard: some View {
+        NavigationLink {
+            ProgressTrackingView(
+                inventoryService: inventoryService,
+                settingsService: settingsService
+            )
+        } label: {
+            VStack(alignment: .leading, spacing: VaySpacing.md) {
+                HStack(spacing: VaySpacing.sm) {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.vayInfo)
+                    Text("Прогресс")
+                        .font(VayFont.heading(16))
+                    Spacer()
+                    Text("Подробнее")
+                        .font(VayFont.label(12))
+                        .foregroundStyle(Color.vayPrimary)
+                }
+
+                HStack(spacing: VaySpacing.md) {
+                    miniPill(icon: "checkmark.circle.fill", label: "Съедено", value: "\(weeklyConsumedCount)", color: .vaySuccess)
+                    miniPill(icon: "minus.circle.fill", label: "Списано", value: "\(weeklyWriteOffCount)", color: .vayWarning)
+                    miniPill(icon: "clock.badge.exclamationmark", label: "Потери", value: rubText(fromMinor: weeklyLossMinor), color: .vayDanger)
+                }
+
+                HStack {
+                    Text("Расходы за 7 дней")
+                        .font(VayFont.caption(12))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(rubText(fromMinor: weeklySpendingMinor))
+                        .font(VayFont.label(14))
+                        .foregroundStyle(Color.vayWarning)
+                }
+            }
+            .vayCard()
+        }
+        .buttonStyle(.plain)
+        .vayAccessibilityLabel("Прогресс: съедено \(weeklyConsumedCount), списано \(weeklyWriteOffCount), потери \(rubText(fromMinor: weeklyLossMinor)), расходы \(rubText(fromMinor: weeklySpendingMinor))")
+    }
+
     private var expiringSoonSection: some View {
         VStack(alignment: .leading, spacing: VaySpacing.md) {
             sectionHeader(icon: "clock.badge.exclamationmark", title: "Скоро истекает", color: .vayWarning)
@@ -309,7 +371,16 @@ struct HomeView: View {
         }
         .vayCard()
     }
-
+    
+    private var predictionsSection: some View {
+        PredictionsCard(
+            predictions: predictions,
+            onAddToShoppingList: { _ in
+                GamificationService.shared.trackExpiryWarning()
+            }
+        )
+    }
+    
     private func miniPill(icon: String, label: String, value: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: VaySpacing.xs) {
             HStack(spacing: VaySpacing.xs) {
@@ -396,6 +467,17 @@ struct HomeView: View {
             .reduce(0, +)
     }
 
+    private var weeklySpendingMinor: Int64 {
+        weeklyPriceEntries
+            .map { $0.price.asMinorUnits }
+            .reduce(0, +)
+    }
+
+    private var weeklyPriceEntries: [PriceEntry] {
+        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .now
+        return priceEntries.filter { $0.date >= weekAgo }
+    }
+
     private func rubText(fromMinor minor: Int64) -> String {
         let rub = Double(minor) / 100
         return "\(rub.formatted(.number.precision(.fractionLength(0)))) ₽"
@@ -416,11 +498,21 @@ struct HomeView: View {
             settings = try await settingsService.loadSettings()
 
             var allEvents: [InventoryEvent] = []
+            var allPrices: [PriceEntry] = []
             for product in products {
                 let productEvents = try await inventoryService.listEvents(productId: product.id)
                 allEvents.append(contentsOf: productEvents)
+                let history = try await inventoryService.listPriceHistory(productId: product.id)
+                allPrices.append(contentsOf: history)
             }
             events = allEvents
+            priceEntries = allPrices
+            
+            let inventoryItems = products.map { product in
+                let quantity = batches.filter { $0.productId == product.id }.reduce(0.0) { $0 + $1.quantity }
+                return (name: product.name, quantity: quantity, expiryDate: batches.first { $0.productId == product.id }?.expiryDate)
+            }
+            predictions = PredictionService.shared.predictNeededProducts(currentInventory: inventoryItems)
 
             isLoading = false
         } catch {

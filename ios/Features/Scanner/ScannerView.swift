@@ -35,6 +35,8 @@ struct ScannerView: View {
     @State private var mode: ScannerMode
     @State private var manualCode: String = ""
     @State private var isProcessing = false
+    @State private var scannerGate = ScannerOneShotGate()
+    @State private var isScannerPaused = false
     @State private var lastScannedCode: String = ""
     @State private var lastScanAt: Date = .distantPast
     @State private var resolution: ScanResolution?
@@ -71,8 +73,9 @@ struct ScannerView: View {
             Group {
                 if scannerAvailable {
                     ScannerCameraView(
+                        isPaused: isScannerPaused,
                         onCodeDetected: { code in
-                            Task { await processScannedCode(code) }
+                            handleCameraDetectedCode(code)
                         },
                         onError: { message in
                             errorMessage = message
@@ -85,12 +88,18 @@ struct ScannerView: View {
             .ignoresSafeArea()
 
             // Gradient overlay at bottom for readability
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.7), .black.opacity(0.85)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 420)
+            VStack(spacing: 0) {
+                Spacer()
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.35), .black.opacity(0.55)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 320)
+
+                // Solid fill beneath the gradient to cover edge-to-edge
+                Color.black.opacity(0.55)
+            }
             .ignoresSafeArea()
 
             // Bottom Controls
@@ -108,6 +117,20 @@ struct ScannerView: View {
                     .background(.green.opacity(0.8))
                     .clipShape(Capsule())
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                if scannerGate.isLocked {
+                    HStack(spacing: VaySpacing.sm) {
+                        Image(systemName: "scope")
+                            .foregroundStyle(Color.vayInfo)
+                        Text("Код зафиксирован, можно убрать камеру")
+                            .font(VayFont.label(13))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, VaySpacing.lg)
+                    .padding(.vertical, VaySpacing.sm)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
                 }
 
                 // Scanning indicator
@@ -316,7 +339,7 @@ struct ScannerView: View {
                 iconColor: .vayInfo,
                 title: "Создано автоматически",
                 productName: product.name,
-                category: "\(product.category) • \(provider)",
+                category: "\(product.category) • \(providerTitle(provider))",
                 expiry: suggestedExpiry,
                 product: product,
                 showAddActions: true,
@@ -540,6 +563,21 @@ struct ScannerView: View {
         VayHaptic.impact(.medium)
     }
 
+    private func handleCameraDetectedCode(_ rawCode: String) {
+        guard !isProcessing else { return }
+        guard let capturedCode = scannerGate.capture(rawCode) else { return }
+        if capturedCode == lastScannedCode, Date().timeIntervalSince(lastScanAt) < 1.5 {
+            scannerGate.reset()
+            return
+        }
+
+        isScannerPaused = true
+
+        Task {
+            await processScannedCode(capturedCode)
+        }
+    }
+
     private func applyResolution(_ resolved: ScanResolution) {
         resolution = resolved
         quickActionMessage = nil
@@ -620,7 +658,7 @@ struct ScannerView: View {
             }
 
             let preferredUnit: UnitType = parsedWeightGrams == nil ? product.defaultUnit : .g
-            var targetBatch = batches.first(where: { $0.unit == preferredUnit }) ?? batches.first!
+            let targetBatch = batches.first(where: { $0.unit == preferredUnit }) ?? batches.first!
 
             var quantityToWriteOff = parsedWeightGrams ?? 1
             if quantityToWriteOff <= 0 {
@@ -664,6 +702,10 @@ struct ScannerView: View {
         withAnimation(VayAnimation.springSmooth) {
             resolution = nil
         }
+        scannerGate.reset()
+        isScannerPaused = false
+        lastScannedCode = ""
+        lastScanAt = .distantPast
         selectedProduct = nil
         suggestedExpiry = nil
         internalCodeToBind = nil
@@ -671,9 +713,27 @@ struct ScannerView: View {
         barcodeForManualCreation = nil
         quickActionMessage = nil
     }
+
+    private func providerTitle(_ provider: String) -> String {
+        switch provider {
+        case "barcode_list_ru":
+            return "barcode-list.ru"
+        case "open_food_facts":
+            return "Open Food Facts"
+        case "ean_db":
+            return "EAN-DB"
+        case "rf_source":
+            return "RF proxy"
+        case "auto_template":
+            return "Автошаблон"
+        default:
+            return provider
+        }
+    }
 }
 
 private struct ScannerCameraView: UIViewControllerRepresentable {
+    let isPaused: Bool
     let onCodeDetected: (String) -> Void
     let onError: (String) -> Void
 
@@ -701,7 +761,21 @@ private struct ScannerCameraView: UIViewControllerRepresentable {
         return scanner
     }
 
-    func updateUIViewController(_ uiViewController: DataScannerViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: DataScannerViewController, context: Context) {
+        if isPaused {
+            if uiViewController.isScanning {
+                uiViewController.stopScanning()
+            }
+            return
+        }
+
+        guard !uiViewController.isScanning else { return }
+        do {
+            try uiViewController.startScanning()
+        } catch {
+            context.coordinator.onError("Не удалось запустить сканер: \(error.localizedDescription)")
+        }
+    }
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         let onCodeDetected: (String) -> Void
@@ -714,6 +788,11 @@ private struct ScannerCameraView: UIViewControllerRepresentable {
 
         func dataScanner(_ dataScanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) {
             guard let first = addedItems.first else { return }
+            handle(first)
+        }
+
+        func dataScanner(_ dataScanner: DataScannerViewController, didUpdate updatedItems: [RecognizedItem], allItems: [RecognizedItem]) {
+            guard let first = updatedItems.first else { return }
             handle(first)
         }
 

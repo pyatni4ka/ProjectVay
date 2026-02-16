@@ -3,11 +3,12 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		06411A6082360276D54CE45A /* ProductDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C21C3C843923CE27EFB85832 /* ProductDetailView.swift */; };
+		064D7F36BE1287E134AEB20B /* AddProductIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06D2D5C2CF89063FD463E5DC /* AddProductIntent.swift */; };
 		074C62A6E34B2FF984E10B1D /* StatCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6C8DA82D8FBC910B1604700 /* StatCard.swift */; };
 		117890566693F4B53E5CBA82 /* DTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC52CBB6D2300D537D1E934 /* DTOs.swift */; };
 		184BC4D7E07DFB29BD791623 /* AddProductView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F32432159700AEECE99AD8 /* AddProductView.swift */; };
@@ -15,8 +16,10 @@
 		23A19E045FFE4E867AAC8EA4 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39DF1EE5A75D979CFD4257E6 /* RootTabView.swift */; };
 		297F186A33E743056B67C29E /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DE74EF74D8D73458DC227A /* AppCoordinator.swift */; };
 		2B01E649CDF1D170BC5CB7B4 /* EditBatchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65E8C4A4FA5CB0E8D4E7982E /* EditBatchView.swift */; };
+		2E135B0FED604FF16EF14F92 /* GeneratePlanIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AD4A564E851AEC2CA3C4787 /* GeneratePlanIntent.swift */; };
 		341E169CC39DBC84E25A569E /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27B65E33FDA8892096CD4A1D /* DesignSystem.swift */; };
 		39F3AAA653923BF30B732B39 /* AppSettingsRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6CD145BB6F0E0DFE6FFC32 /* AppSettingsRecord.swift */; };
+		3A728F4CAD06A37E14D38019 /* InventoryShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 730A02E81E6D45E50BA41652 /* InventoryShortcuts.swift */; };
 		3FE17F27E2785D8FC53B67D7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6513EB461776936D524ABC4A /* SettingsView.swift */; };
 		430C7B456CB2F48E45D96ECF /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304FC756B86B6CD7ACC7B581 /* NotificationScheduler.swift */; };
 		499CFDA6DF6ACFDBCE296004 /* Database.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B21538D196D56F81C3F9FB7 /* Database.swift */; };
@@ -40,28 +43,40 @@
 		9CEDB41571133A0CFA2C077C /* HealthKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF886682120A84111FDEFA9 /* HealthKitService.swift */; };
 		9EA81060DA0349314B1550F8 /* InventoryAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86D101CA77F656A64CC222B /* InventoryAIApp.swift */; };
 		A09F7A2546D729CBC3950356 /* InternalCodeMappingRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBF1DC7128519A9CF80D825E /* InternalCodeMappingRecord.swift */; };
+		A1A4CA52D634A68B56596D9E /* ReceiptScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5508B692A300BEF03DB2C9F /* ReceiptScanView.swift */; };
 		A3A1418540243103ABE5C43D /* ProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD0326D790C12B608B526CD0 /* ProgressView.swift */; };
 		A7315714910E83BEF6424793 /* SettingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0331D28BA35FD9C8C0B66A85 /* SettingsService.swift */; };
 		A917F42908081DFD09D1949B /* NutritionRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54C6DC81DA2966C8A3D2092E /* NutritionRing.swift */; };
+		AB06967741BD7FE04957AB86 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F40C5631E4A4E5C02B12374C /* Assets.xcassets */; };
 		AB869B37E8E475C776F76C87 /* ScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A107567ED11654CF90FCC004 /* ScannerView.swift */; };
+		B5C6E2C07F81DEFFADFEC1E1 /* GamificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29EE63C26CEFE3EDF07BFB5D /* GamificationService.swift */; };
+		BC74A4EF8B31C998E59AF1F1 /* CheckExpiryIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16DFEE0A6046D5247EB8284B /* CheckExpiryIntent.swift */; };
 		C2766EEC520802B1E95450CA /* InventoryUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = A16712EB1737E4E4183CE189 /* InventoryUseCases.swift */; };
+		C574F53E1FEA87BD6B9FF69C /* PredictionsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BBAE2E552F333D1C3C5C84B /* PredictionsCard.swift */; };
 		C9D8ACB38417486CAA986205 /* RecipeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AD75210A6920C904EF25C96 /* RecipeView.swift */; };
 		CF2C6A7BE3E92A180FB60D9F /* BarcodeLookupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF16DC1686787D4B9350B6F1 /* BarcodeLookupService.swift */; };
 		D4AC59DD03A122E9D6BB1267 /* BarcodeLookupProviders.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD35E41E3E6D6ED4CD293EB7 /* BarcodeLookupProviders.swift */; };
 		DC2B7EFED3A02DAA3B78C8A7 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DF388A9481F00B34B5C51AF /* Theme.swift */; };
+		DD9EF8EEC9511E29648036B0 /* ReceiptScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA532739B3D73F3C43AF8379 /* ReceiptScannerService.swift */; };
+		DE983534E1893B21AC8FED48 /* PredictionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E19B050C2E456FCE8F4734B /* PredictionService.swift */; };
 		ECD047177C3627DC4A6D67A8 /* InventoryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45505B88FB09B2D4A26D5F84 /* InventoryRepository.swift */; };
 		EE3DB458F2C660702231A83E /* InventoryEventRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35C75B81459C1E1588E13FA9 /* InventoryEventRecord.swift */; };
 		F0DE5F93408D478A226F4D26 /* ScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 777025D3A06BE4314328D5FD /* ScannerService.swift */; };
+		FCEC96F2EF6B2C3BBB195D5D /* Achievements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D462F1E0A221D80BC66BF4B /* Achievements.swift */; };
 		FF8DE9F50F59765F7B89CC5E /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46E51C234C1F962C2012B072 /* AppConfig.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0331D28BA35FD9C8C0B66A85 /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
+		06D2D5C2CF89063FD463E5DC /* AddProductIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddProductIntent.swift; sourceTree = "<group>"; };
 		0B21538D196D56F81C3F9FB7 /* Database.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Database.swift; sourceTree = "<group>"; };
+		16DFEE0A6046D5247EB8284B /* CheckExpiryIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckExpiryIntent.swift; sourceTree = "<group>"; };
 		1C6CD145BB6F0E0DFE6FFC32 /* AppSettingsRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsRecord.swift; sourceTree = "<group>"; };
+		1D462F1E0A221D80BC66BF4B /* Achievements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Achievements.swift; sourceTree = "<group>"; };
 		1D96BEE34757CD202B837CF3 /* RecipeServiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeServiceClient.swift; sourceTree = "<group>"; };
 		1DF388A9481F00B34B5C51AF /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		27B65E33FDA8892096CD4A1D /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		29EE63C26CEFE3EDF07BFB5D /* GamificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamificationService.swift; sourceTree = "<group>"; };
 		2E02A137D0F0AC34C121F2EF /* Migrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Migrations.swift; sourceTree = "<group>"; };
 		304FC756B86B6CD7ACC7B581 /* NotificationScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationScheduler.swift; sourceTree = "<group>"; };
 		35C75B81459C1E1588E13FA9 /* InventoryEventRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryEventRecord.swift; sourceTree = "<group>"; };
@@ -69,6 +84,8 @@
 		45505B88FB09B2D4A26D5F84 /* InventoryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryRepository.swift; sourceTree = "<group>"; };
 		46E51C234C1F962C2012B072 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		47484EC74E15DBB59198C26D /* PriceEntryRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PriceEntryRecord.swift; sourceTree = "<group>"; };
+		4AD4A564E851AEC2CA3C4787 /* GeneratePlanIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratePlanIntent.swift; sourceTree = "<group>"; };
+		4BBAE2E552F333D1C3C5C84B /* PredictionsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictionsCard.swift; sourceTree = "<group>"; };
 		4FC52CBB6D2300D537D1E934 /* DTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DTOs.swift; sourceTree = "<group>"; };
 		54C6DC81DA2966C8A3D2092E /* NutritionRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionRing.swift; sourceTree = "<group>"; };
 		550CED58D673F03AAAB848B0 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
@@ -80,6 +97,7 @@
 		65E8C4A4FA5CB0E8D4E7982E /* EditBatchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditBatchView.swift; sourceTree = "<group>"; };
 		6AA63F9021F1A3BEE015A499 /* BatchRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchRecord.swift; sourceTree = "<group>"; };
 		6E309306A985CAA8840800DA /* InventoryAI.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = InventoryAI.entitlements; sourceTree = "<group>"; };
+		730A02E81E6D45E50BA41652 /* InventoryShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryShortcuts.swift; sourceTree = "<group>"; };
 		76B3126DBCF96C097E0A1A95 /* ProductRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductRecord.swift; sourceTree = "<group>"; };
 		777025D3A06BE4314328D5FD /* ScannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerService.swift; sourceTree = "<group>"; };
 		7A5E541877665853E87E9C9C /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
@@ -89,6 +107,7 @@
 		916B0784A1A8984C5B112E81 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		97DE74EF74D8D73458DC227A /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
 		9AD371C602FCBD98B1A70FFB /* InventoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryView.swift; sourceTree = "<group>"; };
+		9E19B050C2E456FCE8F4734B /* PredictionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictionService.swift; sourceTree = "<group>"; };
 		9FA018E68F28499DAA99C6A4 /* InventoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryService.swift; sourceTree = "<group>"; };
 		A107567ED11654CF90FCC004 /* ScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerView.swift; sourceTree = "<group>"; };
 		A16712EB1737E4E4183CE189 /* InventoryUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryUseCases.swift; sourceTree = "<group>"; };
@@ -96,12 +115,15 @@
 		BD0326D790C12B608B526CD0 /* ProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressView.swift; sourceTree = "<group>"; };
 		BF16DC1686787D4B9350B6F1 /* BarcodeLookupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeLookupService.swift; sourceTree = "<group>"; };
 		C21C3C843923CE27EFB85832 /* ProductDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductDetailView.swift; sourceTree = "<group>"; };
-		C3BB0E58BEF9C4C604DC9ABF /* InventoryAI.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = InventoryAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C3BB0E58BEF9C4C604DC9ABF /* InventoryAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InventoryAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CAF4A687DC38ED5D59D3AC27 /* MealPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealPlanView.swift; sourceTree = "<group>"; };
 		CD35E41E3E6D6ED4CD293EB7 /* BarcodeLookupProviders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeLookupProviders.swift; sourceTree = "<group>"; };
+		D5508B692A300BEF03DB2C9F /* ReceiptScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptScanView.swift; sourceTree = "<group>"; };
 		D709D2660AFBC666C3B526EE /* AppDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependencies.swift; sourceTree = "<group>"; };
 		F03485DF9403E4E043639179 /* MacroRecommendationFilterUseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroRecommendationFilterUseCase.swift; sourceTree = "<group>"; };
+		F40C5631E4A4E5C02B12374C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F86D101CA77F656A64CC222B /* InventoryAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryAIApp.swift; sourceTree = "<group>"; };
+		FA532739B3D73F3C43AF8379 /* ReceiptScannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptScannerService.swift; sourceTree = "<group>"; };
 		FBF1DC7128519A9CF80D825E /* InternalCodeMappingRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InternalCodeMappingRecord.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -139,6 +161,7 @@
 		2D170278DF03174F1116B5EA /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				1D462F1E0A221D80BC66BF4B /* Achievements.swift */,
 				7BA7A730AB342ECF5E6FAEC6 /* DomainModels.swift */,
 				4FC52CBB6D2300D537D1E934 /* DTOs.swift */,
 			);
@@ -162,9 +185,18 @@
 			path = Scanner;
 			sourceTree = "<group>";
 		};
+		613E704F5176A0580A37905F /* ReceiptScan */ = {
+			isa = PBXGroup;
+			children = (
+				D5508B692A300BEF03DB2C9F /* ReceiptScanView.swift */,
+			);
+			path = ReceiptScan;
+			sourceTree = "<group>";
+		};
 		79C001EF544513FBCAF557BA = {
 			isa = PBXGroup;
 			children = (
+				F40C5631E4A4E5C02B12374C /* Assets.xcassets */,
 				DD239E1A82019C5301688050 /* App */,
 				F6D9116904D944DEB8522D97 /* Features */,
 				2D170278DF03174F1116B5EA /* Models */,
@@ -214,6 +246,17 @@
 			path = Shared;
 			sourceTree = "<group>";
 		};
+		A8C4FA7F04E1ECF4E53AED65 /* AppIntents */ = {
+			isa = PBXGroup;
+			children = (
+				06D2D5C2CF89063FD463E5DC /* AddProductIntent.swift */,
+				16DFEE0A6046D5247EB8284B /* CheckExpiryIntent.swift */,
+				4AD4A564E851AEC2CA3C4787 /* GeneratePlanIntent.swift */,
+				730A02E81E6D45E50BA41652 /* InventoryShortcuts.swift */,
+			);
+			path = AppIntents;
+			sourceTree = "<group>";
+		};
 		AACADBE28A0ED0E1885FB1C9 /* Home */ = {
 			isa = PBXGroup;
 			children = (
@@ -236,6 +279,7 @@
 				550CED58D673F03AAAB848B0 /* EmptyStateView.swift */,
 				612B0C439C20EAD9A1B04430 /* GlassCard.swift */,
 				54C6DC81DA2966C8A3D2092E /* NutritionRing.swift */,
+				4BBAE2E552F333D1C3C5C84B /* PredictionsCard.swift */,
 				A6C8DA82D8FBC910B1604700 /* StatCard.swift */,
 			);
 			path = Components;
@@ -255,9 +299,12 @@
 			children = (
 				CD35E41E3E6D6ED4CD293EB7 /* BarcodeLookupProviders.swift */,
 				BF16DC1686787D4B9350B6F1 /* BarcodeLookupService.swift */,
+				29EE63C26CEFE3EDF07BFB5D /* GamificationService.swift */,
 				5CF886682120A84111FDEFA9 /* HealthKitService.swift */,
 				9FA018E68F28499DAA99C6A4 /* InventoryService.swift */,
 				304FC756B86B6CD7ACC7B581 /* NotificationScheduler.swift */,
+				9E19B050C2E456FCE8F4734B /* PredictionService.swift */,
+				FA532739B3D73F3C43AF8379 /* ReceiptScannerService.swift */,
 				1D96BEE34757CD202B837CF3 /* RecipeServiceClient.swift */,
 				777025D3A06BE4314328D5FD /* ScannerService.swift */,
 				0331D28BA35FD9C8C0B66A85 /* SettingsService.swift */,
@@ -282,6 +329,7 @@
 				6E309306A985CAA8840800DA /* InventoryAI.entitlements */,
 				F86D101CA77F656A64CC222B /* InventoryAIApp.swift */,
 				39DF1EE5A75D979CFD4257E6 /* RootTabView.swift */,
+				A8C4FA7F04E1ECF4E53AED65 /* AppIntents */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -307,6 +355,7 @@
 				FEC625112D7DFFF31AE2FBCE /* MealPlan */,
 				C2BFD83DA725C9860E9B35EA /* Onboarding */,
 				AB1B3BAA82E9ECABFA2CE313 /* Progress */,
+				613E704F5176A0580A37905F /* ReceiptScan */,
 				96F8C4E889F8852B85D37AE3 /* Recipe */,
 				4DEE5A7C9B936B9424E2E168 /* Scanner */,
 				D94D35D2D9873FB03ACFBF91 /* Settings */,
@@ -330,6 +379,7 @@
 			buildConfigurationList = 961E556EDAD707AFC79A07D9 /* Build configuration list for PBXNativeTarget "InventoryAI" */;
 			buildPhases = (
 				76D91E97C6DD915D795F45C8 /* Sources */,
+				8039B4233A95F8C11EB7A087 /* Resources */,
 				1544844537A321CE46133FBF /* Frameworks */,
 			);
 			buildRules = (
@@ -351,7 +401,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
+				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					22EC9C40084D5CE7F537038F = {
 						ProvisioningStyle = Automatic;
@@ -371,7 +421,6 @@
 			packageReferences = (
 				6DFAB34ACC8E8BAADCF85531 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 			);
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -380,11 +429,24 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		8039B4233A95F8C11EB7A087 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AB06967741BD7FE04957AB86 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		76D91E97C6DD915D795F45C8 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FCEC96F2EF6B2C3BBB195D5D /* Achievements.swift in Sources */,
+				064D7F36BE1287E134AEB20B /* AddProductIntent.swift in Sources */,
 				184BC4D7E07DFB29BD791623 /* AddProductView.swift in Sources */,
 				FF8DE9F50F59765F7B89CC5E /* AppConfig.swift in Sources */,
 				297F186A33E743056B67C29E /* AppCoordinator.swift in Sources */,
@@ -393,12 +455,15 @@
 				D4AC59DD03A122E9D6BB1267 /* BarcodeLookupProviders.swift in Sources */,
 				CF2C6A7BE3E92A180FB60D9F /* BarcodeLookupService.swift in Sources */,
 				4A26B5BCF17FE0FD4E9B4905 /* BatchRecord.swift in Sources */,
+				BC74A4EF8B31C998E59AF1F1 /* CheckExpiryIntent.swift in Sources */,
 				117890566693F4B53E5CBA82 /* DTOs.swift in Sources */,
 				499CFDA6DF6ACFDBCE296004 /* Database.swift in Sources */,
 				341E169CC39DBC84E25A569E /* DesignSystem.swift in Sources */,
 				8422F3A0176B31DA389C2E96 /* DomainModels.swift in Sources */,
 				2B01E649CDF1D170BC5CB7B4 /* EditBatchView.swift in Sources */,
 				5F304CF40465A14074DB06C7 /* EmptyStateView.swift in Sources */,
+				B5C6E2C07F81DEFFADFEC1E1 /* GamificationService.swift in Sources */,
+				2E135B0FED604FF16EF14F92 /* GeneratePlanIntent.swift in Sources */,
 				49A816AA2A3F1D80B49937DA /* GlassCard.swift in Sources */,
 				9CEDB41571133A0CFA2C077C /* HealthKitService.swift in Sources */,
 				6473C2002C2414560D67F263 /* HomeView.swift in Sources */,
@@ -407,6 +472,7 @@
 				EE3DB458F2C660702231A83E /* InventoryEventRecord.swift in Sources */,
 				ECD047177C3627DC4A6D67A8 /* InventoryRepository.swift in Sources */,
 				622DE74BDA9218EAC5E84874 /* InventoryService.swift in Sources */,
+				3A728F4CAD06A37E14D38019 /* InventoryShortcuts.swift in Sources */,
 				C2766EEC520802B1E95450CA /* InventoryUseCases.swift in Sources */,
 				7777A1108BAE1DADC35BBB01 /* InventoryView.swift in Sources */,
 				618C54D2D55CC4B18E9CB64A /* MacroRecommendationFilterUseCase.swift in Sources */,
@@ -416,10 +482,14 @@
 				A917F42908081DFD09D1949B /* NutritionRing.swift in Sources */,
 				9CCBCDAB56381E05D8179047 /* OnboardingFlowView.swift in Sources */,
 				74EA21D496763AA6104CC52E /* OnboardingView.swift in Sources */,
+				DE983534E1893B21AC8FED48 /* PredictionService.swift in Sources */,
+				C574F53E1FEA87BD6B9FF69C /* PredictionsCard.swift in Sources */,
 				4B23718C89F1ACCF2DE4F18E /* PriceEntryRecord.swift in Sources */,
 				06411A6082360276D54CE45A /* ProductDetailView.swift in Sources */,
 				890576FD5663A5034748E5D1 /* ProductRecord.swift in Sources */,
 				A3A1418540243103ABE5C43D /* ProgressView.swift in Sources */,
+				A1A4CA52D634A68B56596D9E /* ReceiptScanView.swift in Sources */,
+				DD9EF8EEC9511E29648036B0 /* ReceiptScannerService.swift in Sources */,
 				925F7743551FF72421ED860C /* RecipeServiceClient.swift in Sources */,
 				C9D8ACB38417486CAA986205 /* RecipeView.swift in Sources */,
 				23A19E045FFE4E867AAC8EA4 /* RootTabView.swift in Sources */,
@@ -499,9 +569,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = App/InventoryAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "ДомИнвентарь";
@@ -514,9 +586,11 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Камера нужна для сканирования штрихкодов и DataMatrix.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Нужно для чтения веса, жира и КБЖУ из Apple Health.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Нужно для синхронизации данных питания и прогресса.";
+				INFOPLIST_KEY_NSSiriUsageDescription = "Siri поможет быстро добавлять продукты и проверять сроки годности.";
 				INFOPLIST_KEY_RecipeServiceBaseURL = "http://127.0.0.1:8080";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -534,9 +608,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = App/InventoryAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "ДомИнвентарь";
@@ -549,9 +625,11 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Камера нужна для сканирования штрихкодов и DataMatrix.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Нужно для чтения веса, жира и КБЖУ из Apple Health.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Нужно для синхронизации данных питания и прогресса.";
+				INFOPLIST_KEY_NSSiriUsageDescription = "Siri поможет быстро добавлять продукты и проверять сроки годности.";
 				INFOPLIST_KEY_RecipeServiceBaseURL = "http://127.0.0.1:8080";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

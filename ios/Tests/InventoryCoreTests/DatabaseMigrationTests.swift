@@ -28,7 +28,6 @@ final class DatabaseMigrationTests: XCTestCase {
             XCTAssertTrue(indexNames.contains("idx_batches_expiry_date"))
             XCTAssertTrue(indexNames.contains("idx_batches_location"))
             XCTAssertTrue(indexNames.contains("idx_price_entries_product_date"))
-            XCTAssertTrue(indexNames.contains("idx_price_entries_date"))
             XCTAssertTrue(indexNames.contains("idx_events_product_timestamp"))
             XCTAssertTrue(indexNames.contains("idx_internal_code_mappings_product"))
 
@@ -40,14 +39,18 @@ final class DatabaseMigrationTests: XCTestCase {
             XCTAssertTrue(appSettingsColumns.contains("lunch_minute"))
             XCTAssertTrue(appSettingsColumns.contains("dinner_minute"))
             XCTAssertTrue(appSettingsColumns.contains("strict_macro_tracking"))
-            XCTAssertTrue(appSettingsColumns.contains("macro_tolerance_percent"))            XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_mode"))
-            XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_months"))
-            XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_year"))
-            XCTAssertTrue(appSettingsColumns.contains("ai_personalization_enabled"))
-            XCTAssertTrue(appSettingsColumns.contains("ai_cloud_assist_enabled"))
-            XCTAssertTrue(appSettingsColumns.contains("ai_ru_only_storage"))
-            XCTAssertTrue(appSettingsColumns.contains("ai_data_consent_accepted_at"))
-            XCTAssertTrue(appSettingsColumns.contains("ai_data_collection_mode"))
+            XCTAssertTrue(appSettingsColumns.contains("macro_tolerance_percent"))
+            XCTAssertTrue(appSettingsColumns.contains("kcal_goal"))
+            XCTAssertTrue(appSettingsColumns.contains("protein_goal_grams"))
+            XCTAssertTrue(appSettingsColumns.contains("fat_goal_grams"))
+            XCTAssertTrue(appSettingsColumns.contains("carbs_goal_grams"))
+            XCTAssertTrue(appSettingsColumns.contains("weight_goal_kg"))
+            XCTAssertTrue(appSettingsColumns.contains("preferred_color_scheme"))
+            XCTAssertTrue(appSettingsColumns.contains("healthkit_read_enabled"))
+            XCTAssertTrue(appSettingsColumns.contains("healthkit_write_enabled"))
+            XCTAssertTrue(appSettingsColumns.contains("enable_animations"))
+            XCTAssertTrue(appSettingsColumns.contains("macro_goal_source"))
+            XCTAssertTrue(appSettingsColumns.contains("recipe_service_base_url"))
 
             let batchColumns = try String.fetchAll(
                 db,
@@ -74,11 +77,7 @@ final class DatabaseMigrationTests: XCTestCase {
         XCTAssertEqual(settings.mealSchedule, .default)
         XCTAssertTrue(settings.strictMacroTracking)
         XCTAssertEqual(settings.macroTolerancePercent, 25)
-        XCTAssertEqual(settings.bodyMetricsRangeMode, .lastMonths)
-        XCTAssertEqual(settings.bodyMetricsRangeMonths, 12)
-        XCTAssertTrue(settings.aiPersonalizationEnabled)
-        XCTAssertTrue(settings.aiCloudAssistEnabled)
-        XCTAssertTrue(settings.aiRuOnlyStorage)
-        XCTAssertEqual(settings.aiDataCollectionMode, .maximal)
+        XCTAssertEqual(settings.macroGoalSource, .automatic)
+        XCTAssertNil(settings.recipeServiceBaseURLOverride)
     }
 }

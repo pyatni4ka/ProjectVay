@@ -21,34 +21,129 @@ struct SettingsView: View {
     @State private var carbsText = ""
     @State private var weightText = ""
 
+    @State private var selectedTheme: Int = 0
+    @State private var healthKitReadEnabled: Bool = true
+    @State private var healthKitWriteEnabled: Bool = false
+    @State private var animationsEnabled: Bool = true
+    @State private var macroGoalSource: AppSettings.MacroGoalSource = .automatic
+    @State private var recipeServiceURLText: String = ""
+
+    @ObservedObject private var gamification = GamificationService.shared
+
+    private let themeOptions = ["Системный", "Светлый", "Тёмный"]
+
     var body: some View {
         List {
             Section {
+                settingRow(icon: "paintpalette.fill", color: .vayAccent, label: "Тема") {
+                    Picker("Тема", selection: $selectedTheme) {
+                        ForEach(0..<themeOptions.count, id: \.self) { index in
+                            Text(themeOptions[index]).tag(index)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(Color.vayPrimary)
+                }
+            } header: {
+                sectionHeader(icon: "paintbrush.fill", title: "Внешний вид")
+            }
+
+            Section {
+                settingRow(icon: "heart.fill", color: .vayDanger, label: "Читать данные") {
+                    Toggle("", isOn: $healthKitReadEnabled)
+                        .labelsHidden()
+                        .tint(Color.vayPrimary)
+                }
+
+                settingRow(icon: "heart.text.square.fill", color: .vaySuccess, label: "Записывать калории") {
+                    Toggle("", isOn: $healthKitWriteEnabled)
+                        .labelsHidden()
+                        .tint(Color.vayPrimary)
+                }
+            } header: {
+                sectionHeader(icon: "apple.logo", title: "Apple Health")
+            } footer: {
+                Text("Разрешить чтение данных о весе и активности из Apple Health.")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                settingRow(icon: "network", color: .vayInfo, label: "Сервер рецептов") {
+                    TextField("http://192.168.1.10:8080", text: $recipeServiceURLText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .multilineTextAlignment(.trailing)
+                }
+            } header: {
+                sectionHeader(icon: "wifi.router", title: "Подключение")
+            } footer: {
+                Text("Оставьте поле пустым, чтобы использовать адрес по умолчанию из конфигурации приложения.")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                settingRow(icon: "sparkles", color: .vaySecondary, label: "Анимации") {
+                    Toggle("", isOn: $animationsEnabled)
+                        .labelsHidden()
+                        .tint(Color.vayPrimary)
+                }
+            } header: {
+                sectionHeader(icon: "wand.and.stars", title: "Анимация и эффекты")
+            }
+
+            Section {
+                settingRow(icon: "slider.horizontal.3", color: .vayPrimary, label: "Источник") {
+                    Picker("Источник КБЖУ", selection: $macroGoalSource) {
+                        ForEach(AppSettings.MacroGoalSource.allCases, id: \.rawValue) { source in
+                            Text(source.title).tag(source)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(Color.vayPrimary)
+                }
+
                 settingRow(icon: "flame.fill", color: .vayCalories, label: "Калории (ккал)") {
                     TextField("2000", text: $kcalText)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
+                        .disabled(macroGoalSource == .automatic)
+                        .foregroundStyle(macroGoalSource == .automatic ? .secondary : .primary)
                 }
 
                 settingRow(icon: "fish.fill", color: .vayProtein, label: "Белки (г)") {
                     TextField("80", text: $proteinText)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
+                        .disabled(macroGoalSource == .automatic)
+                        .foregroundStyle(macroGoalSource == .automatic ? .secondary : .primary)
                 }
 
                 settingRow(icon: "drop.fill", color: .vayFat, label: "Жиры (г)") {
                     TextField("65", text: $fatText)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
+                        .disabled(macroGoalSource == .automatic)
+                        .foregroundStyle(macroGoalSource == .automatic ? .secondary : .primary)
                 }
 
                 settingRow(icon: "leaf.fill", color: .vayCarbs, label: "Углеводы (г)") {
                     TextField("250", text: $carbsText)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
+                        .disabled(macroGoalSource == .automatic)
+                        .foregroundStyle(macroGoalSource == .automatic ? .secondary : .primary)
                 }
             } header: {
                 sectionHeader(icon: "target", title: "Цели питания")
+            } footer: {
+                Text(macroGoalSource == .automatic
+                     ? "В режиме «Авто» КБЖУ рассчитываются на экране плана питания по HealthKit и формулам."
+                     : "В режиме «Вручную» используем ваши фиксированные цели КБЖУ.")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -95,6 +190,21 @@ struct SettingsView: View {
             }
 
             Section {
+                ForEach(gamification.achievements) { achievement in
+                    achievementRow(achievement)
+                }
+            } header: {
+                sectionHeader(icon: "trophy.fill", title: "Достижения")
+            } footer: {
+                HStack {
+                    Text("Серия: \(gamification.userStats.currentStreak) дней")
+                    Spacer()
+                    Text("Всего продуктов: \(gamification.userStats.totalProductsAdded)")
+                }
+                .font(VayFont.caption(11))
+            }
+
+            Section {
                 Button {
                     VayHaptic.selection()
                     Task { await saveSettings() }
@@ -134,10 +244,6 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isSaving)
-                .vayAccessibilityLabel(
-                    showSaved ? "Настройки сохранены" : "Сохранить настройки",
-                    hint: "Применяет текущие параметры"
-                )
             }
             .listRowBackground(Color.clear)
 
@@ -154,10 +260,14 @@ struct SettingsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, VaySpacing.xs)
-                .vayAccessibilityLabel("Информация о приложении, версия \(appVersionText)")
             } header: {
                 sectionHeader(icon: "info.circle", title: "О приложении")
             }
+
+            Section {
+                Color.clear.frame(height: 60)
+            }
+            .listRowBackground(Color.clear)
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Настройки")
@@ -198,7 +308,43 @@ struct SettingsView: View {
 
             content()
         }
-        .vayAccessibilityLabel(label)
+    }
+
+    private func achievementRow(_ achievement: Achievement) -> some View {
+        HStack(spacing: VaySpacing.md) {
+            Text(achievement.icon)
+                .font(.title2)
+                .frame(width: 40, height: 40)
+                .background(achievement.isUnlocked ? Color.vayPrimaryLight : Color.gray.opacity(0.2))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(achievement.title)
+                    .font(VayFont.label(14))
+                    .foregroundStyle(achievement.isUnlocked ? .primary : .secondary)
+
+                Text(achievement.description)
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
+
+                if !achievement.isUnlocked {
+                    ProgressView(value: achievement.progress)
+                        .tint(Color.vayPrimary)
+                }
+            }
+
+            Spacer()
+
+            if achievement.isUnlocked {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.vaySuccess)
+            } else {
+                Text("\(achievement.currentProgress)/\(achievement.requiredCount)")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func sectionHeader(icon: String, title: String) -> some View {
@@ -226,6 +372,21 @@ struct SettingsView: View {
             breakfastDate = DateComponents.from(minutes: s.mealSchedule.breakfastMinute).asDate
             lunchDate = DateComponents.from(minutes: s.mealSchedule.lunchMinute).asDate
             dinnerDate = DateComponents.from(minutes: s.mealSchedule.dinnerMinute).asDate
+            
+            selectedTheme = s.preferredColorScheme ?? 0
+            healthKitReadEnabled = s.healthKitReadEnabled
+            healthKitWriteEnabled = s.healthKitWriteEnabled
+            animationsEnabled = s.enableAnimations
+            macroGoalSource = s.macroGoalSource
+            recipeServiceURLText = s.recipeServiceBaseURLOverride ?? ""
+
+            if macroGoalSource == .automatic {
+                if kcalText.isEmpty { kcalText = "2100" }
+                if proteinText.isEmpty { proteinText = "140" }
+                if fatText.isEmpty { fatText = "65" }
+                if carbsText.isEmpty { carbsText = "230" }
+            }
+            
             isLoading = false
         } catch {
             errorMessage = error.localizedDescription
@@ -236,17 +397,30 @@ struct SettingsView: View {
     private func saveSettings() async {
         guard !isSaving else { return }
 
+        let normalizedRecipeServiceURL = recipeServiceURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedRecipeServiceURL.isEmpty, !isValidRecipeServerURL(normalizedRecipeServiceURL) {
+            errorMessage = "Укажите корректный URL сервера (http:// или https://)."
+            return
+        }
+
         var updated = settings
         updated.kcalGoal = Double(kcalText)
         updated.proteinGoalGrams = Double(proteinText)
         updated.fatGoalGrams = Double(fatText)
         updated.carbsGoalGrams = Double(carbsText)
         updated.weightGoalKg = Double(weightText.replacingOccurrences(of: ",", with: "."))
+        updated.macroGoalSource = macroGoalSource
         updated.quietStartMinute = Calendar.current.minuteOfDay(from: quietStartDate)
         updated.quietEndMinute = Calendar.current.minuteOfDay(from: quietEndDate)
         updated.mealSchedule.breakfastMinute = Calendar.current.minuteOfDay(from: breakfastDate)
         updated.mealSchedule.lunchMinute = Calendar.current.minuteOfDay(from: lunchDate)
         updated.mealSchedule.dinnerMinute = Calendar.current.minuteOfDay(from: dinnerDate)
+        
+        updated.preferredColorScheme = selectedTheme
+        updated.healthKitReadEnabled = healthKitReadEnabled
+        updated.healthKitWriteEnabled = healthKitWriteEnabled
+        updated.enableAnimations = animationsEnabled
+        updated.recipeServiceBaseURLOverride = normalizedRecipeServiceURL.isEmpty ? nil : normalizedRecipeServiceURL
 
         isSaving = true
         defer { isSaving = false }
@@ -266,6 +440,16 @@ struct SettingsView: View {
             VayHaptic.error()
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func isValidRecipeServerURL(_ value: String) -> Bool {
+        guard
+            let url = URL(string: value),
+            let scheme = url.scheme?.lowercased()
+        else {
+            return false
+        }
+        return scheme == "http" || scheme == "https"
     }
 }
 

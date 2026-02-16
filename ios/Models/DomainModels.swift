@@ -264,16 +264,16 @@ extension InventoryEvent {
 }
 
 struct AppSettings: Codable, Equatable {
-    enum BodyMetricsRangeMode: String, Codable, CaseIterable {
-        case lastMonths
-        case year
-        case sinceYear
-    }
+    enum MacroGoalSource: String, Codable, CaseIterable {
+        case automatic
+        case manual
 
-    enum AIDataCollectionMode: String, Codable, CaseIterable {
-        case conservative
-        case balanced
-        case maximal
+        var title: String {
+            switch self {
+            case .automatic: return "Авто"
+            case .manual: return "Вручную"
+            }
+        }
     }
 
     struct MealSchedule: Codable, Equatable {
@@ -316,14 +316,7 @@ struct AppSettings: Codable, Equatable {
     var mealSchedule: MealSchedule = .default
     var strictMacroTracking: Bool = true
     var macroTolerancePercent: Double = 25
-    var bodyMetricsRangeMode: BodyMetricsRangeMode = .lastMonths
-    var bodyMetricsRangeMonths: Int = 12
-    var bodyMetricsRangeYear: Int = Calendar.current.component(.year, from: Date())
-    var aiPersonalizationEnabled: Bool = true
-    var aiCloudAssistEnabled: Bool = true
-    var aiRuOnlyStorage: Bool = true
-    var aiDataConsentAcceptedAt: Date?
-    var aiDataCollectionMode: AIDataCollectionMode = .maximal
+    var macroGoalSource: MacroGoalSource = .automatic
 
     // Nutrition goals
     var kcalGoal: Double?
@@ -331,6 +324,13 @@ struct AppSettings: Codable, Equatable {
     var fatGoalGrams: Double?
     var carbsGoalGrams: Double?
     var weightGoalKg: Double?
+
+    // App preferences
+    var preferredColorScheme: Int?
+    var healthKitReadEnabled: Bool = true
+    var healthKitWriteEnabled: Bool = false
+    var enableAnimations: Bool = true
+    var recipeServiceBaseURLOverride: String?
 
     static let defaultStores: [Store] = [.pyaterochka, .yandexLavka, .chizhik, .auchan]
 
@@ -346,14 +346,12 @@ struct AppSettings: Codable, Equatable {
         mealSchedule: .default,
         strictMacroTracking: true,
         macroTolerancePercent: 25,
-        bodyMetricsRangeMode: .lastMonths,
-        bodyMetricsRangeMonths: 12,
-        bodyMetricsRangeYear: Calendar.current.component(.year, from: Date()),
-        aiPersonalizationEnabled: true,
-        aiCloudAssistEnabled: true,
-        aiRuOnlyStorage: true,
-        aiDataConsentAcceptedAt: nil,
-        aiDataCollectionMode: .maximal
+        macroGoalSource: .automatic,
+        preferredColorScheme: nil,
+        healthKitReadEnabled: true,
+        healthKitWriteEnabled: false,
+        enableAnimations: true,
+        recipeServiceBaseURLOverride: nil
     )
 
     func normalized() -> AppSettings {
@@ -370,9 +368,6 @@ struct AppSettings: Codable, Equatable {
             }
 
         let normalizedStores = stores.isEmpty ? Self.defaultStores : stores
-        let currentYear = Calendar.current.component(.year, from: Date())
-        let normalizedBodyRangeMonths = min(max(bodyMetricsRangeMonths, 1), 60)
-        let normalizedBodyRangeYear = min(max(bodyMetricsRangeYear, 1970), currentYear)
 
         var result = AppSettings(
             quietStartMinute: Self.clampMinute(quietStartMinute),
@@ -386,20 +381,18 @@ struct AppSettings: Codable, Equatable {
             mealSchedule: mealSchedule.normalized(),
             strictMacroTracking: strictMacroTracking,
             macroTolerancePercent: min(max(macroTolerancePercent, 5), 60),
-            bodyMetricsRangeMode: bodyMetricsRangeMode,
-            bodyMetricsRangeMonths: normalizedBodyRangeMonths,
-            bodyMetricsRangeYear: normalizedBodyRangeYear,
-            aiPersonalizationEnabled: aiPersonalizationEnabled,
-            aiCloudAssistEnabled: aiCloudAssistEnabled,
-            aiRuOnlyStorage: aiRuOnlyStorage,
-            aiDataConsentAcceptedAt: aiDataConsentAcceptedAt,
-            aiDataCollectionMode: aiDataCollectionMode
+            macroGoalSource: macroGoalSource
         )
-        result.kcalGoal = kcalGoal
-        result.proteinGoalGrams = proteinGoalGrams
-        result.fatGoalGrams = fatGoalGrams
-        result.carbsGoalGrams = carbsGoalGrams
-        result.weightGoalKg = weightGoalKg
+        result.kcalGoal = normalizedMacroValue(kcalGoal)
+        result.proteinGoalGrams = normalizedMacroValue(proteinGoalGrams)
+        result.fatGoalGrams = normalizedMacroValue(fatGoalGrams)
+        result.carbsGoalGrams = normalizedMacroValue(carbsGoalGrams)
+        result.weightGoalKg = normalizedMacroValue(weightGoalKg)
+        result.preferredColorScheme = normalizedColorScheme(preferredColorScheme)
+        result.healthKitReadEnabled = healthKitReadEnabled
+        result.healthKitWriteEnabled = healthKitWriteEnabled
+        result.enableAnimations = enableAnimations
+        result.recipeServiceBaseURLOverride = normalizedRecipeServiceURLOverride(recipeServiceBaseURLOverride)
         return result
     }
 
@@ -409,6 +402,29 @@ struct AppSettings: Codable, Equatable {
 
     static func clampMinute(_ minute: Int) -> Int {
         min(max(minute, 0), 23 * 60 + 59)
+    }
+
+    private func normalizedMacroValue(_ value: Double?) -> Double? {
+        guard let value else { return nil }
+        return max(0, value)
+    }
+
+    private func normalizedColorScheme(_ value: Int?) -> Int? {
+        guard let value, (0...2).contains(value) else { return nil }
+        return value
+    }
+
+    private func normalizedRecipeServiceURLOverride(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return nil }
+        guard
+            let url = URL(string: trimmed),
+            let scheme = url.scheme?.lowercased(),
+            scheme == "http" || scheme == "https"
+        else {
+            return nil
+        }
+        return trimmed
     }
 }
 
@@ -425,19 +441,17 @@ extension AppSettings {
         case mealSchedule
         case strictMacroTracking
         case macroTolerancePercent
-        case bodyMetricsRangeMode
-        case bodyMetricsRangeMonths
-        case bodyMetricsRangeYear
-        case aiPersonalizationEnabled
-        case aiCloudAssistEnabled
-        case aiRuOnlyStorage
-        case aiDataConsentAcceptedAt
-        case aiDataCollectionMode
+        case macroGoalSource
         case kcalGoal
         case proteinGoalGrams
         case fatGoalGrams
         case carbsGoalGrams
         case weightGoalKg
+        case preferredColorScheme
+        case healthKitReadEnabled
+        case healthKitWriteEnabled
+        case enableAnimations
+        case recipeServiceBaseURLOverride
     }
 
     init(from decoder: Decoder) throws {
@@ -453,34 +467,17 @@ extension AppSettings {
         mealSchedule = try container.decodeIfPresent(MealSchedule.self, forKey: .mealSchedule) ?? .default
         strictMacroTracking = try container.decodeIfPresent(Bool.self, forKey: .strictMacroTracking) ?? true
         macroTolerancePercent = try container.decodeIfPresent(Double.self, forKey: .macroTolerancePercent) ?? 25
-        if
-            let rawRangeMode = try container.decodeIfPresent(String.self, forKey: .bodyMetricsRangeMode),
-            let parsedRangeMode = BodyMetricsRangeMode(rawValue: rawRangeMode)
-        {
-            bodyMetricsRangeMode = parsedRangeMode
-        } else {
-            bodyMetricsRangeMode = .lastMonths
-        }
-        bodyMetricsRangeMonths = try container.decodeIfPresent(Int.self, forKey: .bodyMetricsRangeMonths) ?? 12
-        bodyMetricsRangeYear = try container.decodeIfPresent(Int.self, forKey: .bodyMetricsRangeYear)
-            ?? Calendar.current.component(.year, from: Date())
-        aiPersonalizationEnabled = try container.decodeIfPresent(Bool.self, forKey: .aiPersonalizationEnabled) ?? true
-        aiCloudAssistEnabled = try container.decodeIfPresent(Bool.self, forKey: .aiCloudAssistEnabled) ?? true
-        aiRuOnlyStorage = try container.decodeIfPresent(Bool.self, forKey: .aiRuOnlyStorage) ?? true
-        aiDataConsentAcceptedAt = try container.decodeIfPresent(Date.self, forKey: .aiDataConsentAcceptedAt)
-        if
-            let rawCollectionMode = try container.decodeIfPresent(String.self, forKey: .aiDataCollectionMode),
-            let parsedCollectionMode = AIDataCollectionMode(rawValue: rawCollectionMode)
-        {
-            aiDataCollectionMode = parsedCollectionMode
-        } else {
-            aiDataCollectionMode = .maximal
-        }
+        macroGoalSource = try container.decodeIfPresent(MacroGoalSource.self, forKey: .macroGoalSource) ?? .automatic
         kcalGoal = try container.decodeIfPresent(Double.self, forKey: .kcalGoal)
         proteinGoalGrams = try container.decodeIfPresent(Double.self, forKey: .proteinGoalGrams)
         fatGoalGrams = try container.decodeIfPresent(Double.self, forKey: .fatGoalGrams)
         carbsGoalGrams = try container.decodeIfPresent(Double.self, forKey: .carbsGoalGrams)
         weightGoalKg = try container.decodeIfPresent(Double.self, forKey: .weightGoalKg)
+        preferredColorScheme = try container.decodeIfPresent(Int.self, forKey: .preferredColorScheme)
+        healthKitReadEnabled = try container.decodeIfPresent(Bool.self, forKey: .healthKitReadEnabled) ?? true
+        healthKitWriteEnabled = try container.decodeIfPresent(Bool.self, forKey: .healthKitWriteEnabled) ?? false
+        enableAnimations = try container.decodeIfPresent(Bool.self, forKey: .enableAnimations) ?? true
+        recipeServiceBaseURLOverride = try container.decodeIfPresent(String.self, forKey: .recipeServiceBaseURLOverride)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -496,19 +493,17 @@ extension AppSettings {
         try container.encode(mealSchedule, forKey: .mealSchedule)
         try container.encode(strictMacroTracking, forKey: .strictMacroTracking)
         try container.encode(macroTolerancePercent, forKey: .macroTolerancePercent)
-        try container.encode(bodyMetricsRangeMode.rawValue, forKey: .bodyMetricsRangeMode)
-        try container.encode(bodyMetricsRangeMonths, forKey: .bodyMetricsRangeMonths)
-        try container.encode(bodyMetricsRangeYear, forKey: .bodyMetricsRangeYear)
-        try container.encode(aiPersonalizationEnabled, forKey: .aiPersonalizationEnabled)
-        try container.encode(aiCloudAssistEnabled, forKey: .aiCloudAssistEnabled)
-        try container.encode(aiRuOnlyStorage, forKey: .aiRuOnlyStorage)
-        try container.encodeIfPresent(aiDataConsentAcceptedAt, forKey: .aiDataConsentAcceptedAt)
-        try container.encode(aiDataCollectionMode.rawValue, forKey: .aiDataCollectionMode)
+        try container.encode(macroGoalSource, forKey: .macroGoalSource)
         try container.encodeIfPresent(kcalGoal, forKey: .kcalGoal)
         try container.encodeIfPresent(proteinGoalGrams, forKey: .proteinGoalGrams)
         try container.encodeIfPresent(fatGoalGrams, forKey: .fatGoalGrams)
         try container.encodeIfPresent(carbsGoalGrams, forKey: .carbsGoalGrams)
         try container.encodeIfPresent(weightGoalKg, forKey: .weightGoalKg)
+        try container.encodeIfPresent(preferredColorScheme, forKey: .preferredColorScheme)
+        try container.encode(healthKitReadEnabled, forKey: .healthKitReadEnabled)
+        try container.encode(healthKitWriteEnabled, forKey: .healthKitWriteEnabled)
+        try container.encode(enableAnimations, forKey: .enableAnimations)
+        try container.encodeIfPresent(recipeServiceBaseURLOverride, forKey: .recipeServiceBaseURLOverride)
     }
 }
 

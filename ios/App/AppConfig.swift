@@ -4,6 +4,7 @@ struct AppConfig {
     let enableEANDB: Bool
     let enableRFProvider: Bool
     let enableOpenFoodFacts: Bool
+    let enableBarcodeListRu: Bool
     let allowInsecureLookupEndpoints: Bool
     let recipeServiceBaseURL: URL?
     let allowInsecureRecipeServiceURL: Bool
@@ -26,6 +27,11 @@ struct AppConfig {
 
         let enableOpenFoodFacts = boolValue(
             env["ENABLE_OPEN_FOOD_FACTS_LOOKUP"] ?? stringValue(info["EnableOpenFoodFactsLookup"]),
+            fallback: true
+        )
+
+        let enableBarcodeListRu = boolValue(
+            env["ENABLE_BARCODE_LIST_RU"] ?? stringValue(info["EnableBarcodeListRu"]),
             fallback: true
         )
 
@@ -91,6 +97,7 @@ struct AppConfig {
             enableEANDB: enableEANDB,
             enableRFProvider: enableRFProvider,
             enableOpenFoodFacts: enableOpenFoodFacts,
+            enableBarcodeListRu: enableBarcodeListRu,
             allowInsecureLookupEndpoints: allowInsecureLookupEndpoints,
             recipeServiceBaseURL: recipeServiceBaseURL,
             allowInsecureRecipeServiceURL: allowInsecureRecipeServiceURL,

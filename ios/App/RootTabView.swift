@@ -11,25 +11,13 @@ struct RootTabView: View {
         case home
         case inventory
         case mealPlan
-        case progress
         case settings
 
         var icon: String {
             switch self {
-            case .home: return "house"
-            case .inventory: return "refrigerator"
-            case .mealPlan: return "fork.knife"
-            case .progress: return "chart.line.uptrend.xyaxis"
-            case .settings: return "gearshape"
-            }
-        }
-
-        var selectedIcon: String {
-            switch self {
             case .home: return "house.fill"
             case .inventory: return "refrigerator.fill"
             case .mealPlan: return "fork.knife.circle.fill"
-            case .progress: return "chart.line.uptrend.xyaxis.circle.fill"
             case .settings: return "gearshape.fill"
             }
         }
@@ -39,68 +27,32 @@ struct RootTabView: View {
             case .home: return "Главная"
             case .inventory: return "Запасы"
             case .mealPlan: return "План"
-            case .progress: return "Прогресс"
-            case .settings: return "Ещё"
+            case .settings: return "Настройки"
             }
         }
     }
 
+    static let leadingTabs: [Tab] = [.home, .inventory]
+    static let trailingTabs: [Tab] = [.mealPlan, .settings]
+
     @State private var selectedTab: Tab = .home
     @State private var previousTab: Tab = .home
-    @State private var tabBarVisible = true
+    @State private var loadedTabs: Set<Tab> = [.home]
     @State private var showScannerSheet = false
+    @State private var showReceiptScanSheet = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
-                NavigationStack {
-                    HomeView(
-                        inventoryService: inventoryService,
-                        settingsService: settingsService,
-                        onOpenScanner: { showScannerSheet = true }
-                    )
-                }
-                .tag(Tab.home)
-
-                NavigationStack {
-                    InventoryView(
-                        inventoryService: inventoryService,
-                        onOpenScanner: { showScannerSheet = true }
-                    )
-                }
-                .tag(Tab.inventory)
-
-                NavigationStack {
-                    MealPlanView(
-                        inventoryService: inventoryService,
-                        settingsService: settingsService,
-                        healthKitService: healthKitService,
-                        recipeServiceClient: recipeServiceClient,
-                        onOpenScanner: { showScannerSheet = true }
-                    )
-                }
-                .tag(Tab.mealPlan)
-
-                NavigationStack {
-                    ProgressTrackingView(
-                        inventoryService: inventoryService,
-                        settingsService: settingsService
-                    )
-                }
-                .tag(Tab.progress)
-
-                NavigationStack {
-                    SettingsView(settingsService: settingsService)
-                }
-                .tag(Tab.settings)
+            ZStack {
+                tabContent(for: .home)
+                tabContent(for: .inventory)
+                tabContent(for: .mealPlan)
+                tabContent(for: .settings)
             }
-            .toolbar(.hidden, for: .tabBar)
 
-            if tabBarVisible {
-                customTabBar
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+            customTabBar
         }
+        .ignoresSafeArea(.keyboard)
         .sheet(isPresented: $showScannerSheet) {
             NavigationStack {
                 ScannerView(
@@ -111,7 +63,16 @@ struct RootTabView: View {
                 )
             }
         }
+        .sheet(isPresented: $showReceiptScanSheet) {
+            NavigationStack {
+                ReceiptScanView(
+                    inventoryService: inventoryService,
+                    onItemsAdded: {}
+                )
+            }
+        }
         .onChange(of: selectedTab) { _, newValue in
+            loadedTabs.insert(newValue)
             if newValue != previousTab {
                 VayHaptic.selection()
                 previousTab = newValue
@@ -120,54 +81,131 @@ struct RootTabView: View {
         .vayDynamicType()
     }
 
+    @ViewBuilder
+    private func tabContent(for tab: Tab) -> some View {
+        let isSelected = selectedTab == tab
+        Group {
+            if loadedTabs.contains(tab) {
+                switch tab {
+                case .home:
+                    NavigationStack {
+                        HomeView(
+                            inventoryService: inventoryService,
+                            settingsService: settingsService,
+                            onOpenScanner: { showScannerSheet = true },
+                            onOpenReceiptScan: { showReceiptScanSheet = true }
+                        )
+                    }
+                case .inventory:
+                    NavigationStack {
+                        InventoryView(
+                            inventoryService: inventoryService,
+                            onOpenScanner: { showScannerSheet = true }
+                        )
+                    }
+                case .mealPlan:
+                    NavigationStack {
+                        MealPlanView(
+                            inventoryService: inventoryService,
+                            settingsService: settingsService,
+                            healthKitService: healthKitService,
+                            recipeServiceClient: recipeServiceClient,
+                            onOpenScanner: { showScannerSheet = true }
+                        )
+                    }
+                case .settings:
+                    NavigationStack {
+                        SettingsView(settingsService: settingsService)
+                    }
+                }
+            } else {
+                Color.clear
+            }
+        }
+        .opacity(isSelected ? 1 : 0)
+        .allowsHitTesting(isSelected)
+    }
+
     private var customTabBar: some View {
+        ZStack(alignment: .top) {
+            HStack(spacing: 0) {
+                tabGroup(Self.leadingTabs)
+
+                Color.clear
+                    .frame(width: 72)
+
+                tabGroup(Self.trailingTabs)
+            }
+            .padding(.horizontal, VaySpacing.sm)
+            .padding(.top, VaySpacing.md)
+            .padding(.bottom, VaySpacing.sm)
+            .background(.ultraThinMaterial)
+            .clipShape(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: VayRadius.xxl,
+                    bottomLeadingRadius: VayRadius.xxl,
+                    bottomTrailingRadius: VayRadius.xxl,
+                    topTrailingRadius: VayRadius.xxl,
+                    style: .continuous
+                )
+            )
+            .vayShadow(.card)
+
+            fabButton
+                .offset(y: -22)
+        }
+        .frame(height: 80)
+        .padding(.bottom, VaySpacing.xs)
+    }
+
+    private func tabGroup(_ tabs: [Tab]) -> some View {
         HStack(spacing: 0) {
-            ForEach(Tab.allCases, id: \.rawValue) { tab in
+            ForEach(tabs, id: \.rawValue) { tab in
                 tabButton(for: tab)
             }
         }
-        .padding(.horizontal, VaySpacing.sm)
-        .padding(.top, VaySpacing.md)
-        .padding(.bottom, VaySpacing.xxl)
-        .background(.ultraThinMaterial)
-        .clipShape(
-            UnevenRoundedRectangle(
-                topLeadingRadius: VayRadius.xxl,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: VayRadius.xxl,
-                style: .continuous
-            )
-        )
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [.white.opacity(0.2), .clear],
-                        startPoint: .leading,
-                        endPoint: .trailing
+        .frame(maxWidth: .infinity)
+    }
+
+    private var fabButton: some View {
+        Button {
+            VayHaptic.medium()
+            withAnimation(VayAnimation.springSnappy) {
+                showScannerSheet = true
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.vayPrimary, .vayAccent],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-                .frame(height: 0.5)
+                    .frame(width: 56, height: 56)
+                    .vayShadow(.glow)
+
+                Image(systemName: "barcode.viewfinder")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
         }
-        .vayShadow(.card)
+        .buttonStyle(FABButtonStyle())
+        .vayAccessibilityLabel("Открыть сканер", hint: "Сканировать штрихкод товара")
     }
 
     private func tabButton(for tab: Tab) -> some View {
         let isSelected = selectedTab == tab
 
         return Button {
-            withAnimation(VayAnimation.springSnappy) {
-                selectedTab = tab
-            }
+            selectedTab = tab
         } label: {
             VStack(spacing: VaySpacing.xs) {
-                Image(systemName: isSelected ? tab.selectedIcon : tab.icon)
-                    .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
+                Image(systemName: tab.icon)
+                    .font(.system(size: isSelected ? 22 : 20, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Color.vayPrimary : Color.secondary)
-                    .scaleEffect(isSelected ? 1.15 : 1.0)
-                    .symbolEffect(.bounce, value: isSelected)
-                    .frame(height: 32)
+                    .frame(height: 28)
 
                 Text(tab.title)
                     .font(VayFont.caption(10))
@@ -181,5 +219,13 @@ struct RootTabView: View {
             "Вкладка \(tab.title)",
             hint: isSelected ? "Текущая вкладка" : "Дважды нажмите для перехода"
         )
+    }
+}
+
+struct FABButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.9 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
     }
 }

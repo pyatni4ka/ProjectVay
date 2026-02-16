@@ -1,6 +1,5 @@
 import Foundation
 import UserNotifications
-import Nuke
 
 struct AppDependencies {
     let inventoryService: InventoryService
@@ -9,11 +8,8 @@ struct AppDependencies {
     let scannerService: ScannerService
     let barcodeLookupService: BarcodeLookupService
     let recipeServiceClient: RecipeServiceClient?
-    private static var didConfigureImagePipeline = false
 
     static func makeLive() throws -> AppDependencies {
-        configureImagePipelineIfNeeded()
-
         let config = AppConfig.live()
         let dbQueue = try AppDatabase.makeDatabaseQueue()
         let inventoryRepository = InventoryRepository(dbQueue: dbQueue)
@@ -36,14 +32,18 @@ struct AppDependencies {
         let scannerService = ScannerService()
 
         var providers: [any BarcodeLookupProvider] = []
+        // Free public sources are primary defaults; optional providers remain opt-in.
+        if config.enableOpenFoodFacts {
+            providers.append(OpenFoodFactsBarcodeProvider())
+        }
+        if config.enableBarcodeListRu {
+            providers.append(BarcodeListRuProvider())
+        }
         if config.enableEANDB {
             providers.append(EANDBBarcodeProvider(apiKey: config.eanDBApiKey))
         }
         if config.enableRFProvider, let rfLookupBaseURL = config.rfLookupBaseURL {
             providers.append(RFBarcodeProvider(endpoint: rfLookupBaseURL))
-        }
-        if config.enableOpenFoodFacts {
-            providers.append(OpenFoodFactsBarcodeProvider())
         }
 
         let barcodeLookupService = BarcodeLookupService(
@@ -53,7 +53,14 @@ struct AppDependencies {
             policy: config.lookupPolicy
         )
 
-        let recipeServiceClient = config.recipeServiceBaseURL.map {
+        let persistedSettings = (try? settingsRepository.loadSettings()) ?? .default
+        let overrideRecipeServiceURL = resolvedRecipeServiceURL(
+            from: persistedSettings.recipeServiceBaseURLOverride,
+            allowInsecure: config.allowInsecureRecipeServiceURL
+        )
+        let resolvedRecipeServiceBaseURL = overrideRecipeServiceURL ?? config.recipeServiceBaseURL
+
+        let recipeServiceClient = resolvedRecipeServiceBaseURL.map {
             RecipeServiceClient(baseURL: $0)
         }
 
@@ -67,21 +74,20 @@ struct AppDependencies {
         )
     }
 
-    private static func configureImagePipelineIfNeeded() {
-        guard !didConfigureImagePipeline else { return }
-        didConfigureImagePipeline = true
+    private static func resolvedRecipeServiceURL(from rawValue: String?, allowInsecure: Bool) -> URL? {
+        guard
+            let raw = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !raw.isEmpty,
+            let url = URL(string: raw),
+            let scheme = url.scheme?.lowercased()
+        else {
+            return nil
+        }
 
-        var configuration = ImagePipeline.Configuration()
-        let sessionConfiguration = URLSessionConfiguration.default
-        sessionConfiguration.requestCachePolicy = .returnCacheDataElseLoad
-        sessionConfiguration.urlCache = URLCache(
-            memoryCapacity: 40 * 1024 * 1024,
-            diskCapacity: 250 * 1024 * 1024,
-            directory: nil
-        )
-        configuration.dataLoader = DataLoader(configuration: sessionConfiguration)
-        configuration.dataCache = try? DataCache(name: "com.projectvay.inventoryai.images")
-        configuration.imageCache = ImageCache.shared
-        ImagePipeline.shared = ImagePipeline(configuration: configuration)
+        if allowInsecure {
+            return scheme == "http" || scheme == "https" ? url : nil
+        }
+
+        return scheme == "https" ? url : nil
     }
 }

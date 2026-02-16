@@ -35,27 +35,104 @@ struct InventoryView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: VaySpacing.lg) {
-                locationFilter
-                sortPicker
-
-                if isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, minHeight: 220)
-                } else if filteredProducts.isEmpty {
-                    emptyState
-                } else {
-                    productsList
+        List {
+            Section {
+                // Inline search bar
+                HStack(spacing: VaySpacing.sm) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Поиск продуктов...", text: $searchText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
-                Color.clear.frame(height: VaySpacing.huge + VaySpacing.xxl)
+                locationFilter
+                sortPicker
             }
-            .padding(.horizontal, VaySpacing.lg)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+
+            if isLoading {
+                Section {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                }
+                .listRowBackground(Color.clear)
+            } else if filteredProducts.isEmpty {
+                Section {
+                    emptyState
+                }
+                .listRowBackground(Color.clear)
+            } else {
+                Section {
+                    ForEach(filteredProducts) { product in
+                        let productBatches = batches.filter { $0.productId == product.id }
+                        let nearestExpiry = productBatches.compactMap(\.expiryDate).min()
+                        let totalQty = productBatches.reduce(0.0) { $0 + $1.quantity }
+                        let mainUnit = productBatches.first?.unit ?? .pcs
+
+                        NavigationLink {
+                            ProductDetailView(
+                                productID: product.id,
+                                inventoryService: inventoryService
+                            )
+                        } label: {
+                            productCard(product)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                productToDelete = product
+                                showDeleteConfirm = true
+                            } label: {
+                                Label("Удалить", systemImage: "trash")
+                            }
+
+                            Button {
+                                Task { await writeOffProduct(product) }
+                            } label: {
+                                Label("Списать", systemImage: "minus.circle")
+                            }
+                            .tint(.vayWarning)
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                Task { await consumeProduct(product) }
+                            } label: {
+                                Label("Съедено", systemImage: "checkmark.circle")
+                            }
+                            .tint(.vaySuccess)
+                        }
+                        .vayAccessibilityLabel(
+                            accessibilityLabel(for: product, qty: totalQty, unit: mainUnit, expiry: nearestExpiry),
+                            hint: "Нажмите для просмотра деталей. Смахните для действий."
+                        )
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+
+            // Bottom spacer for tab bar
+            Section {
+                Color.clear.frame(height: 80)
+            }
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .background(Color.vayBackground)
         .navigationTitle("Запасы")
-        .searchable(text: $searchText, prompt: "Поиск продуктов...")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button(action: onOpenScanner) {
@@ -240,53 +317,7 @@ struct InventoryView: View {
         .padding(.horizontal, VaySpacing.xs)
     }
 
-    private var productsList: some View {
-        LazyVStack(spacing: VaySpacing.md) {
-            ForEach(filteredProducts) { product in
-                let productBatches = batches.filter { $0.productId == product.id }
-                let nearestExpiry = productBatches.compactMap(\.expiryDate).min()
-                let totalQty = productBatches.reduce(0.0) { $0 + $1.quantity }
-                let mainUnit = productBatches.first?.unit ?? .pcs
 
-                NavigationLink {
-                    ProductDetailView(
-                        productID: product.id,
-                        inventoryService: inventoryService
-                    )
-                } label: {
-                    productCard(product)
-                }
-                .buttonStyle(.plain)
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        productToDelete = product
-                        showDeleteConfirm = true
-                    } label: {
-                        Label("Удалить", systemImage: "trash")
-                    }
-
-                    Button {
-                        Task { await writeOffProduct(product) }
-                    } label: {
-                        Label("Списать", systemImage: "minus.circle")
-                    }
-                    .tint(.vayWarning)
-                }
-                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                    Button {
-                        Task { await consumeProduct(product) }
-                    } label: {
-                        Label("Съедено", systemImage: "checkmark.circle")
-                    }
-                    .tint(.vaySuccess)
-                }
-                .vayAccessibilityLabel(
-                    accessibilityLabel(for: product, qty: totalQty, unit: mainUnit, expiry: nearestExpiry),
-                    hint: "Нажмите для просмотра деталей. Смахните для действий."
-                )
-            }
-        }
-    }
 
     private func productCard(_ product: Product) -> some View {
         let productBatches = batches.filter { $0.productId == product.id }

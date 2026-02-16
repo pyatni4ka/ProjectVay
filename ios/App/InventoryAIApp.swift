@@ -4,6 +4,9 @@ import SwiftUI
 struct InventoryAIApp: App {
     private let dependencies: AppDependencies
     @StateObject private var coordinator: AppCoordinator
+    
+    @AppStorage("preferredColorScheme") private var storedColorScheme: Int = 0
+    @AppStorage("enableAnimations") private var animationsEnabled: Bool = true
 
     init() {
         do {
@@ -45,9 +48,24 @@ struct InventoryAIApp: App {
                 }
             }
             .environmentObject(coordinator)
+            .preferredColorScheme(colorScheme)
+            .animation(animationsEnabled ? .default : .none, value: animationsEnabled)
             .task {
                 await coordinator.bootstrap()
             }
+        }
+    }
+    
+    private var colorScheme: ColorScheme? {
+        switch storedColorScheme {
+        case 0:
+            return nil
+        case 1:
+            return .light
+        case 2:
+            return .dark
+        default:
+            return nil
         }
     }
 }

@@ -131,7 +131,14 @@ final class OpenFoodFactsBarcodeProvider: BarcodeLookupProvider, @unchecked Send
     }
 
     func lookup(barcode: String) async throws -> BarcodeLookupPayload? {
-        guard let url = URL(string: "https://world.openfoodfacts.org/api/v2/product/\(barcode).json") else {
+        guard var components = URLComponents(string: "https://world.openfoodfacts.org/api/v2/product/\(barcode).json") else {
+            throw BarcodeLookupProviderError.invalidEndpoint
+        }
+        components.queryItems = [
+            URLQueryItem(name: "lc", value: "ru"),
+            URLQueryItem(name: "fields", value: "code,product_name,product_name_ru,brands,categories,categories_tags_ru,nutriments")
+        ]
+        guard let url = components.url else {
             throw BarcodeLookupProviderError.invalidEndpoint
         }
 
@@ -186,10 +193,11 @@ final class OpenFoodFactsBarcodeProvider: BarcodeLookupProvider, @unchecked Send
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first
 
-        let category = product.categories?
+        let rawCategory = product.categories?
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty }) ?? "Продукты"
+            .first(where: { !$0.isEmpty && !$0.hasPrefix("en:") && !$0.hasPrefix("fr:") })
+        let category = rawCategory ?? "Продукты"
 
         let nutrition = Nutrition(
             kcal: product.nutriments?.kcal,
@@ -205,6 +213,135 @@ final class OpenFoodFactsBarcodeProvider: BarcodeLookupProvider, @unchecked Send
             category: category,
             nutrition: nutrition
         )
+    }
+}
+
+// MARK: - barcode-list.ru (HTML parsing)
+
+final class BarcodeListRuProvider: BarcodeLookupProvider, @unchecked Sendable {
+    let providerID = "barcode_list_ru"
+
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    func lookup(barcode: String) async throws -> BarcodeLookupPayload? {
+        guard var components = URLComponents(string: "https://barcode-list.ru/barcode/RU/Поиск.htm") else {
+            return nil
+        }
+        components.queryItems = [URLQueryItem(name: "barcode", value: barcode)]
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+        request.setValue("ru-RU,ru;q=0.9", forHTTPHeaderField: "Accept-Language")
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            return nil
+        }
+
+        guard let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1251) else {
+            return nil
+        }
+
+        // Extract product name from <title> tag: "Штрихкод ... - ProductName"
+        let name = extractProductName(from: html)
+        guard let name, !name.isEmpty else { return nil }
+
+        let brand = extractMeta(named: "brand", from: html)
+        let category = extractBreadcrumbCategory(from: html)
+
+        return BarcodeLookupPayload(
+            barcode: barcode,
+            name: name,
+            brand: brand,
+            category: category ?? "Продукты",
+            nutrition: .empty
+        )
+    }
+
+    // MARK: - HTML Parsing Helpers
+
+    private func extractProductName(from html: String) -> String? {
+        // Helper to check if a name is just a generic "Barcode ..." string
+        func isGeneric(_ name: String) -> Bool {
+            let lower = name.lowercased()
+            return lower.hasPrefix("штрих-код") || lower.hasPrefix("штрихкод") || lower.hasPrefix("barcode") || lower == "поиск"
+        }
+
+        // Try og:title meta tag first
+        if let ogTitle = extractMeta(property: "og:title", from: html) {
+            // Format: "Штрихкод 4607... - Название продукта"
+            if let dashRange = ogTitle.range(of: " - ") {
+                let name = String(ogTitle[dashRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty && !isGeneric(name) { return name }
+            }
+        }
+
+        // Fallback: try <title> tag
+        if let titleContent = extractTagContent(tag: "title", from: html) {
+            // Format similar to og:title
+            if let dashRange = titleContent.range(of: " - ") {
+                let name = String(titleContent[dashRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty && !isGeneric(name) { return name }
+            } else if !isGeneric(titleContent) {
+                 return titleContent
+            }
+        }
+
+        // Fallback: try <h1> tag
+        if let h1 = extractTagContent(tag: "h1", from: html) {
+            let cleaned = h1.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty && cleaned.count > 3 && !isGeneric(cleaned) { return cleaned }
+        }
+
+        return nil
+    }
+
+    private func extractMeta(property: String, from html: String) -> String? {
+        // <meta property="og:title" content="...">
+        let pattern = "<meta[^>]+property=\"\(property)\"[^>]+content=\"([^\"]*)\""
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let range = NSRange(html.startIndex..., in: html)
+        guard let match = regex.firstMatch(in: html, range: range),
+              let contentRange = Range(match.range(at: 1), in: html) else { return nil }
+        return String(html[contentRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func extractMeta(named name: String, from html: String) -> String? {
+        // <meta name="brand" content="...">
+        let pattern = "<meta[^>]+name=\"\(name)\"[^>]+content=\"([^\"]*)\""
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let range = NSRange(html.startIndex..., in: html)
+        guard let match = regex.firstMatch(in: html, range: range),
+              let contentRange = Range(match.range(at: 1), in: html) else { return nil }
+        let value = String(html[contentRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private func extractTagContent(tag: String, from html: String) -> String? {
+        let pattern = "<\(tag)[^>]*>([^<]+)</\(tag)>"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let range = NSRange(html.startIndex..., in: html)
+        guard let match = regex.firstMatch(in: html, range: range),
+              let contentRange = Range(match.range(at: 1), in: html) else { return nil }
+        return String(html[contentRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func extractBreadcrumbCategory(from html: String) -> String? {
+        // Try to find breadcrumb-like category links
+        let pattern = "class=\"breadcrumb[^\"]*\"[^>]*>[^<]*<a[^>]*>([^<]+)</a>"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else { return nil }
+        let range = NSRange(html.startIndex..., in: html)
+        let matches = regex.matches(in: html, range: range)
+        // Take the last breadcrumb as most specific category
+        guard let lastMatch = matches.last,
+              let contentRange = Range(lastMatch.range(at: 1), in: html) else { return nil }
+        let value = String(html[contentRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }
 

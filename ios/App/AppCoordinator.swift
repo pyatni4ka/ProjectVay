@@ -60,6 +60,5 @@ enum RootTab: Hashable {
     case home
     case inventory
     case mealPlan
-    case progress
     case settings
 }
