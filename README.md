@@ -34,24 +34,6 @@
 - `backend/` — Node.js/TypeScript API для рецептов (search/recommend/fetch/sources/meal-plan + whitelist + memory+SQLite cache).
 - `docs/` — архитектура, API-спека, ранжирование, тест-план, заметки по дистрибуции IPA (`docs/IPA_DISTRIBUTION.md`).
 
-## Локальная проверка iOS-ядра
-
-В `ios/` добавлен `Swift Package` для тестов доменной/инфраструктурной логики.
-
-```bash
-cd /Users/antonpyatnica/Downloads/ProjectVay/ios
-swift test
-```
-
-## Локальная проверка backend
-
-```bash
-cd /Users/antonpyatnica/Downloads/ProjectVay/backend
-npm install
-npm test
-npm run build
-```
-
 ## Ограничения текущего этапа
 
 - `EAN-DB` и RF-провайдер подключены как опциональные (нужны реальные ключи/endpoint);
