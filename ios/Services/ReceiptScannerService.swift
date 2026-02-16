@@ -1,6 +1,8 @@
 import Foundation
 import Vision
+#if canImport(UIKit)
 import UIKit
+#endif
 
 struct ScannedReceiptItem: Identifiable, Equatable {
     let id = UUID()
@@ -20,11 +22,12 @@ enum ReceiptScannerError: Error {
     case noTextFound
 }
 
-final class ReceiptScannerService {
+final class ReceiptScannerService: @unchecked Sendable {
     static let shared = ReceiptScannerService()
     
     private init() {}
     
+    #if canImport(UIKit)
     func scanReceipt(from image: UIImage) async throws -> [ScannedReceiptItem] {
         guard let cgImage = image.cgImage else {
             throw ReceiptScannerError.imageProcessingFailed
@@ -39,6 +42,7 @@ final class ReceiptScannerService {
         let items = parseReceiptText(recognizedText)
         return items
     }
+    #endif
     
     private func performTextRecognition(on image: CGImage) async throws -> [String] {
         try await withCheckedThrowingContinuation { continuation in

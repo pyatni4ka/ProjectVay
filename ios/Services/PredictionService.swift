@@ -30,7 +30,7 @@ struct ProductPrediction: Identifiable, Equatable {
     }
 }
 
-final class PredictionService {
+final class PredictionService: @unchecked Sendable {
     static let shared = PredictionService()
     
     private let userDefaults = UserDefaults.standard

@@ -45,6 +45,7 @@ struct MealPlanView: View {
     @State private var hasRequestedHealthAccess = false
     @State private var hasInventoryProducts = true
     @State private var availableIngredients: Set<String> = []
+    private let todayMenuSnapshotStore = TodayMenuSnapshotStore()
 
     var body: some View {
         ScrollView {
@@ -82,7 +83,7 @@ struct MealPlanView: View {
                 }
 
 
-                Color.clear.frame(height: 100)
+                Color.clear.frame(height: VayLayout.tabBarOverlayInset)
             }
             .padding(.horizontal, VaySpacing.lg)
         }
@@ -107,6 +108,9 @@ struct MealPlanView: View {
             await generatePlan()
         }
         .onChange(of: selectedRange) { _, _ in
+            Task { await generatePlan() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .appSettingsDidChange)) { _ in
             Task { await generatePlan() }
         }
     }
@@ -406,10 +410,6 @@ struct MealPlanView: View {
             let settings = try await settingsTask
             macroGoalSource = settings.macroGoalSource
 
-            if let recipeServiceClient {
-                recipeServiceClient.updateBaseURL(validRecipeServiceURL(from: settings.recipeServiceBaseURLOverride))
-            }
-
             let nutritionSnapshot = await computeAdaptiveNutritionSnapshot(settings: settings)
 
             dayTargetNutrition = selectedRange == .day ? nutritionSnapshot.planDayTarget : nutritionSnapshot.baselineDayTarget
@@ -442,7 +442,7 @@ struct MealPlanView: View {
             hasInventoryProducts = true
 
             guard let recipeServiceClient else {
-                offlineStatusMessage = "Сервер рецептов не настроен. Укажите URL сервера в настройках."
+                offlineStatusMessage = "Сервис рецептов сейчас недоступен."
                 errorMessage = nil
                 return
             }
@@ -463,6 +463,7 @@ struct MealPlanView: View {
             let generated = try await recipeServiceClient.generateMealPlan(payload: payload)
             mealPlan = generated
             offlineStatusMessage = nil
+            persistTodayMenuSnapshot(from: generated)
 
             let nextMealBudget = budgetPerDay > 0 ? budgetPerDay / Double(max(1, nutritionSnapshot.remainingMealsCount)) : nil
             do {
@@ -523,6 +524,27 @@ struct MealPlanView: View {
         }
     }
 
+    private func persistTodayMenuSnapshot(from plan: MealPlanGenerateResponse) {
+        guard let firstDay = plan.days.first, !firstDay.entries.isEmpty else {
+            return
+        }
+
+        let items = firstDay.entries.map { entry in
+            TodayMenuSnapshot.Item(
+                mealType: entry.mealType,
+                title: entry.recipe.title,
+                kcal: entry.kcal
+            )
+        }
+
+        let snapshot = TodayMenuSnapshot(
+            generatedAt: Date(),
+            items: items,
+            estimatedCost: firstDay.totals.estimatedCost
+        )
+        todayMenuSnapshotStore.save(snapshot)
+    }
+
     private func computeAdaptiveNutritionSnapshot(settings: AppSettings) async -> AdaptiveNutritionUseCase.Output {
         if settings.healthKitReadEnabled, !hasRequestedHealthAccess {
             hasRequestedHealthAccess = true
@@ -534,7 +556,12 @@ struct MealPlanView: View {
         if settings.healthKitReadEnabled, settings.macroGoalSource == .automatic {
             do {
                 let metrics = try await healthKitService.fetchLatestMetrics()
-                automaticDailyCalories = Double(healthKitService.calculateDailyCalories(metrics: metrics, targetLossPerWeek: 0.5))
+                automaticDailyCalories = Double(
+                    healthKitService.calculateDailyCalories(
+                        metrics: metrics,
+                        targetLossPerWeek: settings.dietProfile.targetLossPerWeek
+                    )
+                )
                 weightKG = metrics.weightKG
             } catch {
                 automaticDailyCalories = nil
@@ -563,19 +590,6 @@ struct MealPlanView: View {
                 healthIntegrationEnabled: settings.healthKitReadEnabled
             )
         )
-    }
-
-    private func validRecipeServiceURL(from value: String?) -> URL? {
-        guard
-            let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !value.isEmpty,
-            let url = URL(string: value),
-            let scheme = url.scheme?.lowercased(),
-            scheme == "http" || scheme == "https"
-        else {
-            return nil
-        }
-        return url
     }
 
     private func offlineMessage(for error: Error, hasCachedPlan: Bool) -> String? {

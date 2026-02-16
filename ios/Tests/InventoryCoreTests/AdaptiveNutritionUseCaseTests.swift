@@ -115,6 +115,32 @@ final class AdaptiveNutritionUseCaseTests: XCTestCase {
         XCTAssertEqual(output.nextMealTarget.kcal ?? 0, 500, accuracy: 0.001)
     }
 
+    func testManualModeIgnoresAutomaticCaloriesEvenWithExtremeDietProfile() {
+        var settings = AppSettings.default
+        settings.macroGoalSource = .manual
+        settings.dietProfile = .extreme
+        settings.kcalGoal = 1750
+        settings.proteinGoalGrams = 120
+        settings.fatGoalGrams = 55
+        settings.carbsGoalGrams = 150
+
+        let output = useCase.execute(
+            .init(
+                settings: settings,
+                range: .day,
+                now: date(hour: 12, minute: 0),
+                automaticDailyCalories: 2400,
+                weightKG: 82,
+                consumedNutrition: Nutrition(kcal: 300, protein: 20, fat: 10, carbs: 25),
+                consumedFetchFailed: false
+            )
+        )
+
+        XCTAssertEqual(output.baselineDayTarget.kcal ?? 0, 1750, accuracy: 0.001)
+        XCTAssertEqual(output.planDayTarget.kcal ?? 0, 1450, accuracy: 0.001)
+        XCTAssertTrue(output.statusMessage.contains("ручная цель"))
+    }
+
     private func date(hour: Int, minute: Int) -> Date {
         let calendar = Calendar(identifier: .gregorian)
         var components = DateComponents()

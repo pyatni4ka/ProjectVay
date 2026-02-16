@@ -50,7 +50,7 @@ enum RecipeServiceClientError: Error, Equatable, LocalizedError {
     }
 }
 
-final class RecipeServiceClient {
+final class RecipeServiceClient: @unchecked Sendable {
     private let defaultBaseURL: URL
     private var baseURL: URL
     private let session: URLSession

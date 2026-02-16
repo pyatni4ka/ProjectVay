@@ -92,3 +92,56 @@ struct MealPlanGenerateResponse: Codable {
     let estimatedTotalCost: Double
     let warnings: [String]
 }
+
+struct TodayMenuSnapshot: Codable, Equatable {
+    struct Item: Codable, Equatable {
+        let mealType: String
+        let title: String
+        let kcal: Double
+    }
+
+    let generatedAt: Date
+    let items: [Item]
+    let estimatedCost: Double?
+}
+
+final class TodayMenuSnapshotStore {
+    private let userDefaults: UserDefaults
+    private let key: String
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+
+    init(
+        userDefaults: UserDefaults = .standard,
+        key: String = "vay_today_menu_snapshot"
+    ) {
+        self.userDefaults = userDefaults
+        self.key = key
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        self.encoder = encoder
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.decoder = decoder
+    }
+
+    func save(_ snapshot: TodayMenuSnapshot) {
+        guard let data = try? encoder.encode(snapshot) else { return }
+        userDefaults.set(data, forKey: key)
+    }
+
+    func load() -> TodayMenuSnapshot? {
+        guard let data = userDefaults.data(forKey: key) else { return nil }
+        return try? decoder.decode(TodayMenuSnapshot.self, from: data)
+    }
+
+    func clear() {
+        userDefaults.removeObject(forKey: key)
+    }
+
+    func isFreshForToday(_ snapshot: TodayMenuSnapshot) -> Bool {
+        Calendar.current.isDate(snapshot.generatedAt, inSameDayAs: Date())
+    }
+}

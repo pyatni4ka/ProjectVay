@@ -108,6 +108,11 @@ enum VayRadius {
     static let pill: CGFloat = 100
 }
 
+enum VayLayout {
+    /// Extra bottom space for the custom tab bar + safe-area on iPhone devices.
+    static let tabBarOverlayInset: CGFloat = 124
+}
+
 // MARK: - Shadows
 
 struct VayShadow {
@@ -131,11 +136,33 @@ extension View {
 // MARK: - Animations
 
 enum VayAnimation {
-    static let springBounce = Animation.spring(response: 0.5, dampingFraction: 0.7)
-    static let springSmooth = Animation.spring(response: 0.4, dampingFraction: 0.85)
-    static let springSnappy = Animation.spring(response: 0.3, dampingFraction: 0.9)
-    static let easeOut = Animation.easeOut(duration: 0.25)
-    static let gentleBounce = Animation.spring(response: 0.6, dampingFraction: 0.75)
+    private static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
+    }
+
+    private static var instant: Animation {
+        .linear(duration: 0)
+    }
+
+    static var springBounce: Animation {
+        isEnabled ? .spring(response: 0.5, dampingFraction: 0.7) : instant
+    }
+
+    static var springSmooth: Animation {
+        isEnabled ? .spring(response: 0.4, dampingFraction: 0.85) : instant
+    }
+
+    static var springSnappy: Animation {
+        isEnabled ? .spring(response: 0.3, dampingFraction: 0.9) : instant
+    }
+
+    static var easeOut: Animation {
+        isEnabled ? .easeOut(duration: 0.25) : instant
+    }
+
+    static var gentleBounce: Animation {
+        isEnabled ? .spring(response: 0.6, dampingFraction: 0.75) : instant
+    }
 }
 
 // MARK: - Gradients
@@ -240,31 +267,42 @@ extension View {
 // MARK: - Haptics
 
 enum VayHaptic {
+    private static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: "hapticsEnabled") as? Bool ?? true
+    }
+
     static func light() {
+        guard isEnabled else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     static func medium() {
+        guard isEnabled else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
 
     static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        guard isEnabled else { return }
         UIImpactFeedbackGenerator(style: style).impactOccurred()
     }
 
     static func success() {
+        guard isEnabled else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
     static func warning() {
+        guard isEnabled else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
     }
 
     static func error() {
+        guard isEnabled else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.error)
     }
 
     static func selection() {
+        guard isEnabled else { return }
         UISelectionFeedbackGenerator().selectionChanged()
     }
 }
@@ -305,6 +343,38 @@ extension View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(label)
             .accessibilityHint(hint != nil ? Text(hint!) : Text(""))
+    }
+
+    @ViewBuilder
+    func dismissKeyboardOnTap() -> some View {
+        if #available(iOS 16.0, *) {
+            self
+                .scrollDismissesKeyboard(.immediately)
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        dismissKeyboard()
+                    },
+                    including: .gesture
+                )
+        } else {
+            self.simultaneousGesture(
+                TapGesture().onEnded {
+                    dismissKeyboard()
+                },
+                including: .gesture
+            )
+        }
+    }
+
+    private func dismissKeyboard() {
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        #endif
     }
 }
 

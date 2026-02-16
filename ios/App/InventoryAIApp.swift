@@ -50,6 +50,11 @@ struct InventoryAIApp: App {
             .environmentObject(coordinator)
             .preferredColorScheme(colorScheme)
             .animation(animationsEnabled ? .default : .none, value: animationsEnabled)
+            .transaction { transaction in
+                if !animationsEnabled {
+                    transaction.disablesAnimations = true
+                }
+            }
             .task {
                 await coordinator.bootstrap()
             }

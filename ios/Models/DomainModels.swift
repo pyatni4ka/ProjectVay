@@ -276,6 +276,51 @@ struct AppSettings: Codable, Equatable {
         }
     }
 
+    enum BudgetInputPeriod: String, Codable, CaseIterable {
+        case day
+        case week
+        case month
+
+        var title: String {
+            switch self {
+            case .day:
+                return "День"
+            case .week:
+                return "Неделя"
+            case .month:
+                return "Месяц"
+            }
+        }
+    }
+
+    enum DietProfile: String, Codable, CaseIterable {
+        case light
+        case medium
+        case extreme
+
+        var title: String {
+            switch self {
+            case .light:
+                return "Лайт"
+            case .medium:
+                return "Медиум"
+            case .extreme:
+                return "Экстрим"
+            }
+        }
+
+        var targetLossPerWeek: Double {
+            switch self {
+            case .light:
+                return 0.3
+            case .medium:
+                return 0.5
+            case .extreme:
+                return 0.8
+            }
+        }
+    }
+
     struct MealSchedule: Codable, Equatable {
         var breakfastMinute: Int
         var lunchMinute: Int
@@ -310,6 +355,8 @@ struct AppSettings: Codable, Equatable {
     var expiryAlertsDays: [Int]
     var budgetDay: Decimal
     var budgetWeek: Decimal?
+    var budgetMonth: Decimal?
+    var budgetInputPeriod: BudgetInputPeriod = .week
     var stores: [Store]
     var dislikedList: [String]
     var avoidBones: Bool
@@ -330,6 +377,9 @@ struct AppSettings: Codable, Equatable {
     var healthKitReadEnabled: Bool = true
     var healthKitWriteEnabled: Bool = false
     var enableAnimations: Bool = true
+    var hapticsEnabled: Bool = true
+    var showHealthCardOnHome: Bool = true
+    var dietProfile: DietProfile = .medium
     var recipeServiceBaseURLOverride: String?
 
     static let defaultStores: [Store] = [.pyaterochka, .yandexLavka, .chizhik, .auchan]
@@ -339,7 +389,9 @@ struct AppSettings: Codable, Equatable {
         quietEndMinute: 360,
         expiryAlertsDays: [5, 3, 1],
         budgetDay: 800,
-        budgetWeek: nil,
+        budgetWeek: 5_600,
+        budgetMonth: 24_333.33,
+        budgetInputPeriod: .week,
         stores: defaultStores,
         dislikedList: ["кускус"],
         avoidBones: true,
@@ -351,6 +403,9 @@ struct AppSettings: Codable, Equatable {
         healthKitReadEnabled: true,
         healthKitWriteEnabled: false,
         enableAnimations: true,
+        hapticsEnabled: true,
+        showHealthCardOnHome: true,
+        dietProfile: .medium,
         recipeServiceBaseURLOverride: nil
     )
 
@@ -368,13 +423,24 @@ struct AppSettings: Codable, Equatable {
             }
 
         let normalizedStores = stores.isEmpty ? Self.defaultStores : stores
+        let normalizedBudgetDay = max(0, budgetDay).rounded(scale: 2)
+        let normalizedBudgetWeek = budgetWeek.map { max(0, $0).rounded(scale: 2) }
+        let normalizedBudgetMonth = budgetMonth.map { max(0, $0).rounded(scale: 2) }
+        let resolvedBudget = Self.resolveBudget(
+            budgetDay: normalizedBudgetDay,
+            budgetWeek: normalizedBudgetWeek,
+            budgetMonth: normalizedBudgetMonth,
+            period: budgetInputPeriod
+        )
 
         var result = AppSettings(
             quietStartMinute: Self.clampMinute(quietStartMinute),
             quietEndMinute: Self.clampMinute(quietEndMinute),
             expiryAlertsDays: normalizedDays.isEmpty ? [5, 3, 1] : normalizedDays,
-            budgetDay: max(0, budgetDay).rounded(scale: 2),
-            budgetWeek: budgetWeek.map { max(0, $0).rounded(scale: 2) },
+            budgetDay: resolvedBudget.day,
+            budgetWeek: resolvedBudget.week,
+            budgetMonth: resolvedBudget.month,
+            budgetInputPeriod: budgetInputPeriod,
             stores: normalizedStores,
             dislikedList: normalizedDisliked,
             avoidBones: avoidBones,
@@ -392,6 +458,9 @@ struct AppSettings: Codable, Equatable {
         result.healthKitReadEnabled = healthKitReadEnabled
         result.healthKitWriteEnabled = healthKitWriteEnabled
         result.enableAnimations = enableAnimations
+        result.hapticsEnabled = hapticsEnabled
+        result.showHealthCardOnHome = showHealthCardOnHome
+        result.dietProfile = dietProfile
         result.recipeServiceBaseURLOverride = normalizedRecipeServiceURLOverride(recipeServiceBaseURLOverride)
         return result
     }
@@ -402,6 +471,104 @@ struct AppSettings: Codable, Equatable {
 
     static func clampMinute(_ minute: Int) -> Int {
         min(max(minute, 0), 23 * 60 + 59)
+    }
+
+    static func budgetBreakdown(
+        input value: Decimal,
+        period: BudgetInputPeriod
+    ) -> (day: Decimal, week: Decimal, month: Decimal) {
+        let normalizedValue = max(0, value).rounded(scale: 2)
+
+        switch period {
+        case .day:
+            let day = normalizedValue
+            let week = (day * 7).rounded(scale: 2)
+            let month = ((day * 365) / 12).rounded(scale: 2)
+            return (day: day, week: week, month: month)
+        case .week:
+            let week = normalizedValue
+            let month = monthlyBudget(fromWeekly: week)
+            let day = dailyBudget(fromWeekly: week)
+            return (day: day, week: week, month: month)
+        case .month:
+            let month = normalizedValue
+            let week = weeklyBudget(fromMonthly: month)
+            let day = dailyBudget(fromWeekly: week)
+            return (day: day, week: week, month: month)
+        }
+    }
+
+    static func weeklyBudget(fromMonthly monthlyBudget: Decimal) -> Decimal {
+        ((max(0, monthlyBudget).rounded(scale: 2) * 84) / 365).rounded(scale: 2)
+    }
+
+    static func monthlyBudget(fromWeekly weeklyBudget: Decimal) -> Decimal {
+        ((max(0, weeklyBudget).rounded(scale: 2) * 365) / 84).rounded(scale: 2)
+    }
+
+    static func dailyBudget(fromWeekly weeklyBudget: Decimal) -> Decimal {
+        (max(0, weeklyBudget).rounded(scale: 2) / 7).rounded(scale: 2)
+    }
+
+    static func dailyBudget(fromMonthly monthlyBudget: Decimal) -> Decimal {
+        ((max(0, monthlyBudget).rounded(scale: 2) * 12) / 365).rounded(scale: 2)
+    }
+
+    private static func resolveBudget(
+        budgetDay: Decimal,
+        budgetWeek: Decimal?,
+        budgetMonth: Decimal?,
+        period: BudgetInputPeriod
+    ) -> (day: Decimal, week: Decimal?, month: Decimal?) {
+        switch period {
+        case .day:
+            if budgetDay > 0 {
+                let breakdown = budgetBreakdown(input: budgetDay, period: .day)
+                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+            }
+
+            if let budgetWeek {
+                let breakdown = budgetBreakdown(input: budgetWeek, period: .week)
+                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+            }
+
+            if let budgetMonth {
+                let breakdown = budgetBreakdown(input: budgetMonth, period: .month)
+                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+            }
+
+            let breakdown = budgetBreakdown(input: max(0, budgetDay), period: .day)
+            return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+        case .week:
+            if let budgetWeek {
+                let breakdown = budgetBreakdown(input: budgetWeek, period: .week)
+                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+            }
+
+            if let budgetMonth {
+                let breakdown = budgetBreakdown(input: budgetMonth, period: .month)
+                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+            }
+
+            let legacyWeek = (max(0, budgetDay) * 7).rounded(scale: 2)
+            let breakdown = budgetBreakdown(input: legacyWeek, period: .week)
+            return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+        case .month:
+            if let budgetMonth {
+                let breakdown = budgetBreakdown(input: budgetMonth, period: .month)
+                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+            }
+
+            if let budgetWeek {
+                let breakdown = budgetBreakdown(input: budgetWeek, period: .week)
+                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+            }
+
+            let legacyWeek = (max(0, budgetDay) * 7).rounded(scale: 2)
+            let legacyMonth = monthlyBudget(fromWeekly: legacyWeek)
+            let breakdown = budgetBreakdown(input: legacyMonth, period: .month)
+            return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
+        }
     }
 
     private func normalizedMacroValue(_ value: Double?) -> Double? {
@@ -435,6 +602,8 @@ extension AppSettings {
         case expiryAlertsDays
         case budgetDay
         case budgetWeek
+        case budgetMonth
+        case budgetInputPeriod
         case stores
         case dislikedList
         case avoidBones
@@ -451,6 +620,9 @@ extension AppSettings {
         case healthKitReadEnabled
         case healthKitWriteEnabled
         case enableAnimations
+        case hapticsEnabled
+        case showHealthCardOnHome
+        case dietProfile
         case recipeServiceBaseURLOverride
     }
 
@@ -461,6 +633,15 @@ extension AppSettings {
         expiryAlertsDays = try container.decode([Int].self, forKey: .expiryAlertsDays)
         budgetDay = try container.decode(Decimal.self, forKey: .budgetDay)
         budgetWeek = try container.decodeIfPresent(Decimal.self, forKey: .budgetWeek)
+        budgetMonth = try container.decodeIfPresent(Decimal.self, forKey: .budgetMonth)
+        if
+            let budgetInputPeriodRaw = try container.decodeIfPresent(String.self, forKey: .budgetInputPeriod),
+            let decodedPeriod = BudgetInputPeriod(rawValue: budgetInputPeriodRaw)
+        {
+            budgetInputPeriod = decodedPeriod
+        } else {
+            budgetInputPeriod = .week
+        }
         stores = try container.decode([Store].self, forKey: .stores)
         dislikedList = try container.decode([String].self, forKey: .dislikedList)
         avoidBones = try container.decode(Bool.self, forKey: .avoidBones)
@@ -477,6 +658,9 @@ extension AppSettings {
         healthKitReadEnabled = try container.decodeIfPresent(Bool.self, forKey: .healthKitReadEnabled) ?? true
         healthKitWriteEnabled = try container.decodeIfPresent(Bool.self, forKey: .healthKitWriteEnabled) ?? false
         enableAnimations = try container.decodeIfPresent(Bool.self, forKey: .enableAnimations) ?? true
+        hapticsEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
+        showHealthCardOnHome = try container.decodeIfPresent(Bool.self, forKey: .showHealthCardOnHome) ?? true
+        dietProfile = try container.decodeIfPresent(DietProfile.self, forKey: .dietProfile) ?? .medium
         recipeServiceBaseURLOverride = try container.decodeIfPresent(String.self, forKey: .recipeServiceBaseURLOverride)
     }
 
@@ -487,6 +671,8 @@ extension AppSettings {
         try container.encode(expiryAlertsDays, forKey: .expiryAlertsDays)
         try container.encode(budgetDay, forKey: .budgetDay)
         try container.encodeIfPresent(budgetWeek, forKey: .budgetWeek)
+        try container.encodeIfPresent(budgetMonth, forKey: .budgetMonth)
+        try container.encode(budgetInputPeriod.rawValue, forKey: .budgetInputPeriod)
         try container.encode(stores, forKey: .stores)
         try container.encode(dislikedList, forKey: .dislikedList)
         try container.encode(avoidBones, forKey: .avoidBones)
@@ -503,6 +689,9 @@ extension AppSettings {
         try container.encode(healthKitReadEnabled, forKey: .healthKitReadEnabled)
         try container.encode(healthKitWriteEnabled, forKey: .healthKitWriteEnabled)
         try container.encode(enableAnimations, forKey: .enableAnimations)
+        try container.encode(hapticsEnabled, forKey: .hapticsEnabled)
+        try container.encode(showHealthCardOnHome, forKey: .showHealthCardOnHome)
+        try container.encode(dietProfile, forKey: .dietProfile)
         try container.encodeIfPresent(recipeServiceBaseURLOverride, forKey: .recipeServiceBaseURLOverride)
     }
 }

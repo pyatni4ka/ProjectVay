@@ -2,12 +2,19 @@ import SwiftUI
 
 struct SettingsView: View {
     let settingsService: any SettingsServiceProtocol
+    let inventoryService: any InventoryServiceProtocol
+    let healthKitService: HealthKitService
+
+    @AppStorage("preferredColorScheme") private var storedColorScheme: Int = 0
+    @AppStorage("enableAnimations") private var storedAnimationsEnabled: Bool = true
+    @AppStorage("hapticsEnabled") private var storedHapticsEnabled: Bool = true
+    @AppStorage("showHealthCardOnHome") private var storedShowHealthCardOnHome: Bool = true
 
     @State private var settings: AppSettings = .default
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var showSaved = false
-    @State private var isSaving = false
+    @State private var isHydratingSettings = false
+    @State private var autoSaveTask: Task<Void, Never>?
 
     @State private var quietStartDate = Date()
     @State private var quietEndDate = Date()
@@ -15,25 +22,47 @@ struct SettingsView: View {
     @State private var lunchDate = Date()
     @State private var dinnerDate = Date()
 
-    @State private var kcalText = ""
-    @State private var proteinText = ""
-    @State private var fatText = ""
-    @State private var carbsText = ""
-    @State private var weightText = ""
-
     @State private var selectedTheme: Int = 0
     @State private var healthKitReadEnabled: Bool = true
     @State private var healthKitWriteEnabled: Bool = false
     @State private var animationsEnabled: Bool = true
-    @State private var macroGoalSource: AppSettings.MacroGoalSource = .automatic
-    @State private var recipeServiceURLText: String = ""
+    @State private var hapticsEnabled: Bool = true
+    @State private var showHealthCardOnHome: Bool = true
 
-    @ObservedObject private var gamification = GamificationService.shared
+    @State private var budgetInputPeriod: AppSettings.BudgetInputPeriod = .week
+    @State private var budgetPrimaryText = ""
 
     private let themeOptions = ["Системный", "Светлый", "Тёмный"]
 
+    private struct AutoSaveState: Equatable {
+        let selectedTheme: Int
+        let healthKitReadEnabled: Bool
+        let healthKitWriteEnabled: Bool
+        let animationsEnabled: Bool
+        let hapticsEnabled: Bool
+        let showHealthCardOnHome: Bool
+        let budgetInputPeriod: AppSettings.BudgetInputPeriod
+        let budgetPrimaryText: String
+        let quietStartMinute: Int
+        let quietEndMinute: Int
+        let breakfastMinute: Int
+        let lunchMinute: Int
+        let dinnerMinute: Int
+    }
+
     var body: some View {
         List {
+            if isLoading {
+                Section {
+                    HStack(spacing: VaySpacing.sm) {
+                        ProgressView()
+                        Text("Загружаем настройки...")
+                            .font(VayFont.body(14))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section {
                 settingRow(icon: "paintpalette.fill", color: .vayAccent, label: "Тема") {
                     Picker("Тема", selection: $selectedTheme) {
@@ -46,6 +75,32 @@ struct SettingsView: View {
                 }
             } header: {
                 sectionHeader(icon: "paintbrush.fill", title: "Внешний вид")
+            }
+
+            Section {
+                settingRow(icon: "sparkles", color: .vaySecondary, label: "Анимации интерфейса") {
+                    Toggle("", isOn: $animationsEnabled)
+                        .labelsHidden()
+                        .tint(Color.vayPrimary)
+                }
+
+                settingRow(icon: "iphone.radiowaves.left.and.right", color: .vayInfo, label: "Тактильная отдача") {
+                    Toggle("", isOn: $hapticsEnabled)
+                        .labelsHidden()
+                        .tint(Color.vayPrimary)
+                }
+
+                settingRow(icon: "heart.text.square.fill", color: .vaySuccess, label: "Здоровье на главной") {
+                    Toggle("", isOn: $showHealthCardOnHome)
+                        .labelsHidden()
+                        .tint(Color.vayPrimary)
+                }
+            } header: {
+                sectionHeader(icon: "wand.and.stars", title: "Интерфейс и отклик")
+            } footer: {
+                Text("Отключение анимаций убирает плавные переходы карточек, вкладок и кнопок.")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -63,97 +118,41 @@ struct SettingsView: View {
             } header: {
                 sectionHeader(icon: "apple.logo", title: "Apple Health")
             } footer: {
-                Text("Разрешить чтение данных о весе и активности из Apple Health.")
+                Text("Разрешить чтение данных о весе, составе тела и активности из Apple Health.")
                     .font(VayFont.caption(11))
                     .foregroundStyle(.secondary)
             }
 
             Section {
-                settingRow(icon: "network", color: .vayInfo, label: "Сервер рецептов") {
-                    TextField("http://192.168.1.10:8080", text: $recipeServiceURLText)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .multilineTextAlignment(.trailing)
-                }
-            } header: {
-                sectionHeader(icon: "wifi.router", title: "Подключение")
-            } footer: {
-                Text("Оставьте поле пустым, чтобы использовать адрес по умолчанию из конфигурации приложения.")
-                    .font(VayFont.caption(11))
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                settingRow(icon: "sparkles", color: .vaySecondary, label: "Анимации") {
-                    Toggle("", isOn: $animationsEnabled)
-                        .labelsHidden()
-                        .tint(Color.vayPrimary)
-                }
-            } header: {
-                sectionHeader(icon: "wand.and.stars", title: "Анимация и эффекты")
-            }
-
-            Section {
-                settingRow(icon: "slider.horizontal.3", color: .vayPrimary, label: "Источник") {
-                    Picker("Источник КБЖУ", selection: $macroGoalSource) {
-                        ForEach(AppSettings.MacroGoalSource.allCases, id: \.rawValue) { source in
-                            Text(source.title).tag(source)
-                        }
+                Picker("Период бюджета", selection: $budgetInputPeriod) {
+                    ForEach(AppSettings.BudgetInputPeriod.allCases, id: \.rawValue) { period in
+                        Text(period.title).tag(period)
                     }
-                    .pickerStyle(.menu)
-                    .tint(Color.vayPrimary)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: budgetInputPeriod) { previous, current in
+                    convertBudgetPrimaryInput(from: previous, to: current)
                 }
 
-                settingRow(icon: "flame.fill", color: .vayCalories, label: "Калории (ккал)") {
-                    TextField("2000", text: $kcalText)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .disabled(macroGoalSource == .automatic)
-                        .foregroundStyle(macroGoalSource == .automatic ? .secondary : .primary)
-                }
-
-                settingRow(icon: "fish.fill", color: .vayProtein, label: "Белки (г)") {
-                    TextField("80", text: $proteinText)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .disabled(macroGoalSource == .automatic)
-                        .foregroundStyle(macroGoalSource == .automatic ? .secondary : .primary)
-                }
-
-                settingRow(icon: "drop.fill", color: .vayFat, label: "Жиры (г)") {
-                    TextField("65", text: $fatText)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .disabled(macroGoalSource == .automatic)
-                        .foregroundStyle(macroGoalSource == .automatic ? .secondary : .primary)
-                }
-
-                settingRow(icon: "leaf.fill", color: .vayCarbs, label: "Углеводы (г)") {
-                    TextField("250", text: $carbsText)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .disabled(macroGoalSource == .automatic)
-                        .foregroundStyle(macroGoalSource == .automatic ? .secondary : .primary)
-                }
-            } header: {
-                sectionHeader(icon: "target", title: "Цели питания")
-            } footer: {
-                Text(macroGoalSource == .automatic
-                     ? "В режиме «Авто» КБЖУ рассчитываются на экране плана питания по HealthKit и формулам."
-                     : "В режиме «Вручную» используем ваши фиксированные цели КБЖУ.")
-                    .font(VayFont.caption(11))
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                settingRow(icon: "scalemass.fill", color: .vayInfo, label: "Цель (кг)") {
-                    TextField("70", text: $weightText)
+                settingRow(icon: "rublesign.circle.fill", color: .vaySuccess, label: budgetPrimaryLabel) {
+                    TextField(budgetPrimaryPlaceholder, text: $budgetPrimaryText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                 }
+
+                ForEach(readOnlyBudgetRows, id: \.period.rawValue) { rowData in
+                    settingRow(icon: rowData.icon, color: rowData.color, label: rowData.label) {
+                        Text(rowData.value)
+                            .font(VayFont.label(14))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } header: {
-                sectionHeader(icon: "figure.stand", title: "Вес")
+                sectionHeader(icon: "banknote.fill", title: "Бюджет")
+            } footer: {
+                Text("Введите бюджет за выбранный период. Остальные периоды рассчитываются автоматически.")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -190,62 +189,35 @@ struct SettingsView: View {
             }
 
             Section {
-                ForEach(gamification.achievements) { achievement in
-                    achievementRow(achievement)
+                NavigationLink {
+                    SettingsStatisticsView(inventoryService: inventoryService)
+                } label: {
+                    navigationRow(icon: "chart.bar.fill", color: .vayInfo, title: "Статистика")
+                }
+
+                NavigationLink {
+                    SettingsAchievementsView()
+                } label: {
+                    navigationRow(icon: "trophy.fill", color: .vayWarning, title: "Достижения")
+                }
+
+                NavigationLink {
+                    BodyMetricsView(
+                        settingsService: settingsService,
+                        healthKitService: healthKitService
+                    )
+                } label: {
+                    navigationRow(icon: "figure.walk", color: .vayPrimary, title: "Моё тело")
+                }
+
+                NavigationLink {
+                    DietSettingsView(settingsService: settingsService)
+                } label: {
+                    navigationRow(icon: "leaf.circle.fill", color: .vaySuccess, title: "Диета")
                 }
             } header: {
-                sectionHeader(icon: "trophy.fill", title: "Достижения")
-            } footer: {
-                HStack {
-                    Text("Серия: \(gamification.userStats.currentStreak) дней")
-                    Spacer()
-                    Text("Всего продуктов: \(gamification.userStats.totalProductsAdded)")
-                }
-                .font(VayFont.caption(11))
+                sectionHeader(icon: "square.grid.2x2.fill", title: "Разделы")
             }
-
-            Section {
-                Button {
-                    VayHaptic.selection()
-                    Task { await saveSettings() }
-                } label: {
-                    HStack {
-                        Spacer()
-                        HStack(spacing: VaySpacing.sm) {
-                            if isSaving {
-                                ProgressView()
-                                    .tint(.white)
-                            } else if showSaved {
-                                Image(systemName: "checkmark.circle.fill")
-                                Text("Сохранено")
-                            } else {
-                                Image(systemName: "square.and.arrow.down")
-                                Text("Сохранить")
-                            }
-                        }
-                        .font(VayFont.label())
-                        Spacer()
-                    }
-                    .padding(.vertical, VaySpacing.md)
-                    .foregroundStyle(.white)
-                    .background(
-                        LinearGradient(
-                            colors: showSaved
-                                ? [Color.vaySuccess, Color.vayPrimary]
-                                : [Color.vayPrimary, Color.vayAccent],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
-                    .scaleEffect(isSaving ? 0.98 : 1)
-                    .animation(VayAnimation.springSmooth, value: isSaving)
-                    .animation(VayAnimation.springSmooth, value: showSaved)
-                }
-                .buttonStyle(.plain)
-                .disabled(isSaving)
-            }
-            .listRowBackground(Color.clear)
 
             Section {
                 VStack(alignment: .leading, spacing: VaySpacing.xs) {
@@ -263,13 +235,12 @@ struct SettingsView: View {
             } header: {
                 sectionHeader(icon: "info.circle", title: "О приложении")
             }
-
-            Section {
-                Color.clear.frame(height: 60)
-            }
-            .listRowBackground(Color.clear)
         }
         .listStyle(.insetGrouped)
+        .dismissKeyboardOnTap()
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: VayLayout.tabBarOverlayInset)
+        }
         .navigationTitle("Настройки")
         .alert("Ошибка", isPresented: Binding(get: { errorMessage != nil }, set: { _ in errorMessage = nil })) {
             Button("Ок", role: .cancel) {}
@@ -279,12 +250,118 @@ struct SettingsView: View {
         .task {
             await loadSettings()
         }
+        .onChange(of: autoSaveState) { _, _ in
+            scheduleAutoSave()
+        }
+        .onChange(of: selectedTheme) { _, newValue in
+            storedColorScheme = newValue
+            Task { await saveSettingsIfValid() }
+        }
+        .onChange(of: animationsEnabled) { _, newValue in
+            storedAnimationsEnabled = newValue
+            Task { await saveSettingsIfValid() }
+        }
+        .onChange(of: hapticsEnabled) { _, newValue in
+            storedHapticsEnabled = newValue
+            Task { await saveSettingsIfValid() }
+        }
+        .onChange(of: showHealthCardOnHome) { _, _ in
+            storedShowHealthCardOnHome = showHealthCardOnHome
+            Task { await saveSettingsIfValid() }
+        }
+        .onChange(of: healthKitReadEnabled) { _, _ in
+            Task { await saveSettingsIfValid() }
+        }
+        .onChange(of: healthKitWriteEnabled) { _, _ in
+            Task { await saveSettingsIfValid() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .appSettingsDidChange)) { notification in
+            guard let updated = notification.object as? AppSettings else { return }
+            guard updated != settings else { return }
+            applyLoadedSettings(updated)
+        }
+        .onDisappear {
+            autoSaveTask?.cancel()
+            Task { await saveSettingsIfValid() }
+        }
     }
 
     private var appVersionText: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         return "\(version) (\(build))"
+    }
+
+    private var autoSaveState: AutoSaveState {
+        AutoSaveState(
+            selectedTheme: selectedTheme,
+            healthKitReadEnabled: healthKitReadEnabled,
+            healthKitWriteEnabled: healthKitWriteEnabled,
+            animationsEnabled: animationsEnabled,
+            hapticsEnabled: hapticsEnabled,
+            showHealthCardOnHome: showHealthCardOnHome,
+            budgetInputPeriod: budgetInputPeriod,
+            budgetPrimaryText: budgetPrimaryText,
+            quietStartMinute: Calendar.current.minuteOfDay(from: quietStartDate),
+            quietEndMinute: Calendar.current.minuteOfDay(from: quietEndDate),
+            breakfastMinute: Calendar.current.minuteOfDay(from: breakfastDate),
+            lunchMinute: Calendar.current.minuteOfDay(from: lunchDate),
+            dinnerMinute: Calendar.current.minuteOfDay(from: dinnerDate)
+        )
+    }
+
+    private var budgetPrimaryLabel: String {
+        switch budgetInputPeriod {
+        case .day:
+            return "Бюджет дня"
+        case .week:
+            return "Бюджет недели"
+        case .month:
+            return "Бюджет месяца"
+        }
+    }
+
+    private var budgetPrimaryPlaceholder: String {
+        switch budgetInputPeriod {
+        case .day:
+            return "₽/день"
+        case .week:
+            return "₽/нед"
+        case .month:
+            return "₽/мес"
+        }
+    }
+
+    private var parsedBudgetBreakdown: (day: Decimal, week: Decimal, month: Decimal)? {
+        guard let primaryBudget = parseBudgetValue(budgetPrimaryText) else {
+            return nil
+        }
+
+        return AppSettings.budgetBreakdown(
+            input: primaryBudget,
+            period: budgetInputPeriod
+        )
+    }
+
+    private var displayBudgetBreakdown: (day: Decimal, week: Decimal, month: Decimal) {
+        if let parsedBudgetBreakdown {
+            return parsedBudgetBreakdown
+        }
+
+        let primary = budgetPrimaryValue(from: settings, period: budgetInputPeriod)
+        return AppSettings.budgetBreakdown(input: primary, period: budgetInputPeriod)
+    }
+
+    private var readOnlyBudgetRows: [(period: AppSettings.BudgetInputPeriod, icon: String, color: Color, label: String, value: String)] {
+        let breakdown = displayBudgetBreakdown
+        let allRows: [(AppSettings.BudgetInputPeriod, String, Color, String, String)] = [
+            (.day, "calendar", .vayInfo, "Рассчитано в день", "\(formatBudgetValue(breakdown.day)) ₽"),
+            (.week, "calendar.badge.clock", .vayWarning, "Рассчитано в неделю", "\(formatBudgetValue(breakdown.week)) ₽"),
+            (.month, "calendar.badge.plus", .vayPrimary, "Рассчитано в месяц", "\(formatBudgetValue(breakdown.month)) ₽")
+        ]
+
+        return allRows.filter { $0.0 != budgetInputPeriod }
+            .map { (period: $0.0, icon: $0.1, color: $0.2, label: $0.3, value: $0.4) }
     }
 
     private func settingRow<Content: View>(
@@ -310,41 +387,18 @@ struct SettingsView: View {
         }
     }
 
-    private func achievementRow(_ achievement: Achievement) -> some View {
+    private func navigationRow(icon: String, color: Color, title: String) -> some View {
         HStack(spacing: VaySpacing.md) {
-            Text(achievement.icon)
-                .font(.title2)
-                .frame(width: 40, height: 40)
-                .background(achievement.isUnlocked ? Color.vayPrimaryLight : Color.gray.opacity(0.2))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(color)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(achievement.title)
-                    .font(VayFont.label(14))
-                    .foregroundStyle(achievement.isUnlocked ? .primary : .secondary)
-
-                Text(achievement.description)
-                    .font(VayFont.caption(11))
-                    .foregroundStyle(.secondary)
-
-                if !achievement.isUnlocked {
-                    ProgressView(value: achievement.progress)
-                        .tint(Color.vayPrimary)
-                }
-            }
-
-            Spacer()
-
-            if achievement.isUnlocked {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(Color.vaySuccess)
-            } else {
-                Text("\(achievement.currentProgress)/\(achievement.requiredCount)")
-                    .font(VayFont.caption(11))
-                    .foregroundStyle(.secondary)
-            }
+            Text(title)
+                .font(VayFont.body(15))
         }
-        .padding(.vertical, 4)
     }
 
     private func sectionHeader(icon: String, title: String) -> some View {
@@ -359,97 +413,181 @@ struct SettingsView: View {
     }
 
     private func loadSettings() async {
-        do {
-            let s = try await settingsService.loadSettings()
-            settings = s
-            kcalText = s.kcalGoal.map { "\(Int($0))" } ?? ""
-            proteinText = s.proteinGoalGrams.map { "\(Int($0))" } ?? ""
-            fatText = s.fatGoalGrams.map { "\(Int($0))" } ?? ""
-            carbsText = s.carbsGoalGrams.map { "\(Int($0))" } ?? ""
-            weightText = s.weightGoalKg.map { String(format: "%.1f", $0) } ?? ""
-            quietStartDate = DateComponents.from(minutes: s.quietStartMinute).asDate
-            quietEndDate = DateComponents.from(minutes: s.quietEndMinute).asDate
-            breakfastDate = DateComponents.from(minutes: s.mealSchedule.breakfastMinute).asDate
-            lunchDate = DateComponents.from(minutes: s.mealSchedule.lunchMinute).asDate
-            dinnerDate = DateComponents.from(minutes: s.mealSchedule.dinnerMinute).asDate
-            
-            selectedTheme = s.preferredColorScheme ?? 0
-            healthKitReadEnabled = s.healthKitReadEnabled
-            healthKitWriteEnabled = s.healthKitWriteEnabled
-            animationsEnabled = s.enableAnimations
-            macroGoalSource = s.macroGoalSource
-            recipeServiceURLText = s.recipeServiceBaseURLOverride ?? ""
+        defer { isLoading = false }
 
-            if macroGoalSource == .automatic {
-                if kcalText.isEmpty { kcalText = "2100" }
-                if proteinText.isEmpty { proteinText = "140" }
-                if fatText.isEmpty { fatText = "65" }
-                if carbsText.isEmpty { carbsText = "230" }
-            }
-            
-            isLoading = false
+        do {
+            let loaded = try await settingsService.loadSettings()
+            applyLoadedSettings(loaded)
         } catch {
             errorMessage = error.localizedDescription
-            isLoading = false
         }
     }
 
-    private func saveSettings() async {
-        guard !isSaving else { return }
+    private func applyLoadedSettings(_ loaded: AppSettings) {
+        isHydratingSettings = true
+        defer { isHydratingSettings = false }
 
-        let normalizedRecipeServiceURL = recipeServiceURLText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !normalizedRecipeServiceURL.isEmpty, !isValidRecipeServerURL(normalizedRecipeServiceURL) {
-            errorMessage = "Укажите корректный URL сервера (http:// или https://)."
-            return
+        settings = loaded
+
+        quietStartDate = DateComponents.from(minutes: loaded.quietStartMinute).asDate
+        quietEndDate = DateComponents.from(minutes: loaded.quietEndMinute).asDate
+        breakfastDate = DateComponents.from(minutes: loaded.mealSchedule.breakfastMinute).asDate
+        lunchDate = DateComponents.from(minutes: loaded.mealSchedule.lunchMinute).asDate
+        dinnerDate = DateComponents.from(minutes: loaded.mealSchedule.dinnerMinute).asDate
+
+        selectedTheme = loaded.preferredColorScheme ?? 0
+        healthKitReadEnabled = loaded.healthKitReadEnabled
+        healthKitWriteEnabled = loaded.healthKitWriteEnabled
+        animationsEnabled = loaded.enableAnimations
+        hapticsEnabled = loaded.hapticsEnabled
+        showHealthCardOnHome = loaded.showHealthCardOnHome
+
+        budgetInputPeriod = loaded.budgetInputPeriod
+        budgetPrimaryText = formatBudgetValue(
+            budgetPrimaryValue(from: loaded, period: loaded.budgetInputPeriod)
+        )
+
+        syncAppearanceStorage(from: loaded)
+    }
+
+    private func scheduleAutoSave() {
+        guard !isHydratingSettings else { return }
+
+        autoSaveTask?.cancel()
+        autoSaveTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            await saveSettingsIfValid()
         }
+    }
+
+    private func saveSettingsIfValid() async {
+        guard !isHydratingSettings else { return }
+        autoSaveTask?.cancel()
+        autoSaveTask = nil
 
         var updated = settings
-        updated.kcalGoal = Double(kcalText)
-        updated.proteinGoalGrams = Double(proteinText)
-        updated.fatGoalGrams = Double(fatText)
-        updated.carbsGoalGrams = Double(carbsText)
-        updated.weightGoalKg = Double(weightText.replacingOccurrences(of: ",", with: "."))
-        updated.macroGoalSource = macroGoalSource
+        updated.preferredColorScheme = selectedTheme
+        updated.healthKitReadEnabled = healthKitReadEnabled
+        updated.healthKitWriteEnabled = healthKitWriteEnabled
+        updated.enableAnimations = animationsEnabled
+        updated.hapticsEnabled = hapticsEnabled
+        updated.showHealthCardOnHome = showHealthCardOnHome
+
         updated.quietStartMinute = Calendar.current.minuteOfDay(from: quietStartDate)
         updated.quietEndMinute = Calendar.current.minuteOfDay(from: quietEndDate)
         updated.mealSchedule.breakfastMinute = Calendar.current.minuteOfDay(from: breakfastDate)
         updated.mealSchedule.lunchMinute = Calendar.current.minuteOfDay(from: lunchDate)
         updated.mealSchedule.dinnerMinute = Calendar.current.minuteOfDay(from: dinnerDate)
-        
-        updated.preferredColorScheme = selectedTheme
-        updated.healthKitReadEnabled = healthKitReadEnabled
-        updated.healthKitWriteEnabled = healthKitWriteEnabled
-        updated.enableAnimations = animationsEnabled
-        updated.recipeServiceBaseURLOverride = normalizedRecipeServiceURL.isEmpty ? nil : normalizedRecipeServiceURL
 
-        isSaving = true
-        defer { isSaving = false }
+        if let budgetBreakdown = parsedBudgetBreakdown {
+            updated.budgetInputPeriod = budgetInputPeriod
+            updated.budgetDay = budgetBreakdown.day
+            updated.budgetWeek = budgetBreakdown.week
+            updated.budgetMonth = budgetBreakdown.month
+        }
 
         do {
-            _ = try await settingsService.saveSettings(updated)
-            settings = updated
-            VayHaptic.success()
-            withAnimation(VayAnimation.springSmooth) {
-                showSaved = true
-            }
-            try? await Task.sleep(for: .seconds(2))
-            withAnimation(VayAnimation.springSmooth) {
-                showSaved = false
-            }
+            let saved = try await settingsService.saveSettings(updated)
+            settings = saved
+            syncAppearanceStorage(from: saved)
         } catch {
-            VayHaptic.error()
             errorMessage = error.localizedDescription
         }
     }
 
-    private func isValidRecipeServerURL(_ value: String) -> Bool {
-        guard
-            let url = URL(string: value),
-            let scheme = url.scheme?.lowercased()
-        else {
-            return false
+    private func syncAppearanceStorage(from settings: AppSettings) {
+        storedColorScheme = settings.preferredColorScheme ?? 0
+        storedAnimationsEnabled = settings.enableAnimations
+        storedHapticsEnabled = settings.hapticsEnabled
+        storedShowHealthCardOnHome = settings.showHealthCardOnHome
+    }
+
+    private func convertBudgetPrimaryInput(
+        from previous: AppSettings.BudgetInputPeriod,
+        to current: AppSettings.BudgetInputPeriod
+    ) {
+        guard previous != current else { return }
+
+        let sourceValue: Decimal
+        if let parsed = parseBudgetValue(budgetPrimaryText) {
+            sourceValue = parsed
+        } else {
+            sourceValue = budgetPrimaryValue(from: settings, period: previous)
         }
-        return scheme == "http" || scheme == "https"
+
+        let previousBreakdown = AppSettings.budgetBreakdown(
+            input: sourceValue,
+            period: previous
+        )
+
+        let converted: Decimal
+        switch current {
+        case .day:
+            converted = previousBreakdown.day
+        case .week:
+            converted = previousBreakdown.week
+        case .month:
+            converted = previousBreakdown.month
+        }
+
+        budgetPrimaryText = formatBudgetValue(converted)
+    }
+
+    private func budgetPrimaryValue(
+        from settings: AppSettings,
+        period: AppSettings.BudgetInputPeriod
+    ) -> Decimal {
+        switch period {
+        case .day:
+            if settings.budgetDay > 0 {
+                return settings.budgetDay.rounded(scale: 2)
+            }
+            if let budgetWeek = settings.budgetWeek {
+                return AppSettings.dailyBudget(fromWeekly: budgetWeek)
+            }
+            if let budgetMonth = settings.budgetMonth {
+                return AppSettings.dailyBudget(fromMonthly: budgetMonth)
+            }
+            return 0
+        case .week:
+            if let budgetWeek = settings.budgetWeek {
+                return budgetWeek.rounded(scale: 2)
+            }
+            if let budgetMonth = settings.budgetMonth {
+                return AppSettings.weeklyBudget(fromMonthly: budgetMonth)
+            }
+            return (max(0, settings.budgetDay) * 7).rounded(scale: 2)
+        case .month:
+            if let budgetMonth = settings.budgetMonth {
+                return budgetMonth.rounded(scale: 2)
+            }
+            if let budgetWeek = settings.budgetWeek {
+                return AppSettings.monthlyBudget(fromWeekly: budgetWeek)
+            }
+            let fallbackWeek = (max(0, settings.budgetDay) * 7).rounded(scale: 2)
+            return AppSettings.monthlyBudget(fromWeekly: fallbackWeek)
+        }
+    }
+
+    private func parseBudgetValue(_ value: String) -> Decimal? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let normalized = trimmed.replacingOccurrences(of: ",", with: ".")
+        guard let decimal = Decimal(string: normalized), decimal >= 0 else {
+            return nil
+        }
+
+        return decimal.rounded(scale: 2)
+    }
+
+    private func formatBudgetValue(_ value: Decimal) -> String {
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        formatter.decimalSeparator = ","
+        return formatter.string(from: NSDecimalNumber(decimal: value.rounded(scale: 2))) ?? "0"
     }
 }
 

@@ -10,6 +10,8 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var expiryAlertsDaysJSON: String
     var budgetDayMinor: Int64
     var budgetWeekMinor: Int64?
+    var budgetMonthMinor: Int64?
+    var budgetInputPeriod: String
     var storesJSON: String
     var dislikedListJSON: String
     var avoidBones: Bool
@@ -28,6 +30,9 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var healthKitReadEnabled: Bool
     var healthKitWriteEnabled: Bool
     var enableAnimations: Bool
+    var hapticsEnabled: Bool
+    var showHealthCardOnHome: Bool
+    var dietProfile: String
     var recipeServiceBaseURL: String?
     var onboardingCompleted: Bool
 
@@ -38,6 +43,8 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case expiryAlertsDaysJSON = "expiry_alerts_days_json"
         case budgetDayMinor = "budget_day_minor"
         case budgetWeekMinor = "budget_week_minor"
+        case budgetMonthMinor = "budget_month_minor"
+        case budgetInputPeriod = "budget_input_period"
         case storesJSON = "stores_json"
         case dislikedListJSON = "disliked_list_json"
         case avoidBones = "avoid_bones"
@@ -56,6 +63,9 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case healthKitReadEnabled = "healthkit_read_enabled"
         case healthKitWriteEnabled = "healthkit_write_enabled"
         case enableAnimations = "enable_animations"
+        case hapticsEnabled = "haptics_enabled"
+        case showHealthCardOnHome = "show_health_card_on_home"
+        case dietProfile = "diet_profile"
         case recipeServiceBaseURL = "recipe_service_base_url"
         case onboardingCompleted = "onboarding_completed"
     }
@@ -72,6 +82,8 @@ extension AppSettingsRecord {
         expiryAlertsDaysJSON = try Self.encodeJSON(normalized.expiryAlertsDays)
         budgetDayMinor = normalized.budgetDay.asMinorUnits
         budgetWeekMinor = normalized.budgetWeek?.asMinorUnits
+        budgetMonthMinor = normalized.budgetMonth?.asMinorUnits
+        budgetInputPeriod = normalized.budgetInputPeriod.rawValue
         storesJSON = try Self.encodeJSON(normalized.stores.map(\.rawValue))
         dislikedListJSON = try Self.encodeJSON(normalized.dislikedList)
         avoidBones = normalized.avoidBones
@@ -90,6 +102,9 @@ extension AppSettingsRecord {
         healthKitReadEnabled = normalized.healthKitReadEnabled
         healthKitWriteEnabled = normalized.healthKitWriteEnabled
         enableAnimations = normalized.enableAnimations
+        hapticsEnabled = normalized.hapticsEnabled
+        showHealthCardOnHome = normalized.showHealthCardOnHome
+        dietProfile = normalized.dietProfile.rawValue
         recipeServiceBaseURL = normalized.recipeServiceBaseURLOverride
         self.onboardingCompleted = onboardingCompleted
     }
@@ -100,6 +115,8 @@ extension AppSettingsRecord {
         let parsedStores = parsedStoresRaw.compactMap(Store.init(rawValue:))
         let parsedDisliked = (try? Self.decodeJSON([String].self, from: dislikedListJSON)) ?? AppSettings.default.dislikedList
         let parsedMacroGoalSource = AppSettings.MacroGoalSource(rawValue: macroGoalSource) ?? .automatic
+        let parsedBudgetInputPeriod = AppSettings.BudgetInputPeriod(rawValue: budgetInputPeriod) ?? .week
+        let parsedDietProfile = AppSettings.DietProfile(rawValue: dietProfile) ?? .medium
 
         return AppSettings(
             quietStartMinute: quietStartMinute,
@@ -107,6 +124,8 @@ extension AppSettingsRecord {
             expiryAlertsDays: parsedDays,
             budgetDay: Decimal.fromMinorUnits(budgetDayMinor),
             budgetWeek: budgetWeekMinor.map(Decimal.fromMinorUnits),
+            budgetMonth: budgetMonthMinor.map(Decimal.fromMinorUnits),
+            budgetInputPeriod: parsedBudgetInputPeriod,
             stores: parsedStores,
             dislikedList: parsedDisliked,
             avoidBones: avoidBones,
@@ -127,6 +146,9 @@ extension AppSettingsRecord {
             healthKitReadEnabled: healthKitReadEnabled,
             healthKitWriteEnabled: healthKitWriteEnabled,
             enableAnimations: enableAnimations,
+            hapticsEnabled: hapticsEnabled,
+            showHealthCardOnHome: showHealthCardOnHome,
+            dietProfile: parsedDietProfile,
             recipeServiceBaseURLOverride: recipeServiceBaseURL
         ).normalized()
     }

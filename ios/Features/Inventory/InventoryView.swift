@@ -3,6 +3,7 @@ import SwiftUI
 struct InventoryView: View {
     let inventoryService: any InventoryServiceProtocol
     var onOpenScanner: () -> Void = {}
+    var onOpenReceiptScan: () -> Void = {}
 
     @State private var products: [Product] = []
     @State private var batches: [Batch] = []
@@ -124,7 +125,7 @@ struct InventoryView: View {
 
             // Bottom spacer for tab bar
             Section {
-                Color.clear.frame(height: 80)
+                Color.clear.frame(height: VayLayout.tabBarOverlayInset)
             }
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
@@ -134,22 +135,27 @@ struct InventoryView: View {
         .background(Color.vayBackground)
         .navigationTitle("Запасы")
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button(action: onOpenScanner) {
-                    Image(systemName: "barcode.viewfinder")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Color.vayPrimary)
-                }
-                .vayAccessibilityLabel("Сканировать товар", hint: "Открывает сканер штрихкодов")
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button(action: onOpenScanner) {
+                        Label("Сканировать штрихкод", systemImage: "barcode.viewfinder")
+                    }
 
-                Button {
-                    showAddProduct = true
+                    Button(action: onOpenReceiptScan) {
+                        Label("Сканировать чек", systemImage: "doc.text.viewfinder")
+                    }
+
+                    Button {
+                        showAddProduct = true
+                    } label: {
+                        Label("Добавить вручную", systemImage: "plus")
+                    }
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 22))
                         .foregroundStyle(Color.vayPrimary)
                 }
-                .vayAccessibilityLabel("Добавить вручную", hint: "Открывает форму нового продукта")
+                .vayAccessibilityLabel("Действия с запасами", hint: "Сканировать штрихкод, чек или добавить вручную")
             }
         }
         .sheet(isPresented: $showAddProduct) {

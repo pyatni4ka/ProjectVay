@@ -65,7 +65,7 @@ struct ProgressTrackingView: View {
                     categoryBreakdownCard
                 }
 
-                Color.clear.frame(height: VaySpacing.huge + VaySpacing.xxl)
+                Color.clear.frame(height: VayLayout.tabBarOverlayInset)
             }
             .padding(.horizontal, VaySpacing.lg)
         }

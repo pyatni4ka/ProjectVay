@@ -1,6 +1,11 @@
 import Foundation
 import UserNotifications
 
+extension Notification.Name {
+    static let appSettingsDidChange = Notification.Name("appSettingsDidChange")
+    static let inventoryDidChange = Notification.Name("inventoryDidChange")
+}
+
 enum SettingsServiceError: LocalizedError {
     case inventoryUnavailable
     case unableToPrepareExportDirectory
@@ -73,6 +78,12 @@ actor SettingsService: SettingsServiceProtocol {
         let normalized = settings.normalized()
         try repository.saveSettings(normalized)
         try await rescheduleAllExpiryNotifications(settings: normalized)
+        await MainActor.run {
+            syncMirroredUserDefaults(normalized)
+        }
+        await MainActor.run {
+            NotificationCenter.default.post(name: .appSettingsDidChange, object: normalized)
+        }
         return normalized
     }
 
@@ -186,6 +197,10 @@ actor SettingsService: SettingsServiceProtocol {
         try repository.saveSettings(normalizedSettings)
         try repository.setOnboardingCompleted(true)
         try await rescheduleAllExpiryNotifications(settings: normalizedSettings)
+        await MainActor.run {
+            syncMirroredUserDefaults(normalizedSettings)
+            NotificationCenter.default.post(name: .appSettingsDidChange, object: normalizedSettings)
+        }
     }
 
     func deleteAllLocalData(resetOnboarding: Bool = true) async throws {
@@ -206,6 +221,10 @@ actor SettingsService: SettingsServiceProtocol {
         try inventoryRepository.deleteAllInventoryData()
         try repository.saveSettings(.default)
         try repository.setOnboardingCompleted(!resetOnboarding)
+        await MainActor.run {
+            syncMirroredUserDefaults(.default)
+            NotificationCenter.default.post(name: .appSettingsDidChange, object: AppSettings.default)
+        }
     }
 
     private func rescheduleAllExpiryNotifications(settings: AppSettings) async throws {
@@ -271,5 +290,14 @@ actor SettingsService: SettingsServiceProtocol {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd'T'HH-mm-ss'Z'"
         return formatter.string(from: date)
+    }
+
+    @MainActor
+    private func syncMirroredUserDefaults(_ settings: AppSettings) {
+        let defaults = UserDefaults.standard
+        defaults.set(settings.preferredColorScheme ?? 0, forKey: "preferredColorScheme")
+        defaults.set(settings.enableAnimations, forKey: "enableAnimations")
+        defaults.set(settings.hapticsEnabled, forKey: "hapticsEnabled")
+        defaults.set(settings.showHealthCardOnHome, forKey: "showHealthCardOnHome")
     }
 }

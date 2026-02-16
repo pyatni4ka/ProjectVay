@@ -53,21 +53,29 @@ struct RootTabView: View {
             customTabBar
         }
         .ignoresSafeArea(.keyboard)
-        .sheet(isPresented: $showScannerSheet) {
+        .sheet(isPresented: $showScannerSheet, onDismiss: {
+            postInventoryDidChange()
+        }) {
             NavigationStack {
                 ScannerView(
                     inventoryService: inventoryService,
                     barcodeLookupService: barcodeLookupService,
                     initialMode: .add,
-                    onInventoryChanged: {}
+                    onInventoryChanged: {
+                        postInventoryDidChange()
+                    }
                 )
             }
         }
-        .sheet(isPresented: $showReceiptScanSheet) {
+        .sheet(isPresented: $showReceiptScanSheet, onDismiss: {
+            postInventoryDidChange()
+        }) {
             NavigationStack {
                 ReceiptScanView(
                     inventoryService: inventoryService,
-                    onItemsAdded: {}
+                    onItemsAdded: {
+                        postInventoryDidChange()
+                    }
                 )
             }
         }
@@ -92,15 +100,18 @@ struct RootTabView: View {
                         HomeView(
                             inventoryService: inventoryService,
                             settingsService: settingsService,
+                            healthKitService: healthKitService,
                             onOpenScanner: { showScannerSheet = true },
-                            onOpenReceiptScan: { showReceiptScanSheet = true }
+                            onOpenMealPlan: { selectedTab = .mealPlan },
+                            onOpenInventory: { selectedTab = .inventory }
                         )
                     }
                 case .inventory:
                     NavigationStack {
                         InventoryView(
                             inventoryService: inventoryService,
-                            onOpenScanner: { showScannerSheet = true }
+                            onOpenScanner: { showScannerSheet = true },
+                            onOpenReceiptScan: { showReceiptScanSheet = true }
                         )
                     }
                 case .mealPlan:
@@ -115,7 +126,11 @@ struct RootTabView: View {
                     }
                 case .settings:
                     NavigationStack {
-                        SettingsView(settingsService: settingsService)
+                        SettingsView(
+                            settingsService: settingsService,
+                            inventoryService: inventoryService,
+                            healthKitService: healthKitService
+                        )
                     }
                 }
             } else {
@@ -199,7 +214,9 @@ struct RootTabView: View {
         let isSelected = selectedTab == tab
 
         return Button {
-            selectedTab = tab
+            withAnimation(VayAnimation.springSmooth) {
+                selectedTab = tab
+            }
         } label: {
             VStack(spacing: VaySpacing.xs) {
                 Image(systemName: tab.icon)
@@ -220,12 +237,16 @@ struct RootTabView: View {
             hint: isSelected ? "Текущая вкладка" : "Дважды нажмите для перехода"
         )
     }
+
+    private func postInventoryDidChange() {
+        NotificationCenter.default.post(name: .inventoryDidChange, object: nil)
+    }
 }
 
 struct FABButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.9 : 1.0)
-            .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
+            .animation(VayAnimation.easeOut, value: configuration.isPressed)
     }
 }

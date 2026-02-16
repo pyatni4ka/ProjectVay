@@ -47,6 +47,10 @@
 		A3A1418540243103ABE5C43D /* ProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD0326D790C12B608B526CD0 /* ProgressView.swift */; };
 		A7315714910E83BEF6424793 /* SettingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0331D28BA35FD9C8C0B66A85 /* SettingsService.swift */; };
 		A917F42908081DFD09D1949B /* NutritionRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54C6DC81DA2966C8A3D2092E /* NutritionRing.swift */; };
+		A11D9A1D7C8E4E54A1B4C101 /* SettingsStatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11D9A1D7C8E4E54A1B4D201 /* SettingsStatisticsView.swift */; };
+		A11D9A1D7C8E4E54A1B4C102 /* SettingsAchievementsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11D9A1D7C8E4E54A1B4D202 /* SettingsAchievementsView.swift */; };
+		A11D9A1D7C8E4E54A1B4C103 /* BodyMetricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11D9A1D7C8E4E54A1B4D203 /* BodyMetricsView.swift */; };
+		A11D9A1D7C8E4E54A1B4C104 /* DietSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11D9A1D7C8E4E54A1B4D204 /* DietSettingsView.swift */; };
 		AB06967741BD7FE04957AB86 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F40C5631E4A4E5C02B12374C /* Assets.xcassets */; };
 		AB869B37E8E475C776F76C87 /* ScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A107567ED11654CF90FCC004 /* ScannerView.swift */; };
 		B5C6E2C07F81DEFFADFEC1E1 /* GamificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29EE63C26CEFE3EDF07BFB5D /* GamificationService.swift */; };
@@ -111,6 +115,10 @@
 		9FA018E68F28499DAA99C6A4 /* InventoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryService.swift; sourceTree = "<group>"; };
 		A107567ED11654CF90FCC004 /* ScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerView.swift; sourceTree = "<group>"; };
 		A16712EB1737E4E4183CE189 /* InventoryUseCases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryUseCases.swift; sourceTree = "<group>"; };
+		A11D9A1D7C8E4E54A1B4D201 /* SettingsStatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStatisticsView.swift; sourceTree = "<group>"; };
+		A11D9A1D7C8E4E54A1B4D202 /* SettingsAchievementsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAchievementsView.swift; sourceTree = "<group>"; };
+		A11D9A1D7C8E4E54A1B4D203 /* BodyMetricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyMetricsView.swift; sourceTree = "<group>"; };
+		A11D9A1D7C8E4E54A1B4D204 /* DietSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DietSettingsView.swift; sourceTree = "<group>"; };
 		A6C8DA82D8FBC910B1604700 /* StatCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatCard.swift; sourceTree = "<group>"; };
 		BD0326D790C12B608B526CD0 /* ProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressView.swift; sourceTree = "<group>"; };
 		BF16DC1686787D4B9350B6F1 /* BarcodeLookupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeLookupService.swift; sourceTree = "<group>"; };
@@ -315,6 +323,10 @@
 		D94D35D2D9873FB03ACFBF91 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				A11D9A1D7C8E4E54A1B4D203 /* BodyMetricsView.swift */,
+				A11D9A1D7C8E4E54A1B4D204 /* DietSettingsView.swift */,
+				A11D9A1D7C8E4E54A1B4D202 /* SettingsAchievementsView.swift */,
+				A11D9A1D7C8E4E54A1B4D201 /* SettingsStatisticsView.swift */,
 				6513EB461776936D524ABC4A /* SettingsView.swift */,
 			);
 			path = Settings;
@@ -497,9 +509,13 @@
 				AB869B37E8E475C776F76C87 /* ScannerView.swift in Sources */,
 				1922B5B4880D290DE3E296D2 /* SettingsRepository.swift in Sources */,
 				A7315714910E83BEF6424793 /* SettingsService.swift in Sources */,
+				A11D9A1D7C8E4E54A1B4C102 /* SettingsAchievementsView.swift in Sources */,
+				A11D9A1D7C8E4E54A1B4C101 /* SettingsStatisticsView.swift in Sources */,
 				3FE17F27E2785D8FC53B67D7 /* SettingsView.swift in Sources */,
 				074C62A6E34B2FF984E10B1D /* StatCard.swift in Sources */,
 				DC2B7EFED3A02DAA3B78C8A7 /* Theme.swift in Sources */,
+				A11D9A1D7C8E4E54A1B4C103 /* BodyMetricsView.swift in Sources */,
+				A11D9A1D7C8E4E54A1B4C104 /* DietSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

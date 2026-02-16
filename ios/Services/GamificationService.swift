@@ -4,7 +4,7 @@ import Combine
 import UIKit
 #endif
 
-final class GamificationService: ObservableObject {
+final class GamificationService: ObservableObject, @unchecked Sendable {
     static let shared = GamificationService()
     
     @Published private(set) var achievements: [Achievement] = []

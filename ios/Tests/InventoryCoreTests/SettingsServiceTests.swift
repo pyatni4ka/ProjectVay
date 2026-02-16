@@ -1,4 +1,5 @@
 import XCTest
+import GRDB
 @testable import InventoryCore
 
 final class SettingsServiceTests: XCTestCase {
@@ -244,6 +245,71 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(settings.macroTolerancePercent, 25)
         XCTAssertEqual(settings.macroGoalSource, .automatic)
         XCTAssertNil(settings.recipeServiceBaseURLOverride)
+        XCTAssertNil(settings.budgetMonth)
+        XCTAssertEqual(settings.budgetInputPeriod, .week)
+        XCTAssertTrue(settings.hapticsEnabled)
+        XCTAssertTrue(settings.showHealthCardOnHome)
+        XCTAssertEqual(settings.dietProfile, .medium)
+    }
+
+    func testBudgetNormalizationConvertsDayToWeekAndMonth() {
+        let settings = AppSettings(
+            quietStartMinute: 60,
+            quietEndMinute: 360,
+            expiryAlertsDays: [5, 3, 1],
+            budgetDay: 800,
+            budgetWeek: nil,
+            budgetMonth: nil,
+            budgetInputPeriod: .day,
+            stores: [.pyaterochka],
+            dislikedList: [],
+            avoidBones: true
+        ).normalized()
+
+        XCTAssertEqual(settings.budgetInputPeriod, .day)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetDay).doubleValue, 800, accuracy: 0.001)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetWeek ?? 0).doubleValue, 5_600, accuracy: 0.001)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetMonth ?? 0).doubleValue, 24_333.33, accuracy: 0.01)
+    }
+
+    func testBudgetNormalizationConvertsWeekToMonthAndDay() {
+        let settings = AppSettings(
+            quietStartMinute: 60,
+            quietEndMinute: 360,
+            expiryAlertsDays: [5, 3, 1],
+            budgetDay: 0,
+            budgetWeek: 5_600,
+            budgetMonth: nil,
+            budgetInputPeriod: .week,
+            stores: [.pyaterochka],
+            dislikedList: [],
+            avoidBones: true
+        ).normalized()
+
+        XCTAssertEqual(settings.budgetInputPeriod, .week)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetDay).doubleValue, 800, accuracy: 0.001)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetWeek ?? 0).doubleValue, 5_600, accuracy: 0.001)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetMonth ?? 0).doubleValue, 24_333.33, accuracy: 0.01)
+    }
+
+    func testBudgetNormalizationConvertsMonthToWeekAndDay() {
+        let settings = AppSettings(
+            quietStartMinute: 60,
+            quietEndMinute: 360,
+            expiryAlertsDays: [5, 3, 1],
+            budgetDay: 0,
+            budgetWeek: nil,
+            budgetMonth: 24_333.33,
+            budgetInputPeriod: .month,
+            stores: [.pyaterochka],
+            dislikedList: [],
+            avoidBones: true
+        ).normalized()
+
+        XCTAssertEqual(settings.budgetInputPeriod, .month)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetDay).doubleValue, 800, accuracy: 0.01)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetWeek ?? 0).doubleValue, 5_600, accuracy: 0.01)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetMonth ?? 0).doubleValue, 24_333.33, accuracy: 0.01)
     }
 
     func testSettingsNormalizationClampsMacroTolerance() {
@@ -262,6 +328,21 @@ final class SettingsServiceTests: XCTestCase {
         ).normalized()
 
         XCTAssertEqual(settings.macroTolerancePercent, 5)
+    }
+
+    func testInvalidPersistedDietProfileFallsBackToMedium() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let service = SettingsService(repository: SettingsRepository(dbQueue: dbQueue))
+
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE app_settings SET diet_profile = ? WHERE id = ?",
+                arguments: ["unsupported_profile", AppSettingsRecord.singletonID]
+            )
+        }
+
+        let loaded = try await service.loadSettings()
+        XCTAssertEqual(loaded.dietProfile, .medium)
     }
 
     func testExtendedSettingsRoundtrip() async throws {
@@ -291,6 +372,9 @@ final class SettingsServiceTests: XCTestCase {
             healthKitReadEnabled: false,
             healthKitWriteEnabled: true,
             enableAnimations: false,
+            hapticsEnabled: false,
+            showHealthCardOnHome: false,
+            dietProfile: .extreme,
             recipeServiceBaseURLOverride: "http://192.168.0.15:8080"
         )
 
@@ -307,6 +391,9 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertFalse(loaded.healthKitReadEnabled)
         XCTAssertTrue(loaded.healthKitWriteEnabled)
         XCTAssertFalse(loaded.enableAnimations)
+        XCTAssertFalse(loaded.hapticsEnabled)
+        XCTAssertFalse(loaded.showHealthCardOnHome)
+        XCTAssertEqual(loaded.dietProfile, .extreme)
         XCTAssertEqual(loaded.recipeServiceBaseURLOverride, "http://192.168.0.15:8080")
     }
 }

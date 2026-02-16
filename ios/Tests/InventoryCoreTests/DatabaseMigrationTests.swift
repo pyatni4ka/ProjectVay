@@ -51,6 +51,11 @@ final class DatabaseMigrationTests: XCTestCase {
             XCTAssertTrue(appSettingsColumns.contains("enable_animations"))
             XCTAssertTrue(appSettingsColumns.contains("macro_goal_source"))
             XCTAssertTrue(appSettingsColumns.contains("recipe_service_base_url"))
+            XCTAssertTrue(appSettingsColumns.contains("budget_month_minor"))
+            XCTAssertTrue(appSettingsColumns.contains("budget_input_period"))
+            XCTAssertTrue(appSettingsColumns.contains("diet_profile"))
+            XCTAssertTrue(appSettingsColumns.contains("haptics_enabled"))
+            XCTAssertTrue(appSettingsColumns.contains("show_health_card_on_home"))
 
             let batchColumns = try String.fetchAll(
                 db,

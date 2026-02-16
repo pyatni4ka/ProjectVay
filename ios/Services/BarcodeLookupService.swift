@@ -25,7 +25,7 @@ struct BarcodeLookupPolicy {
     )
 }
 
-final class BarcodeLookupService {
+final class BarcodeLookupService: @unchecked Sendable {
     private let inventoryService: any InventoryServiceProtocol
     private let scannerService: ScannerService
     private let providers: [any BarcodeLookupProvider]

@@ -157,6 +157,31 @@ enum AppMigrations {
             }
         }
 
+        migrator.registerMigration("v8_budget_month_and_period") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "budget_month_minor", .integer)
+                table.add(column: "budget_input_period", .text).notNull().defaults(to: "week")
+            }
+
+            try db.execute(sql: """
+                UPDATE app_settings
+                SET
+                    budget_week_minor = COALESCE(budget_week_minor, budget_day_minor * 7),
+                    budget_month_minor = CAST(
+                        ROUND(COALESCE(budget_week_minor, budget_day_minor * 7) * 365.0 / 84.0)
+                        AS INTEGER
+                    )
+                """)
+        }
+
+        migrator.registerMigration("v9_diet_and_ui_preferences") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "diet_profile", .text).notNull().defaults(to: "medium")
+                table.add(column: "haptics_enabled", .boolean).notNull().defaults(to: true)
+                table.add(column: "show_health_card_on_home", .boolean).notNull().defaults(to: true)
+            }
+        }
+
         return migrator
     }
 }

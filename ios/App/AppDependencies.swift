@@ -69,11 +69,8 @@ struct AppDependencies {
         )
 
         let persistedSettings = (try? settingsRepository.loadSettings()) ?? .default
-        let overrideRecipeServiceURL = resolvedRecipeServiceURL(
-            from: persistedSettings.recipeServiceBaseURLOverride,
-            allowInsecure: config.allowInsecureRecipeServiceURL
-        )
-        let resolvedRecipeServiceBaseURL = overrideRecipeServiceURL ?? config.recipeServiceBaseURL
+        let resolvedRecipeServiceBaseURL = config.recipeServiceBaseURL
+        syncGlobalAppearanceSettings(persistedSettings)
 
         let recipeServiceClient = resolvedRecipeServiceBaseURL.map {
             RecipeServiceClient(baseURL: $0)
@@ -89,20 +86,11 @@ struct AppDependencies {
         )
     }
 
-    private static func resolvedRecipeServiceURL(from rawValue: String?, allowInsecure: Bool) -> URL? {
-        guard
-            let raw = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !raw.isEmpty,
-            let url = URL(string: raw),
-            let scheme = url.scheme?.lowercased()
-        else {
-            return nil
-        }
-
-        if allowInsecure {
-            return scheme == "http" || scheme == "https" ? url : nil
-        }
-
-        return scheme == "https" ? url : nil
+    private static func syncGlobalAppearanceSettings(_ settings: AppSettings) {
+        let defaults = UserDefaults.standard
+        defaults.set(settings.preferredColorScheme ?? 0, forKey: "preferredColorScheme")
+        defaults.set(settings.enableAnimations, forKey: "enableAnimations")
+        defaults.set(settings.hapticsEnabled, forKey: "hapticsEnabled")
+        defaults.set(settings.showHealthCardOnHome, forKey: "showHealthCardOnHome")
     }
 }

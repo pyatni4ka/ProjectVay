@@ -240,7 +240,7 @@ struct ProductDetailView: View {
 
                 // Bottom spacer so tab bar doesn't obscure content
                 Section {
-                    Color.clear.frame(height: 60)
+                    Color.clear.frame(height: VayLayout.tabBarOverlayInset)
                         .listRowBackground(Color.clear)
                 }
             }

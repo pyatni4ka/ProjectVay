@@ -23,6 +23,15 @@ final class HealthKitService {
     private let store = HKHealthStore()
     #endif
 
+    var isHealthDataAvailable: Bool {
+        #if canImport(HealthKit)
+        HKHealthStore.isHealthDataAvailable()
+        #else
+        false
+        #endif
+    }
+
+    @MainActor
     func requestReadAccess() async throws -> Bool {
         #if canImport(HealthKit)
         guard HKHealthStore.isHealthDataAvailable() else {
