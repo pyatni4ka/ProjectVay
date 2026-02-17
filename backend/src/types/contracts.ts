@@ -54,6 +54,36 @@ export type Recipe = {
   reviewCount?: number;
 };
 
+export type NormalizedIngredient = {
+  raw: string;
+  normalizedKey: string;
+  name: string;
+  quantity?: number;
+  unit?: string;
+};
+
+export type RecipeQualityReport = {
+  hasImage: boolean;
+  hasNutrition: boolean;
+  hasServings: boolean;
+  hasTotalTime: boolean;
+  ingredientCount: number;
+  instructionCount: number;
+  score: number;
+  missingFields: string[];
+};
+
+export type RecipeParseRequest = {
+  url: string;
+};
+
+export type RecipeParseResponse = {
+  recipe: Recipe;
+  normalizedIngredients: NormalizedIngredient[];
+  quality: RecipeQualityReport;
+  diagnostics: string[];
+};
+
 export type RecommendPayload = {
   ingredientKeywords: string[];
   expiringSoonKeywords: string[];
@@ -157,6 +187,57 @@ export type MealPlanResponse = {
   warnings: string[];
   diversityScore?: number;
   varietyScore?: number;
+  optimization?: {
+    objective: "cost_macro" | "balanced";
+    averageMacroDeviation: number;
+    averageMealCost: number;
+    strictMacroMeals: number;
+    relaxedMacroMeals: number;
+    repeatedRecipeMeals: number;
+    repeatedCuisineMeals: number;
+    lowConfidenceCostMeals: number;
+  };
+};
+
+export type IngredientPriceHint = {
+  ingredient: string;
+  priceRub: number;
+  confidence?: number;
+  source?: "receipt" | "history" | "category_fallback" | "provider";
+  capturedAt?: string;
+};
+
+export type PriceEstimateRequest = {
+  ingredients: string[];
+  hints?: IngredientPriceHint[];
+  region?: string;
+  currency?: string;
+};
+
+export type PriceEstimateItem = {
+  ingredient: string;
+  estimatedPriceRub: number;
+  confidence: number;
+  source: string;
+};
+
+export type PriceEstimateResponse = {
+  items: PriceEstimateItem[];
+  totalEstimatedRub: number;
+  confidence: number;
+  missingIngredients: string[];
+};
+
+export type SmartMealPlanRequest = MealPlanRequest & {
+  objective?: "cost_macro" | "balanced";
+  macroTolerancePercent?: number;
+  ingredientPriceHints?: IngredientPriceHint[];
+};
+
+export type SmartMealPlanResponse = MealPlanResponse & {
+  objective: "cost_macro" | "balanced";
+  costConfidence: number;
+  priceExplanation: string[];
 };
 
 // External API types

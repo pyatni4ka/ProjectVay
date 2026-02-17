@@ -90,6 +90,7 @@ struct AppDependencies {
         let defaults = UserDefaults.standard
         defaults.set(settings.preferredColorScheme ?? 0, forKey: "preferredColorScheme")
         defaults.set(settings.enableAnimations, forKey: "enableAnimations")
+        defaults.set(settings.motionLevel.rawValue, forKey: "motionLevel")
         defaults.set(settings.hapticsEnabled, forKey: "hapticsEnabled")
         defaults.set(settings.showHealthCardOnHome, forKey: "showHealthCardOnHome")
     }

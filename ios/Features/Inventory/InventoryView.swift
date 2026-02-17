@@ -180,6 +180,9 @@ struct InventoryView: View {
         .refreshable {
             await loadData()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .inventoryDidChange)) { _ in
+            Task { await loadData() }
+        }
         .confirmationDialog(
             "Удалить продукт?",
             isPresented: $showDeleteConfirm,
@@ -461,16 +464,20 @@ struct InventoryView: View {
         return "fork.knife"
     }
 
+    @MainActor
     private func loadData() async {
+        isLoading = true
         do {
             products = try await inventoryService.listProducts(location: nil, search: nil)
             batches = try await inventoryService.listBatches(productId: nil)
+            GamificationService.shared.trackInventoryCount(products.count)
             isLoading = false
         } catch {
             isLoading = false
         }
     }
 
+    @MainActor
     private func deleteProduct(_ product: Product) async {
         do {
             try await inventoryService.deleteProduct(id: product.id)
@@ -482,6 +489,7 @@ struct InventoryView: View {
         }
     }
 
+    @MainActor
     private func writeOffProduct(_ product: Product) async {
         let productBatches = batches.filter { $0.productId == product.id }
         guard let firstBatch = productBatches.first else { return }
@@ -500,6 +508,7 @@ struct InventoryView: View {
         }
     }
 
+    @MainActor
     private func consumeProduct(_ product: Product) async {
         let productBatches = batches.filter { $0.productId == product.id }
         guard let firstBatch = productBatches.first else { return }

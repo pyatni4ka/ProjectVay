@@ -58,6 +58,34 @@ struct MealPlanGenerateRequest: Codable {
     let cuisine: [String]
 }
 
+struct SmartMealPlanGenerateRequest: Codable {
+    struct Budget: Codable {
+        let perDay: Double?
+        let perMeal: Double?
+    }
+
+    struct IngredientPriceHint: Codable {
+        let ingredient: String
+        let priceRub: Double
+        let confidence: Double?
+        let source: String?
+        let capturedAt: String?
+    }
+
+    let days: Int
+    let ingredientKeywords: [String]
+    let expiringSoonKeywords: [String]
+    let targets: Nutrition
+    let beveragesKcal: Double?
+    let budget: Budget?
+    let exclude: [String]
+    let avoidBones: Bool
+    let cuisine: [String]
+    let objective: String?
+    let macroTolerancePercent: Double?
+    let ingredientPriceHints: [IngredientPriceHint]?
+}
+
 struct MealPlanGenerateResponse: Codable {
     struct Day: Codable, Identifiable {
         struct Entry: Codable, Identifiable {
@@ -91,6 +119,75 @@ struct MealPlanGenerateResponse: Codable {
     let shoppingList: [String]
     let estimatedTotalCost: Double
     let warnings: [String]
+}
+
+struct SmartMealPlanGenerateResponse: Codable {
+    let days: [MealPlanGenerateResponse.Day]
+    let shoppingList: [String]
+    let estimatedTotalCost: Double
+    let warnings: [String]
+    let objective: String
+    let costConfidence: Double
+    let priceExplanation: [String]
+}
+
+struct RecipeParseRequest: Codable {
+    let url: String
+}
+
+struct RecipeParseResponse: Codable {
+    struct NormalizedIngredient: Codable {
+        let raw: String
+        let normalizedKey: String
+        let name: String
+        let quantity: Double?
+        let unit: String?
+    }
+
+    struct Quality: Codable {
+        let hasImage: Bool
+        let hasNutrition: Bool
+        let hasServings: Bool
+        let hasTotalTime: Bool
+        let ingredientCount: Int
+        let instructionCount: Int
+        let score: Double
+        let missingFields: [String]
+    }
+
+    let recipe: Recipe
+    let normalizedIngredients: [NormalizedIngredient]
+    let quality: Quality
+    let diagnostics: [String]
+}
+
+struct PriceEstimateRequest: Codable {
+    struct Hint: Codable {
+        let ingredient: String
+        let priceRub: Double
+        let confidence: Double?
+        let source: String?
+        let capturedAt: String?
+    }
+
+    let ingredients: [String]
+    let hints: [Hint]?
+    let region: String?
+    let currency: String?
+}
+
+struct PriceEstimateResponse: Codable {
+    struct Item: Codable {
+        let ingredient: String
+        let estimatedPriceRub: Double
+        let confidence: Double
+        let source: String
+    }
+
+    let items: [Item]
+    let totalEstimatedRub: Double
+    let confidence: Double
+    let missingIngredients: [String]
 }
 
 struct TodayMenuSnapshot: Codable, Equatable {

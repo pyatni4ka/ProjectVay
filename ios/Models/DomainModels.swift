@@ -321,6 +321,51 @@ struct AppSettings: Codable, Equatable {
         }
     }
 
+    enum DietGoalMode: String, Codable, CaseIterable {
+        case lose
+        case maintain
+        case gain
+
+        var title: String {
+            switch self {
+            case .lose:
+                return "Похудение"
+            case .maintain:
+                return "Поддержание"
+            case .gain:
+                return "Набор"
+            }
+        }
+
+        func targetWeightDeltaPerWeek(for profile: DietProfile) -> Double {
+            switch self {
+            case .lose:
+                return profile.targetLossPerWeek
+            case .maintain:
+                return 0
+            case .gain:
+                return -profile.targetLossPerWeek
+            }
+        }
+    }
+
+    enum MotionLevel: String, Codable, CaseIterable {
+        case off
+        case reduced
+        case full
+
+        var title: String {
+            switch self {
+            case .off:
+                return "Выкл"
+            case .reduced:
+                return "Меньше"
+            case .full:
+                return "Полный"
+            }
+        }
+    }
+
     struct MealSchedule: Codable, Equatable {
         var breakfastMinute: Int
         var lunchMinute: Int
@@ -377,9 +422,11 @@ struct AppSettings: Codable, Equatable {
     var healthKitReadEnabled: Bool = true
     var healthKitWriteEnabled: Bool = false
     var enableAnimations: Bool = true
+    var motionLevel: MotionLevel = .full
     var hapticsEnabled: Bool = true
     var showHealthCardOnHome: Bool = true
     var dietProfile: DietProfile = .medium
+    var dietGoalMode: DietGoalMode = .lose
     var recipeServiceBaseURLOverride: String?
 
     static let defaultStores: [Store] = [.pyaterochka, .yandexLavka, .chizhik, .auchan]
@@ -403,9 +450,11 @@ struct AppSettings: Codable, Equatable {
         healthKitReadEnabled: true,
         healthKitWriteEnabled: false,
         enableAnimations: true,
+        motionLevel: .full,
         hapticsEnabled: true,
         showHealthCardOnHome: true,
         dietProfile: .medium,
+        dietGoalMode: .lose,
         recipeServiceBaseURLOverride: nil
     )
 
@@ -433,6 +482,13 @@ struct AppSettings: Codable, Equatable {
             period: budgetInputPeriod
         )
 
+        let resolvedMotionLevel: MotionLevel
+        if motionLevel == .full, !enableAnimations {
+            resolvedMotionLevel = .off
+        } else {
+            resolvedMotionLevel = motionLevel
+        }
+
         var result = AppSettings(
             quietStartMinute: Self.clampMinute(quietStartMinute),
             quietEndMinute: Self.clampMinute(quietEndMinute),
@@ -457,10 +513,12 @@ struct AppSettings: Codable, Equatable {
         result.preferredColorScheme = normalizedColorScheme(preferredColorScheme)
         result.healthKitReadEnabled = healthKitReadEnabled
         result.healthKitWriteEnabled = healthKitWriteEnabled
-        result.enableAnimations = enableAnimations
+        result.enableAnimations = resolvedMotionLevel != .off
+        result.motionLevel = resolvedMotionLevel
         result.hapticsEnabled = hapticsEnabled
         result.showHealthCardOnHome = showHealthCardOnHome
         result.dietProfile = dietProfile
+        result.dietGoalMode = dietGoalMode
         result.recipeServiceBaseURLOverride = normalizedRecipeServiceURLOverride(recipeServiceBaseURLOverride)
         return result
     }
@@ -620,9 +678,11 @@ extension AppSettings {
         case healthKitReadEnabled
         case healthKitWriteEnabled
         case enableAnimations
+        case motionLevel
         case hapticsEnabled
         case showHealthCardOnHome
         case dietProfile
+        case dietGoalMode
         case recipeServiceBaseURLOverride
     }
 
@@ -658,9 +718,11 @@ extension AppSettings {
         healthKitReadEnabled = try container.decodeIfPresent(Bool.self, forKey: .healthKitReadEnabled) ?? true
         healthKitWriteEnabled = try container.decodeIfPresent(Bool.self, forKey: .healthKitWriteEnabled) ?? false
         enableAnimations = try container.decodeIfPresent(Bool.self, forKey: .enableAnimations) ?? true
+        motionLevel = try container.decodeIfPresent(MotionLevel.self, forKey: .motionLevel) ?? (enableAnimations ? .full : .off)
         hapticsEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
         showHealthCardOnHome = try container.decodeIfPresent(Bool.self, forKey: .showHealthCardOnHome) ?? true
         dietProfile = try container.decodeIfPresent(DietProfile.self, forKey: .dietProfile) ?? .medium
+        dietGoalMode = try container.decodeIfPresent(DietGoalMode.self, forKey: .dietGoalMode) ?? .lose
         recipeServiceBaseURLOverride = try container.decodeIfPresent(String.self, forKey: .recipeServiceBaseURLOverride)
     }
 
@@ -689,10 +751,18 @@ extension AppSettings {
         try container.encode(healthKitReadEnabled, forKey: .healthKitReadEnabled)
         try container.encode(healthKitWriteEnabled, forKey: .healthKitWriteEnabled)
         try container.encode(enableAnimations, forKey: .enableAnimations)
+        try container.encode(motionLevel, forKey: .motionLevel)
         try container.encode(hapticsEnabled, forKey: .hapticsEnabled)
         try container.encode(showHealthCardOnHome, forKey: .showHealthCardOnHome)
         try container.encode(dietProfile, forKey: .dietProfile)
+        try container.encode(dietGoalMode, forKey: .dietGoalMode)
         try container.encodeIfPresent(recipeServiceBaseURLOverride, forKey: .recipeServiceBaseURLOverride)
+    }
+}
+
+extension AppSettings {
+    var targetWeightDeltaPerWeek: Double {
+        dietGoalMode.targetWeightDeltaPerWeek(for: dietProfile)
     }
 }
 

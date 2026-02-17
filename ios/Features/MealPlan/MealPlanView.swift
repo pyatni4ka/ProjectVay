@@ -91,6 +91,15 @@ struct MealPlanView: View {
         .navigationTitle("План питания")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                NavigationLink {
+                    RecipeImportView(recipeServiceClient: recipeServiceClient)
+                } label: {
+                    Image(systemName: "link.badge.plus")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.vayPrimary)
+                }
+                .vayAccessibilityLabel("Импортировать рецепт по ссылке")
+
                 Button(action: onOpenScanner) {
                     Image(systemName: "barcode.viewfinder")
                         .font(.system(size: 18, weight: .semibold))
@@ -447,8 +456,21 @@ struct MealPlanView: View {
                 return
             }
 
+            var allPriceEntries: [PriceEntry] = []
+            for product in products {
+                if let history = try? await inventoryService.listPriceHistory(productId: product.id) {
+                    allPriceEntries.append(contentsOf: history)
+                }
+            }
+
+            let ingredientPriceHints = IngredientPriceResolverUseCase().execute(
+                ingredients: ingredientKeywords,
+                products: products,
+                priceEntries: allPriceEntries
+            )
+
             let budgetPerDay = NSDecimalNumber(decimal: settings.budgetDay).doubleValue
-            let payload = MealPlanGenerateRequest(
+            let smartPayload = SmartMealPlanGenerateRequest(
                 days: selectedRange.daysCount,
                 ingredientKeywords: ingredientKeywords,
                 expiringSoonKeywords: expiringSoonKeywords,
@@ -457,13 +479,53 @@ struct MealPlanView: View {
                 budget: .init(perDay: budgetPerDay > 0 ? budgetPerDay : nil, perMeal: nil),
                 exclude: settings.dislikedList,
                 avoidBones: settings.avoidBones,
-                cuisine: []
+                cuisine: [],
+                objective: "cost_macro",
+                macroTolerancePercent: settings.macroTolerancePercent,
+                ingredientPriceHints: ingredientPriceHints
             )
 
-            let generated = try await recipeServiceClient.generateMealPlan(payload: payload)
+            var smartExplanation: [String] = []
+            let generated: MealPlanGenerateResponse
+            if let generatedSmart = try? await recipeServiceClient.generateSmartMealPlan(payload: smartPayload) {
+                generated = MealPlanGenerateResponse(
+                    days: generatedSmart.days,
+                    shoppingList: generatedSmart.shoppingList,
+                    estimatedTotalCost: generatedSmart.estimatedTotalCost,
+                    warnings: generatedSmart.warnings
+                )
+                smartExplanation = generatedSmart.priceExplanation
+            } else {
+                let payload = MealPlanGenerateRequest(
+                    days: selectedRange.daysCount,
+                    ingredientKeywords: ingredientKeywords,
+                    expiringSoonKeywords: expiringSoonKeywords,
+                    targets: selectedRange == .day ? nutritionSnapshot.planDayTarget : nutritionSnapshot.baselineDayTarget,
+                    beveragesKcal: 120,
+                    budget: .init(perDay: budgetPerDay > 0 ? budgetPerDay : nil, perMeal: nil),
+                    exclude: settings.dislikedList,
+                    avoidBones: settings.avoidBones,
+                    cuisine: []
+                )
+                generated = try await recipeServiceClient.generateMealPlan(payload: payload)
+            }
+
             mealPlan = generated
             offlineStatusMessage = nil
             persistTodayMenuSnapshot(from: generated)
+            await MainActor.run {
+                GamificationService.shared.trackMealPlanGenerated()
+                GamificationService.shared.trackMacroModeDay(source: settings.macroGoalSource)
+            }
+
+            if !smartExplanation.isEmpty {
+                let explanation = smartExplanation.joined(separator: " ")
+                if let current = healthStatusMessage, !current.isEmpty {
+                    healthStatusMessage = "\(current) \(explanation)"
+                } else {
+                    healthStatusMessage = explanation
+                }
+            }
 
             let nextMealBudget = budgetPerDay > 0 ? budgetPerDay / Double(max(1, nutritionSnapshot.remainingMealsCount)) : nil
             do {
@@ -553,19 +615,21 @@ struct MealPlanView: View {
 
         var automaticDailyCalories: Double?
         var weightKG: Double?
+        if settings.macroGoalSource == .automatic {
+            automaticDailyCalories = healthKitService.fallbackAutomaticDailyCalories(
+                targetLossPerWeek: settings.targetWeightDeltaPerWeek
+            )
+        }
+
         if settings.healthKitReadEnabled, settings.macroGoalSource == .automatic {
-            do {
-                let metrics = try await healthKitService.fetchLatestMetrics()
+            if let metrics = try? await healthKitService.fetchLatestMetrics() {
                 automaticDailyCalories = Double(
                     healthKitService.calculateDailyCalories(
                         metrics: metrics,
-                        targetLossPerWeek: settings.dietProfile.targetLossPerWeek
+                        targetLossPerWeek: settings.targetWeightDeltaPerWeek
                     )
                 )
                 weightKG = metrics.weightKG
-            } catch {
-                automaticDailyCalories = nil
-                weightKG = nil
             }
         }
 
@@ -579,7 +643,7 @@ struct MealPlanView: View {
             }
         }
 
-        return AdaptiveNutritionUseCase().execute(
+        let baseOutput = AdaptiveNutritionUseCase().execute(
             .init(
                 settings: settings,
                 range: selectedRange == .day ? .day : .week,
@@ -589,6 +653,47 @@ struct MealPlanView: View {
                 consumedFetchFailed: consumedFetchFailed,
                 healthIntegrationEnabled: settings.healthKitReadEnabled
             )
+        )
+
+        guard settings.macroGoalSource == .automatic else {
+            return baseOutput
+        }
+
+        let weightHistory = (try? await healthKitService.fetchWeightHistory(days: 14)) ?? []
+        let bodyFatHistory = (try? await healthKitService.fetchBodyFatHistory(days: 14)) ?? []
+        let nutritionHistory = (try? await healthKitService.fetchConsumedNutritionHistory(days: 7)) ?? []
+
+        let coachOutput = DietCoachUseCase().execute(
+            .init(
+                settings: settings,
+                baselineTarget: baseOutput.baselineDayTarget,
+                weightHistory: weightHistory,
+                bodyFatHistory: bodyFatHistory,
+                nutritionHistory: nutritionHistory
+            )
+        )
+
+        let adjustedBaseline = coachOutput.adjustedTarget
+        let remaining = subtractNutrition(adjustedBaseline, baseOutput.consumedToday)
+        let nextMeal = divideNutrition(remaining, by: Double(baseOutput.remainingMealsCount))
+        let planDayTarget = selectedRange == .day ? remaining : adjustedBaseline
+
+        let statusMessage: String
+        if let note = coachOutput.note, !note.isEmpty {
+            statusMessage = "\(baseOutput.statusMessage) \(note)"
+        } else {
+            statusMessage = baseOutput.statusMessage
+        }
+
+        return .init(
+            baselineDayTarget: adjustedBaseline,
+            planDayTarget: planDayTarget,
+            consumedToday: baseOutput.consumedToday,
+            remainingToday: remaining,
+            nextMealTarget: nextMeal,
+            nextMealSlot: baseOutput.nextMealSlot,
+            remainingMealsCount: baseOutput.remainingMealsCount,
+            statusMessage: statusMessage
         )
     }
 
@@ -617,6 +722,25 @@ struct MealPlanView: View {
 
     private func resolved(_ value: Double?) -> Double {
         max(0, value ?? 0)
+    }
+
+    private func subtractNutrition(_ left: Nutrition, _ right: Nutrition) -> Nutrition {
+        Nutrition(
+            kcal: max(0, (left.kcal ?? 0) - (right.kcal ?? 0)),
+            protein: max(0, (left.protein ?? 0) - (right.protein ?? 0)),
+            fat: max(0, (left.fat ?? 0) - (right.fat ?? 0)),
+            carbs: max(0, (left.carbs ?? 0) - (right.carbs ?? 0))
+        )
+    }
+
+    private func divideNutrition(_ value: Nutrition, by divisor: Double) -> Nutrition {
+        let safe = max(1, divisor)
+        return Nutrition(
+            kcal: (value.kcal ?? 0) / safe,
+            protein: (value.protein ?? 0) / safe,
+            fat: (value.fat ?? 0) / safe,
+            carbs: (value.carbs ?? 0) / safe
+        )
     }
 
     private func nutritionSummary(_ nutrition: Nutrition) -> String {

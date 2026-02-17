@@ -4,6 +4,7 @@ import SwiftUI
 struct BodyMetricsView: View {
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
+    @EnvironmentObject private var appSettingsStore: AppSettingsStore
 
     @State private var settings: AppSettings = .default
     @State private var isHydratingSettings = false
@@ -24,6 +25,7 @@ struct BodyMetricsView: View {
     @State private var bodyFatHistory: [HealthKitService.SamplePoint] = []
     @State private var healthStatusMessage: String?
     @State private var isRequestingHealthAccess = false
+    @State private var healthReadAccessStatus: HealthKitService.ReadAuthorizationRequestStatus = .unknown
 
     @State private var desiredWeightText = ""
 
@@ -34,14 +36,14 @@ struct BodyMetricsView: View {
                 healthOverviewCard
                 todayNutritionCard
                 chartCard(
-                    title: "Вес за 30 дней",
+                    title: "Вес (доступные данные)",
                     icon: "scalemass.fill",
                     points: weightHistory,
                     valueSuffix: "кг",
                     lineColor: .vayPrimary
                 )
                 chartCard(
-                    title: "Жир за 30 дней",
+                    title: "Жир (доступные данные)",
                     icon: "drop.fill",
                     points: bodyFatHistory,
                     valueSuffix: "%",
@@ -144,26 +146,33 @@ struct BodyMetricsView: View {
                         .font(VayFont.body(14))
                         .foregroundStyle(.secondary)
 
-                    Button {
-                        Task { await requestHealthAccess() }
-                    } label: {
-                        if isRequestingHealthAccess {
-                            HStack(spacing: VaySpacing.sm) {
-                                ProgressView()
-                                Text("Запрашиваем доступ...")
+                    if shouldShowHealthAccessButton {
+                        Button {
+                            Task { await requestHealthAccess() }
+                        } label: {
+                            if isRequestingHealthAccess {
+                                HStack(spacing: VaySpacing.sm) {
+                                    ProgressView()
+                                    Text("Запрашиваем доступ...")
+                                        .font(VayFont.label(13))
+                                }
+                            } else {
+                                Label("Разрешить доступ к Apple Health", systemImage: "apple.logo")
                                     .font(VayFont.label(13))
                             }
-                        } else {
-                            Label("Разрешить доступ к Apple Health", systemImage: "apple.logo")
-                                .font(VayFont.label(13))
                         }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.vayPrimary)
+                        .disabled(isRequestingHealthAccess)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color.vayPrimary)
-                    .disabled(isRequestingHealthAccess)
 
                     if let healthStatusMessage {
                         Text(healthStatusMessage)
+                            .font(VayFont.caption(12))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if let infoMessage = healthAccessInfoMessage {
+                        Text(infoMessage)
                             .font(VayFont.caption(12))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -252,6 +261,16 @@ struct BodyMetricsView: View {
                         .font(VayFont.caption(9))
                     }
                 }
+            } else if let point = points.last {
+                VStack(alignment: .leading, spacing: VaySpacing.xs) {
+                    Text("\(point.value.formatted(.number.precision(.fractionLength(0...1)))) \(valueSuffix)")
+                        .font(VayFont.title(24))
+                        .foregroundStyle(lineColor)
+                    Text(point.date.formatted(.dateTime.day().month(.abbreviated).year()))
+                        .font(VayFont.caption(11))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text("Недостаточно данных для графика.")
                     .font(VayFont.body(14))
@@ -303,6 +322,7 @@ struct BodyMetricsView: View {
     }
 
     private func loadInitialData() async {
+        await refreshHealthReadAccessStatus()
         await loadSettings()
         await loadHealthData()
         await recalculateAutoGoalNutrition(for: settings)
@@ -325,20 +345,7 @@ struct BodyMetricsView: View {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            async let metricsTask = healthKitService.fetchLatestMetrics()
-            async let nutritionTask = healthKitService.fetchTodayConsumedNutrition()
-            async let weightTask = healthKitService.fetchWeightHistory(days: 30)
-            async let bodyFatTask = healthKitService.fetchBodyFatHistory(days: 30)
-
-            metrics = try await metricsTask
-            todayNutrition = try await nutritionTask
-            let loadedWeightHistory = try await weightTask
-            let loadedBodyFatHistory = try await bodyFatTask
-            weightHistory = loadedWeightHistory.sorted(by: { $0.date < $1.date })
-            bodyFatHistory = loadedBodyFatHistory.sorted(by: { $0.date < $1.date })
-            healthStatusMessage = nil
-        } catch {
+        guard settings.healthKitReadEnabled else {
             metrics = HealthKitService.UserMetrics(
                 heightCM: nil,
                 weightKG: nil,
@@ -350,7 +357,70 @@ struct BodyMetricsView: View {
             todayNutrition = .empty
             weightHistory = []
             bodyFatHistory = []
-            healthStatusMessage = "Нет доступа к данным Apple Health или данные отсутствуют."
+            healthStatusMessage = "Чтение Apple Health отключено в настройках."
+            await recalculateAutoGoalNutrition(for: settings)
+            return
+        }
+
+        async let metricsTask = try? healthKitService.fetchLatestMetrics()
+        async let nutritionTask = try? healthKitService.fetchTodayConsumedNutrition()
+        async let weightTask = try? healthKitService.fetchWeightHistory(days: 0)
+        async let bodyFatTask = try? healthKitService.fetchBodyFatHistory(days: 0)
+
+        let loadedMetrics = await metricsTask
+        let loadedNutrition = await nutritionTask
+        let loadedWeightHistory = await weightTask
+        let loadedBodyFatHistory = await bodyFatTask
+
+        metrics = loadedMetrics ?? HealthKitService.UserMetrics(
+            heightCM: nil,
+            weightKG: nil,
+            bodyFatPercent: nil,
+            activeEnergyKcal: nil,
+            age: nil,
+            sex: nil
+        )
+        todayNutrition = loadedNutrition ?? .empty
+        weightHistory = (loadedWeightHistory ?? []).sorted(by: { $0.date < $1.date })
+        bodyFatHistory = (loadedBodyFatHistory ?? [])
+            .map { .init(date: $0.date, value: $0.value * 100) }
+            .sorted(by: { $0.date < $1.date })
+
+        if weightHistory.isEmpty, let latestWeight = metrics.weightKG {
+            weightHistory = [.init(date: Date(), value: latestWeight)]
+        }
+        if bodyFatHistory.isEmpty, let latestBodyFat = metrics.bodyFatPercent {
+            bodyFatHistory = [.init(date: Date(), value: latestBodyFat * 100)]
+        }
+
+        let hasMetricsData =
+            metrics.heightCM != nil
+            || metrics.weightKG != nil
+            || metrics.bodyFatPercent != nil
+            || metrics.activeEnergyKcal != nil
+            || metrics.age != nil
+            || metrics.sex != nil
+        let hasNutritionData =
+            (todayNutrition.kcal ?? 0) > 0
+            || (todayNutrition.protein ?? 0) > 0
+            || (todayNutrition.fat ?? 0) > 0
+            || (todayNutrition.carbs ?? 0) > 0
+        let hasHistoryData = !weightHistory.isEmpty || !bodyFatHistory.isEmpty
+
+        if hasMetricsData || hasNutritionData || hasHistoryData {
+            var notes: [String] = []
+            if loadedMetrics == nil {
+                notes.append("Часть метрик тела недоступна.")
+            }
+            if loadedNutrition == nil {
+                notes.append("КБЖУ за сегодня недоступно.")
+            }
+            healthStatusMessage = notes.isEmpty ? nil : notes.joined(separator: " ")
+        } else {
+            let diagnosis = await healthKitService.diagnoseDataAvailability(
+                readEnabledInSettings: settings.healthKitReadEnabled
+            )
+            healthStatusMessage = diagnosis.message
         }
 
         await recalculateAutoGoalNutrition(for: settings)
@@ -368,10 +438,12 @@ struct BodyMetricsView: View {
 
         do {
             let granted = try await healthKitService.requestReadAccess()
+            await refreshHealthReadAccessStatus()
             if granted {
                 var updated = settings
                 updated.healthKitReadEnabled = true
                 settings = try await settingsService.saveSettings(updated)
+                appSettingsStore.update(settings)
                 desiredWeightText = formatDesiredWeight(settings.weightGoalKg)
                 await loadHealthData()
                 await recalculateAutoGoalNutrition(for: settings)
@@ -382,6 +454,28 @@ struct BodyMetricsView: View {
         } catch {
             healthStatusMessage = "Не удалось запросить доступ: \(error.localizedDescription)"
         }
+    }
+
+    private var shouldShowHealthAccessButton: Bool {
+        guard !hasAnyHealthData else { return false }
+        return healthReadAccessStatus == .shouldRequest
+    }
+
+    private var healthAccessInfoMessage: String? {
+        switch healthReadAccessStatus {
+        case .unnecessary:
+            return "Доступ к Apple Health уже настроен. Проверьте, что в приложении Здоровье есть данные веса и состава тела."
+        case .unavailable:
+            return "Apple Health недоступен на этом устройстве."
+        case .unknown:
+            return "Статус доступа пока не определён. Откройте приложение Здоровье и проверьте разрешения."
+        case .shouldRequest:
+            return nil
+        }
+    }
+
+    private func refreshHealthReadAccessStatus() async {
+        healthReadAccessStatus = await healthKitService.readAccessRequestStatus()
     }
 
     private func scheduleAutoSave() {
@@ -402,11 +496,16 @@ struct BodyMetricsView: View {
         let parsed = parseDesiredWeight()
         guard parsed.valid else { return }
 
+        let previousWeightGoal = settings.weightGoalKg
         var updated = settings
         updated.weightGoalKg = parsed.value
 
         do {
             settings = try await settingsService.saveSettings(updated)
+            appSettingsStore.update(settings)
+            if previousWeightGoal != settings.weightGoalKg, settings.weightGoalKg != nil {
+                GamificationService.shared.trackBodyGoalSet()
+            }
             healthStatusMessage = nil
         } catch {
             healthStatusMessage = "Не удалось сохранить целевой вес: \(error.localizedDescription)"
@@ -417,12 +516,18 @@ struct BodyMetricsView: View {
         var automaticDailyCalories: Double?
         var weightKG: Double?
 
+        if settings.macroGoalSource == .automatic {
+            automaticDailyCalories = healthKitService.fallbackAutomaticDailyCalories(
+                targetLossPerWeek: settings.targetWeightDeltaPerWeek
+            )
+        }
+
         if settings.macroGoalSource == .automatic, settings.healthKitReadEnabled {
             if metrics.weightKG != nil, metrics.heightCM != nil, metrics.age != nil {
                 automaticDailyCalories = Double(
                     healthKitService.calculateDailyCalories(
                         metrics: metrics,
-                        targetLossPerWeek: settings.dietProfile.targetLossPerWeek
+                        targetLossPerWeek: settings.targetWeightDeltaPerWeek
                     )
                 )
                 weightKG = metrics.weightKG
@@ -430,7 +535,7 @@ struct BodyMetricsView: View {
                 automaticDailyCalories = Double(
                     healthKitService.calculateDailyCalories(
                         metrics: loadedMetrics,
-                        targetLossPerWeek: settings.dietProfile.targetLossPerWeek
+                        targetLossPerWeek: settings.targetWeightDeltaPerWeek
                     )
                 )
                 weightKG = loadedMetrics.weightKG
@@ -448,7 +553,23 @@ struct BodyMetricsView: View {
                 healthIntegrationEnabled: settings.healthKitReadEnabled
             )
         )
-        autoGoalNutrition = output.baselineDayTarget
+
+        guard settings.macroGoalSource == .automatic else {
+            autoGoalNutrition = output.baselineDayTarget
+            return
+        }
+
+        let nutritionHistory = (try? await healthKitService.fetchConsumedNutritionHistory(days: 7)) ?? []
+        let coachOutput = DietCoachUseCase().execute(
+            .init(
+                settings: settings,
+                baselineTarget: output.baselineDayTarget,
+                weightHistory: weightHistory,
+                bodyFatHistory: bodyFatHistory,
+                nutritionHistory: nutritionHistory
+            )
+        )
+        autoGoalNutrition = coachOutput.adjustedTarget
     }
 
     private func shouldReloadHealthData(previous: AppSettings, next: AppSettings) -> Bool {

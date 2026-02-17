@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import Combine
 
 extension Notification.Name {
     static let appSettingsDidChange = Notification.Name("appSettingsDidChange")
@@ -297,7 +298,25 @@ actor SettingsService: SettingsServiceProtocol {
         let defaults = UserDefaults.standard
         defaults.set(settings.preferredColorScheme ?? 0, forKey: "preferredColorScheme")
         defaults.set(settings.enableAnimations, forKey: "enableAnimations")
+        defaults.set(settings.motionLevel.rawValue, forKey: "motionLevel")
         defaults.set(settings.hapticsEnabled, forKey: "hapticsEnabled")
         defaults.set(settings.showHealthCardOnHome, forKey: "showHealthCardOnHome")
+    }
+}
+
+@MainActor
+final class AppSettingsStore: ObservableObject {
+    @Published private(set) var settings: AppSettings = .default
+
+    func update(_ settings: AppSettings) {
+        let normalized = settings.normalized()
+        self.settings = normalized
+
+        let defaults = UserDefaults.standard
+        defaults.set(normalized.preferredColorScheme ?? 0, forKey: "preferredColorScheme")
+        defaults.set(normalized.enableAnimations, forKey: "enableAnimations")
+        defaults.set(normalized.motionLevel.rawValue, forKey: "motionLevel")
+        defaults.set(normalized.hapticsEnabled, forKey: "hapticsEnabled")
+        defaults.set(normalized.showHealthCardOnHome, forKey: "showHealthCardOnHome")
     }
 }

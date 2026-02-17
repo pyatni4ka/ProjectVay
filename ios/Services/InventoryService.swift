@@ -67,6 +67,7 @@ final class InventoryService: InventoryServiceProtocol {
         stored.createdAt = now
         stored.updatedAt = now
         try repository.upsertProduct(stored)
+        notifyInventoryChanged()
         return stored
     }
 
@@ -74,6 +75,7 @@ final class InventoryService: InventoryServiceProtocol {
         var stored = product
         stored.updatedAt = Date()
         try repository.upsertProduct(stored)
+        notifyInventoryChanged()
         return stored
     }
 
@@ -83,6 +85,7 @@ final class InventoryService: InventoryServiceProtocol {
             try await notificationScheduler.cancelExpiryNotifications(batchId: batch.id)
         }
         try repository.deleteProduct(id: id)
+        notifyInventoryChanged()
     }
 
     func addBatch(_ batch: Batch) async throws -> Batch {
@@ -109,6 +112,7 @@ final class InventoryService: InventoryServiceProtocol {
 
         let settings = try settingsRepository.loadSettings()
         try await notificationScheduler.scheduleExpiryNotifications(for: stored, product: product, settings: settings)
+        notifyInventoryChanged()
         return stored
     }
 
@@ -135,6 +139,7 @@ final class InventoryService: InventoryServiceProtocol {
         let settings = try settingsRepository.loadSettings()
         try await notificationScheduler.rescheduleExpiryNotifications(for: stored, product: product, settings: settings)
 
+        notifyInventoryChanged()
         return stored
     }
 
@@ -161,6 +166,7 @@ final class InventoryService: InventoryServiceProtocol {
         if quantityToRemove >= batch.quantity - 0.000_001 {
             try await notificationScheduler.cancelExpiryNotifications(batchId: id)
             try repository.removeBatch(id: id)
+            notifyInventoryChanged()
             return
         }
 
@@ -178,6 +184,7 @@ final class InventoryService: InventoryServiceProtocol {
             let settings = try settingsRepository.loadSettings()
             try await notificationScheduler.rescheduleExpiryNotifications(for: batch, product: product, settings: settings)
         }
+        notifyInventoryChanged()
     }
 
     func listProducts(location: InventoryLocation?, search: String?) async throws -> [Product] {
@@ -190,6 +197,9 @@ final class InventoryService: InventoryServiceProtocol {
 
     func savePriceEntry(_ entry: PriceEntry) async throws {
         try repository.savePriceEntry(entry)
+        await MainActor.run {
+            GamificationService.shared.trackPriceEntrySaved()
+        }
     }
 
     func listPriceHistory(productId: UUID?) async throws -> [PriceEntry] {
@@ -283,6 +293,10 @@ final class InventoryService: InventoryServiceProtocol {
         let ratio = min(1, max(0, newQuantity / originalQuantity))
         let updated = proportionalMinor(totalMinor: currentMinor, ratio: ratio)
         return updated > 0 ? updated : nil
+    }
+
+    private func notifyInventoryChanged() {
+        NotificationCenter.default.post(name: .inventoryDidChange, object: nil)
     }
 
     private func proportionalMinor(totalMinor: Int64, ratio: Double) -> Int64 {

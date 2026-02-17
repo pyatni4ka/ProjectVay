@@ -5,14 +5,22 @@ import { generateMealPlan } from "../../services/mealPlan.js";
 import { rankRecipes } from "../../services/recommendation.js";
 import { CacheStore } from "../../services/cacheStore.js";
 import { PersistentRecipeCache } from "../../services/persistentRecipeCache.js";
-import { fetchAndParseRecipe, RecipeScraperError } from "../../services/recipeScraper.js";
+import { fetchAndParseRecipe, fetchAndParseRecipeDetailed, RecipeScraperError } from "../../services/recipeScraper.js";
 import { RecipeIndex } from "../../services/recipeIndex.js";
 import { isURLAllowedByWhitelist, parseRecipeURL } from "../../services/sourcePolicy.js";
 import { lookupBarcode, type BarcodeLookupResult } from "../../services/barcodeLookup.js";
 import { searchExternalRecipes } from "../../services/externalRecipes.js";
 import { personalizeRecipes, buildUserTasteProfile } from "../../services/personalization.js";
+import { estimateIngredientsPrice } from "../../services/priceEstimator.js";
 import { getEnv } from "../../config/env.js";
-import type { MealPlanRequest, RecommendPayload, Recipe, UserMealHistory } from "../../types/contracts.js";
+import type {
+  MealPlanRequest,
+  PriceEstimateRequest,
+  RecommendPayload,
+  Recipe,
+  SmartMealPlanRequest,
+  UserMealHistory
+} from "../../types/contracts.js";
 
 const router = Router();
 const env = getEnv();
@@ -188,6 +196,51 @@ router.get("/recipes/external/search", async (req, res) => {
   return res.json(response);
 });
 
+router.post("/recipes/parse", async (req, res, next) => {
+  try {
+    const rateLimitKey = requestRateLimitKey(req);
+    if (!consumeRateLimit(fetchRateLimitState, rateLimitKey, FETCH_RATE_LIMIT_MAX, FETCH_RATE_LIMIT_WINDOW_MS)) {
+      return res.status(429).json({ error: "rate_limited", retryInSeconds: Math.ceil(FETCH_RATE_LIMIT_WINDOW_MS / 1000) });
+    }
+
+    const url = String(req.body?.url ?? "");
+    if (!url) {
+      return res.status(400).json({ error: "url is required" });
+    }
+
+    const parsedURL = parseRecipeURL(url);
+    if (!parsedURL) {
+      return res.status(400).json({ error: "invalid_url" });
+    }
+
+    if (!isURLAllowedByWhitelist(parsedURL, sourceWhitelist)) {
+      return res.status(403).json({ error: "source_not_allowed" });
+    }
+
+    const parsed = await fetchAndParseRecipeDetailed(parsedURL.toString());
+    return res.json(parsed);
+  } catch (error) {
+    if (error instanceof RecipeScraperError) {
+      switch (error.code) {
+        case "recipe_not_found":
+          return res.status(422).json({ error: "recipe_schema_not_found" });
+        case "missing_image":
+          return res.status(422).json({ error: "recipe_image_required" });
+        case "missing_ingredients":
+          return res.status(422).json({ error: "recipe_ingredients_required" });
+        case "missing_instructions":
+          return res.status(422).json({ error: "recipe_instructions_required" });
+        case "timeout":
+          return res.status(504).json({ error: "upstream_timeout" });
+        default:
+          return res.status(502).json({ error: "upstream_fetch_failed" });
+      }
+    }
+
+    next(error);
+  }
+});
+
 router.post("/recipes/fetch", async (req, res, next) => {
   try {
     const rateLimitKey = requestRateLimitKey(req);
@@ -283,6 +336,66 @@ router.post("/meal-plan/generate", async (req, res) => {
 
   const plan = generateMealPlan(pool, payload);
   res.json(plan);
+});
+
+router.post("/prices/estimate", async (req, res) => {
+  const payload = normalizePriceEstimatePayload(req.body);
+  if (!payload) {
+    return res.status(400).json({ error: "invalid_price_estimate_payload" });
+  }
+
+  const result = await estimateIngredientsPrice(payload);
+  return res.json(result);
+});
+
+router.post("/meal-plan/smart-generate", async (req, res) => {
+  const payload = normalizeSmartMealPlanPayload(req.body);
+  if (!payload) {
+    return res.status(400).json({ error: "invalid_meal_plan_payload" });
+  }
+
+  let pool = recipeIndex.all();
+  const includeExternal = Boolean(req.body?.includeExternal);
+  if (includeExternal) {
+    const external = await searchExternalRecipes({
+      query: payload.ingredientKeywords.join(" "),
+      ingredients: payload.ingredientKeywords,
+      cuisine: payload.cuisine?.[0],
+      maxCalories: payload.targets.kcal,
+      limit: 40
+    });
+    pool = dedupeRecipes([...pool, ...external.recipes]);
+  }
+
+  const objective = payload.objective ?? "cost_macro";
+  const plan = generateMealPlan(pool, payload, new Date(), {
+    objective,
+    macroTolerancePercent: payload.macroTolerancePercent,
+    ingredientPriceHints: payload.ingredientPriceHints
+  });
+
+  const estimate = await estimateIngredientsPrice({
+    ingredients: plan.shoppingList,
+    hints: payload.ingredientPriceHints ?? [],
+    region: "RU",
+    currency: "RUB"
+  });
+
+  return res.json({
+    ...plan,
+    objective,
+    costConfidence: estimate.confidence,
+    priceExplanation: [
+      `Оценка построена для региона RU, валюта RUB.`,
+      `Уверенность по цене: ${(estimate.confidence * 100).toFixed(0)}%.`,
+      plan.optimization
+        ? `Оптимизатор: среднее отклонение КБЖУ ${(plan.optimization.averageMacroDeviation * 100).toFixed(0)}%, средняя цена приёма пищи ${plan.optimization.averageMealCost.toFixed(0)} ₽.`
+        : "Оптимизатор: базовый режим.",
+      estimate.missingIngredients.length > 0
+        ? `Без ценовых подсказок осталось: ${estimate.missingIngredients.slice(0, 5).join(", ")}`
+        : "Все ингредиенты оценены по локальным источникам."
+    ]
+  });
 });
 
 router.post("/meal-plan/optimize", (req, res) => {
@@ -445,6 +558,38 @@ function normalizeMealPlanPayload(body: unknown): MealPlanRequest | null {
   };
 }
 
+function normalizeSmartMealPlanPayload(body: unknown): SmartMealPlanRequest | null {
+  const base = normalizeMealPlanPayload(body);
+  if (!base || !isRecord(body)) {
+    return null;
+  }
+
+  return {
+    ...base,
+    objective: toOptionalString(body.objective) === "balanced" ? "balanced" : "cost_macro",
+    macroTolerancePercent: toOptionalNumber(body.macroTolerancePercent),
+    ingredientPriceHints: normalizeIngredientPriceHints(body.ingredientPriceHints)
+  };
+}
+
+function normalizePriceEstimatePayload(body: unknown): PriceEstimateRequest | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+
+  const ingredients = toStringArray(body.ingredients);
+  if (ingredients.length === 0) {
+    return null;
+  }
+
+  return {
+    ingredients,
+    hints: normalizeIngredientPriceHints(body.hints),
+    region: toOptionalString(body.region),
+    currency: toOptionalString(body.currency)
+  };
+}
+
 function normalizeRecommendPayload(body: unknown): RecommendPayload | null {
   if (!isRecord(body)) {
     return null;
@@ -545,6 +690,37 @@ function toOptionalBoolean(value: unknown): boolean | undefined {
   }
 
   return undefined;
+}
+
+function normalizeIngredientPriceHints(value: unknown): SmartMealPlanRequest["ingredientPriceHints"] {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const items = value
+    .filter((entry): entry is Record<string, unknown> => isRecord(entry))
+    .map((entry) => {
+      const ingredient = toOptionalString(entry.ingredient);
+      const priceRub = toOptionalNumber(entry.priceRub);
+      if (!ingredient || priceRub == null || priceRub < 0) {
+        return null;
+      }
+
+      const confidence = toOptionalNumber(entry.confidence);
+      const source = toOptionalString(entry.source);
+      const capturedAt = toOptionalString(entry.capturedAt);
+
+      return {
+        ingredient,
+        priceRub,
+        confidence: confidence != null ? Math.min(Math.max(confidence, 0), 1) : undefined,
+        source: source as any,
+        capturedAt
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+  return items.length > 0 ? items : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

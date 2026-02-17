@@ -4,9 +4,11 @@ struct SettingsView: View {
     let settingsService: any SettingsServiceProtocol
     let inventoryService: any InventoryServiceProtocol
     let healthKitService: HealthKitService
+    @EnvironmentObject private var appSettingsStore: AppSettingsStore
 
     @AppStorage("preferredColorScheme") private var storedColorScheme: Int = 0
     @AppStorage("enableAnimations") private var storedAnimationsEnabled: Bool = true
+    @AppStorage("motionLevel") private var storedMotionLevel: String = AppSettings.MotionLevel.full.rawValue
     @AppStorage("hapticsEnabled") private var storedHapticsEnabled: Bool = true
     @AppStorage("showHealthCardOnHome") private var storedShowHealthCardOnHome: Bool = true
 
@@ -25,7 +27,7 @@ struct SettingsView: View {
     @State private var selectedTheme: Int = 0
     @State private var healthKitReadEnabled: Bool = true
     @State private var healthKitWriteEnabled: Bool = false
-    @State private var animationsEnabled: Bool = true
+    @State private var motionLevel: AppSettings.MotionLevel = .full
     @State private var hapticsEnabled: Bool = true
     @State private var showHealthCardOnHome: Bool = true
 
@@ -38,7 +40,7 @@ struct SettingsView: View {
         let selectedTheme: Int
         let healthKitReadEnabled: Bool
         let healthKitWriteEnabled: Bool
-        let animationsEnabled: Bool
+        let motionLevel: AppSettings.MotionLevel
         let hapticsEnabled: Bool
         let showHealthCardOnHome: Bool
         let budgetInputPeriod: AppSettings.BudgetInputPeriod
@@ -78,9 +80,13 @@ struct SettingsView: View {
             }
 
             Section {
-                settingRow(icon: "sparkles", color: .vaySecondary, label: "Анимации интерфейса") {
-                    Toggle("", isOn: $animationsEnabled)
-                        .labelsHidden()
+                settingRow(icon: "sparkles", color: .vaySecondary, label: "Движение интерфейса") {
+                    Picker("Движение интерфейса", selection: $motionLevel) {
+                        ForEach(AppSettings.MotionLevel.allCases, id: \.rawValue) { level in
+                            Text(level.title).tag(level)
+                        }
+                    }
+                    .pickerStyle(.menu)
                         .tint(Color.vayPrimary)
                 }
 
@@ -98,7 +104,7 @@ struct SettingsView: View {
             } header: {
                 sectionHeader(icon: "wand.and.stars", title: "Интерфейс и отклик")
             } footer: {
-                Text("Отключение анимаций убирает плавные переходы карточек, вкладок и кнопок.")
+                Text("Полный режим — максимум плавности. Меньше — сокращённые эффекты. Выкл — без анимаций.")
                     .font(VayFont.caption(11))
                     .foregroundStyle(.secondary)
             }
@@ -251,14 +257,16 @@ struct SettingsView: View {
             await loadSettings()
         }
         .onChange(of: autoSaveState) { _, _ in
+            publishLiveSettingsDraft()
             scheduleAutoSave()
         }
         .onChange(of: selectedTheme) { _, newValue in
             storedColorScheme = newValue
             Task { await saveSettingsIfValid() }
         }
-        .onChange(of: animationsEnabled) { _, newValue in
-            storedAnimationsEnabled = newValue
+        .onChange(of: motionLevel) { _, newValue in
+            storedMotionLevel = newValue.rawValue
+            storedAnimationsEnabled = newValue != .off
             Task { await saveSettingsIfValid() }
         }
         .onChange(of: hapticsEnabled) { _, newValue in
@@ -297,7 +305,7 @@ struct SettingsView: View {
             selectedTheme: selectedTheme,
             healthKitReadEnabled: healthKitReadEnabled,
             healthKitWriteEnabled: healthKitWriteEnabled,
-            animationsEnabled: animationsEnabled,
+            motionLevel: motionLevel,
             hapticsEnabled: hapticsEnabled,
             showHealthCardOnHome: showHealthCardOnHome,
             budgetInputPeriod: budgetInputPeriod,
@@ -398,7 +406,15 @@ struct SettingsView: View {
 
             Text(title)
                 .font(VayFont.body(15))
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.tertiary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func sectionHeader(icon: String, title: String) -> some View {
@@ -438,7 +454,7 @@ struct SettingsView: View {
         selectedTheme = loaded.preferredColorScheme ?? 0
         healthKitReadEnabled = loaded.healthKitReadEnabled
         healthKitWriteEnabled = loaded.healthKitWriteEnabled
-        animationsEnabled = loaded.enableAnimations
+        motionLevel = loaded.motionLevel
         hapticsEnabled = loaded.hapticsEnabled
         showHealthCardOnHome = loaded.showHealthCardOnHome
 
@@ -447,6 +463,7 @@ struct SettingsView: View {
             budgetPrimaryValue(from: loaded, period: loaded.budgetInputPeriod)
         )
 
+        appSettingsStore.update(loaded)
         syncAppearanceStorage(from: loaded)
     }
 
@@ -466,11 +483,31 @@ struct SettingsView: View {
         autoSaveTask?.cancel()
         autoSaveTask = nil
 
+        let updated = makeDraftSettings()
+
+        do {
+            let saved = try await settingsService.saveSettings(updated)
+            settings = saved
+            appSettingsStore.update(saved)
+            syncAppearanceStorage(from: saved)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func publishLiveSettingsDraft() {
+        guard !isHydratingSettings else { return }
+        let draft = makeDraftSettings()
+        appSettingsStore.update(draft)
+    }
+
+    private func makeDraftSettings() -> AppSettings {
         var updated = settings
         updated.preferredColorScheme = selectedTheme
         updated.healthKitReadEnabled = healthKitReadEnabled
         updated.healthKitWriteEnabled = healthKitWriteEnabled
-        updated.enableAnimations = animationsEnabled
+        updated.motionLevel = motionLevel
+        updated.enableAnimations = motionLevel != .off
         updated.hapticsEnabled = hapticsEnabled
         updated.showHealthCardOnHome = showHealthCardOnHome
 
@@ -487,18 +524,13 @@ struct SettingsView: View {
             updated.budgetMonth = budgetBreakdown.month
         }
 
-        do {
-            let saved = try await settingsService.saveSettings(updated)
-            settings = saved
-            syncAppearanceStorage(from: saved)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        return updated.normalized()
     }
 
     private func syncAppearanceStorage(from settings: AppSettings) {
         storedColorScheme = settings.preferredColorScheme ?? 0
         storedAnimationsEnabled = settings.enableAnimations
+        storedMotionLevel = settings.motionLevel.rawValue
         storedHapticsEnabled = settings.hapticsEnabled
         storedShowHealthCardOnHome = settings.showHealthCardOnHome
     }

@@ -182,6 +182,22 @@ enum AppMigrations {
             }
         }
 
+        migrator.registerMigration("v10_motion_and_goal_mode") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "motion_level", .text).notNull().defaults(to: "full")
+                table.add(column: "diet_goal_mode", .text).notNull().defaults(to: "lose")
+            }
+
+            try db.execute(sql: """
+                UPDATE app_settings
+                SET motion_level = CASE
+                    WHEN enable_animations = 0 THEN 'off'
+                    ELSE 'full'
+                END
+                WHERE motion_level IS NULL OR TRIM(motion_level) = ''
+                """)
+        }
+
         return migrator
     }
 }

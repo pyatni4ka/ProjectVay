@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import type { Recipe } from "../types/contracts.js";
+import type { Recipe, RecipeParseResponse } from "../types/contracts.js";
+import { normalizeIngredients } from "./ingredientNormalizer.js";
+import { buildRecipeQualityReport } from "./recipeQuality.js";
 
 export class RecipeScraperError extends Error {
   constructor(
@@ -32,6 +34,11 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_USER_AGENT = "InventoryAIRecipeBot/1.0 (+https://projectvay.local)";
 
 export async function fetchAndParseRecipe(url: string, options: FetchRecipeOptions = {}): Promise<Recipe> {
+  const detailed = await fetchAndParseRecipeDetailed(url, options);
+  return detailed.recipe;
+}
+
+export async function fetchAndParseRecipeDetailed(url: string, options: FetchRecipeOptions = {}): Promise<RecipeParseResponse> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const fetchImpl = options.fetchImpl ?? fetch;
   const userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
@@ -69,10 +76,14 @@ export async function fetchAndParseRecipe(url: string, options: FetchRecipeOptio
     clearTimeout(timeout);
   }
 
-  return parseRecipeFromHTML(url, html);
+  return parseRecipeFromHTMLDetailed(url, html);
 }
 
 export function parseRecipeFromHTML(url: string, html: string): Recipe {
+  return parseRecipeFromHTMLDetailed(url, html).recipe;
+}
+
+export function parseRecipeFromHTMLDetailed(url: string, html: string): RecipeParseResponse {
   if (!html || !html.trim()) {
     throw new RecipeScraperError("Empty HTML payload", "invalid_html");
   }
@@ -101,7 +112,7 @@ export function parseRecipeFromHTML(url: string, html: string): Recipe {
   const parsedURL = new URL(url);
   const cuisine = firstTagFromUnknown(recipeNode.recipeCuisine);
 
-  return {
+  const recipe: Recipe = {
     id: hashID(url),
     title,
     imageURL,
@@ -115,6 +126,20 @@ export function parseRecipeFromHTML(url: string, html: string): Recipe {
     servings: parseNumberFromUnknown(recipeNode.recipeYield),
     cuisine,
     tags: normalizeTags(recipeNode.keywords, recipeNode.recipeCuisine, recipeNode.recipeCategory)
+  };
+
+  const normalized = normalizeIngredients(recipe.ingredients);
+  const quality = buildRecipeQualityReport(recipe);
+  const diagnostics: string[] = [];
+  if (quality.missingFields.length > 0) {
+    diagnostics.push(`Missing fields: ${quality.missingFields.join(", ")}`);
+  }
+
+  return {
+    recipe,
+    normalizedIngredients: normalized,
+    quality,
+    diagnostics
   };
 }
 
@@ -315,10 +340,21 @@ function normalizeNutrition(value: unknown): Recipe["nutrition"] | undefined {
     kcal: parseNumberFromUnknown(value.calories),
     protein: parseNumberFromUnknown(value.proteinContent),
     fat: parseNumberFromUnknown(value.fatContent),
-    carbs: parseNumberFromUnknown(value.carbohydrateContent)
+    carbs: parseNumberFromUnknown(value.carbohydrateContent),
+    fiber: parseNumberFromUnknown(value.fiberContent),
+    sugar: parseNumberFromUnknown(value.sugarContent),
+    sodium: parseNumberFromUnknown(value.sodiumContent)
   };
 
-  if (!nutrition.kcal && !nutrition.protein && !nutrition.fat && !nutrition.carbs) {
+  if (
+    !nutrition.kcal &&
+    !nutrition.protein &&
+    !nutrition.fat &&
+    !nutrition.carbs &&
+    !nutrition.fiber &&
+    !nutrition.sugar &&
+    !nutrition.sodium
+  ) {
     return undefined;
   }
 

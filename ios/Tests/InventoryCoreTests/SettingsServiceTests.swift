@@ -250,6 +250,8 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertTrue(settings.hapticsEnabled)
         XCTAssertTrue(settings.showHealthCardOnHome)
         XCTAssertEqual(settings.dietProfile, .medium)
+        XCTAssertEqual(settings.motionLevel, .full)
+        XCTAssertEqual(settings.dietGoalMode, .lose)
     }
 
     func testBudgetNormalizationConvertsDayToWeekAndMonth() {
@@ -372,9 +374,11 @@ final class SettingsServiceTests: XCTestCase {
             healthKitReadEnabled: false,
             healthKitWriteEnabled: true,
             enableAnimations: false,
+            motionLevel: .off,
             hapticsEnabled: false,
             showHealthCardOnHome: false,
             dietProfile: .extreme,
+            dietGoalMode: .gain,
             recipeServiceBaseURLOverride: "http://192.168.0.15:8080"
         )
 
@@ -391,9 +395,11 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertFalse(loaded.healthKitReadEnabled)
         XCTAssertTrue(loaded.healthKitWriteEnabled)
         XCTAssertFalse(loaded.enableAnimations)
+        XCTAssertEqual(loaded.motionLevel, .off)
         XCTAssertFalse(loaded.hapticsEnabled)
         XCTAssertFalse(loaded.showHealthCardOnHome)
         XCTAssertEqual(loaded.dietProfile, .extreme)
+        XCTAssertEqual(loaded.dietGoalMode, .gain)
         XCTAssertEqual(loaded.recipeServiceBaseURLOverride, "http://192.168.0.15:8080")
     }
 }

@@ -30,9 +30,11 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var healthKitReadEnabled: Bool
     var healthKitWriteEnabled: Bool
     var enableAnimations: Bool
+    var motionLevel: String
     var hapticsEnabled: Bool
     var showHealthCardOnHome: Bool
     var dietProfile: String
+    var dietGoalMode: String
     var recipeServiceBaseURL: String?
     var onboardingCompleted: Bool
 
@@ -63,9 +65,11 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case healthKitReadEnabled = "healthkit_read_enabled"
         case healthKitWriteEnabled = "healthkit_write_enabled"
         case enableAnimations = "enable_animations"
+        case motionLevel = "motion_level"
         case hapticsEnabled = "haptics_enabled"
         case showHealthCardOnHome = "show_health_card_on_home"
         case dietProfile = "diet_profile"
+        case dietGoalMode = "diet_goal_mode"
         case recipeServiceBaseURL = "recipe_service_base_url"
         case onboardingCompleted = "onboarding_completed"
     }
@@ -102,9 +106,11 @@ extension AppSettingsRecord {
         healthKitReadEnabled = normalized.healthKitReadEnabled
         healthKitWriteEnabled = normalized.healthKitWriteEnabled
         enableAnimations = normalized.enableAnimations
+        motionLevel = normalized.motionLevel.rawValue
         hapticsEnabled = normalized.hapticsEnabled
         showHealthCardOnHome = normalized.showHealthCardOnHome
         dietProfile = normalized.dietProfile.rawValue
+        dietGoalMode = normalized.dietGoalMode.rawValue
         recipeServiceBaseURL = normalized.recipeServiceBaseURLOverride
         self.onboardingCompleted = onboardingCompleted
     }
@@ -117,6 +123,8 @@ extension AppSettingsRecord {
         let parsedMacroGoalSource = AppSettings.MacroGoalSource(rawValue: macroGoalSource) ?? .automatic
         let parsedBudgetInputPeriod = AppSettings.BudgetInputPeriod(rawValue: budgetInputPeriod) ?? .week
         let parsedDietProfile = AppSettings.DietProfile(rawValue: dietProfile) ?? .medium
+        let parsedMotionLevel = AppSettings.MotionLevel(rawValue: motionLevel) ?? .full
+        let parsedDietGoalMode = AppSettings.DietGoalMode(rawValue: dietGoalMode) ?? .lose
 
         return AppSettings(
             quietStartMinute: quietStartMinute,
@@ -146,9 +154,11 @@ extension AppSettingsRecord {
             healthKitReadEnabled: healthKitReadEnabled,
             healthKitWriteEnabled: healthKitWriteEnabled,
             enableAnimations: enableAnimations,
+            motionLevel: parsedMotionLevel,
             hapticsEnabled: hapticsEnabled,
             showHealthCardOnHome: showHealthCardOnHome,
             dietProfile: parsedDietProfile,
+            dietGoalMode: parsedDietGoalMode,
             recipeServiceBaseURLOverride: recipeServiceBaseURL
         ).normalized()
     }

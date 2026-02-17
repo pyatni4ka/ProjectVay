@@ -6,7 +6,8 @@ struct InventoryAIApp: App {
     @StateObject private var coordinator: AppCoordinator
     
     @AppStorage("preferredColorScheme") private var storedColorScheme: Int = 0
-    @AppStorage("enableAnimations") private var animationsEnabled: Bool = true
+    @AppStorage("motionLevel") private var motionLevelRaw: String = AppSettings.MotionLevel.full.rawValue
+    @AppStorage("enableAnimations") private var legacyAnimationsEnabled: Bool = true
 
     init() {
         do {
@@ -49,9 +50,9 @@ struct InventoryAIApp: App {
             }
             .environmentObject(coordinator)
             .preferredColorScheme(colorScheme)
-            .animation(animationsEnabled ? .default : .none, value: animationsEnabled)
+            .animation(isAnimationsEnabled ? .default : .none, value: isAnimationsEnabled)
             .transaction { transaction in
-                if !animationsEnabled {
+                if !isAnimationsEnabled {
                     transaction.disablesAnimations = true
                 }
             }
@@ -59,6 +60,13 @@ struct InventoryAIApp: App {
                 await coordinator.bootstrap()
             }
         }
+    }
+
+    private var isAnimationsEnabled: Bool {
+        if let motionLevel = AppSettings.MotionLevel(rawValue: motionLevelRaw) {
+            return motionLevel != .off
+        }
+        return legacyAnimationsEnabled
     }
     
     private var colorScheme: ColorScheme? {

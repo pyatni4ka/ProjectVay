@@ -144,6 +144,60 @@ final class RecipeServiceClient: @unchecked Sendable {
             return try JSONDecoder().decode(MealPlanGenerateResponse.self, from: data)
         }
     }
+
+    func generateSmartMealPlan(payload: SmartMealPlanGenerateRequest) async throws -> SmartMealPlanGenerateResponse {
+        guard isOnline else {
+            throw RecipeServiceClientError.offlineMode
+        }
+
+        let endpoint = baseURL.appending(path: "/api/v1/meal-plan/smart-generate")
+
+        return try await performRequestWithRetry {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(payload)
+            let (data, response) = try await self.session.data(for: request)
+            try self.validate(response: response, data: data)
+            return try JSONDecoder().decode(SmartMealPlanGenerateResponse.self, from: data)
+        }
+    }
+
+    func parseRecipe(url: String) async throws -> RecipeParseResponse {
+        guard isOnline else {
+            throw RecipeServiceClientError.offlineMode
+        }
+
+        let endpoint = baseURL.appending(path: "/api/v1/recipes/parse")
+
+        return try await performRequestWithRetry {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(RecipeParseRequest(url: url))
+            let (data, response) = try await self.session.data(for: request)
+            try self.validate(response: response, data: data)
+            return try JSONDecoder().decode(RecipeParseResponse.self, from: data)
+        }
+    }
+
+    func estimatePrices(payload: PriceEstimateRequest) async throws -> PriceEstimateResponse {
+        guard isOnline else {
+            throw RecipeServiceClientError.offlineMode
+        }
+
+        let endpoint = baseURL.appending(path: "/api/v1/prices/estimate")
+
+        return try await performRequestWithRetry {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(payload)
+            let (data, response) = try await self.session.data(for: request)
+            try self.validate(response: response, data: data)
+            return try JSONDecoder().decode(PriceEstimateResponse.self, from: data)
+        }
+    }
     
     private func performRequestWithRetry<T>(
         maxAttempts: Int = 4,

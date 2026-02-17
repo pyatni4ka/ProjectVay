@@ -7,11 +7,36 @@ struct SettingsAchievementsView: View {
         List {
             Section {
                 statRow(title: "Открыто", value: "\(unlockedCount)/\(totalAchievements)")
+                statRow(title: "Уровень", value: "\(gamification.userStats.level)")
+                statRow(title: "XP", value: "\(gamification.userStats.totalXP)")
                 statRow(title: "Текущая серия", value: "\(gamification.userStats.currentStreak) дн.")
                 statRow(title: "Лучшая серия", value: "\(gamification.userStats.longestStreak) дн.")
+                statRow(title: "Без потерь", value: "\(gamification.userStats.daysWithoutLoss) дн.")
                 statRow(title: "Планов создано", value: "\(gamification.userStats.mealPlansGenerated)")
+                statRow(title: "Квесты (день)", value: "\(gamification.userStats.dailyQuestsCompleted)")
+                statRow(title: "Квесты (неделя)", value: "\(gamification.userStats.weeklyQuestsCompleted)")
             } header: {
                 sectionHeader(icon: "chart.bar.fill", title: "Сводка")
+            }
+
+            if !gamification.dailyQuests.isEmpty {
+                Section {
+                    ForEach(gamification.dailyQuests) { quest in
+                        questRow(quest)
+                    }
+                } header: {
+                    sectionHeader(icon: "sun.max.fill", title: "Дневные квесты")
+                }
+            }
+
+            if !gamification.weeklyQuests.isEmpty {
+                Section {
+                    ForEach(gamification.weeklyQuests) { quest in
+                        questRow(quest)
+                    }
+                } header: {
+                    sectionHeader(icon: "calendar", title: "Недельные квесты")
+                }
             }
 
             Section {
@@ -85,6 +110,39 @@ struct SettingsAchievementsView: View {
                 Text("\(achievement.currentProgress)/\(achievement.requiredCount)")
                     .font(VayFont.caption(11))
                     .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, VaySpacing.xs)
+    }
+
+    private func questRow(_ quest: GamificationQuest) -> some View {
+        VStack(alignment: .leading, spacing: VaySpacing.xs) {
+            HStack {
+                Text(quest.title)
+                    .font(VayFont.label(14))
+                Spacer()
+                Text("+\(quest.rewardXP) XP")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(quest.description)
+                .font(VayFont.caption(12))
+                .foregroundStyle(.secondary)
+
+            ProgressView(value: quest.completionRatio)
+                .tint(quest.completed ? Color.vaySuccess : Color.vayPrimary)
+
+            HStack {
+                Text("\(quest.progress)/\(quest.target)")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                if quest.completed {
+                    Label("Выполнен", systemImage: "checkmark.seal.fill")
+                        .font(VayFont.caption(11))
+                        .foregroundStyle(Color.vaySuccess)
+                }
             }
         }
         .padding(.vertical, VaySpacing.xs)

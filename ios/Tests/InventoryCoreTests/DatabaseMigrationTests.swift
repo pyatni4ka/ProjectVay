@@ -56,6 +56,8 @@ final class DatabaseMigrationTests: XCTestCase {
             XCTAssertTrue(appSettingsColumns.contains("diet_profile"))
             XCTAssertTrue(appSettingsColumns.contains("haptics_enabled"))
             XCTAssertTrue(appSettingsColumns.contains("show_health_card_on_home"))
+            XCTAssertTrue(appSettingsColumns.contains("motion_level"))
+            XCTAssertTrue(appSettingsColumns.contains("diet_goal_mode"))
 
             let batchColumns = try String.fetchAll(
                 db,
@@ -84,5 +86,7 @@ final class DatabaseMigrationTests: XCTestCase {
         XCTAssertEqual(settings.macroTolerancePercent, 25)
         XCTAssertEqual(settings.macroGoalSource, .automatic)
         XCTAssertNil(settings.recipeServiceBaseURLOverride)
+        XCTAssertEqual(settings.motionLevel, .full)
+        XCTAssertEqual(settings.dietGoalMode, .lose)
     }
 }

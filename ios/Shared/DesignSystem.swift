@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - Color Palette
 
@@ -109,8 +112,26 @@ enum VayRadius {
 }
 
 enum VayLayout {
-    /// Extra bottom space for the custom tab bar + safe-area on iPhone devices.
-    static let tabBarOverlayInset: CGFloat = 124
+    /// Extra bottom space for the custom tab bar + safe-area.
+    static var tabBarOverlayInset: CGFloat {
+        tabBarHeight + safeAreaBottomInset + 28
+    }
+
+    private static let tabBarHeight: CGFloat = 80
+
+    private static var safeAreaBottomInset: CGFloat {
+        #if canImport(UIKit)
+        guard
+            let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+            let window = scene.windows.first(where: \.isKeyWindow)
+        else {
+            return 0
+        }
+        return window.safeAreaInsets.bottom
+        #else
+        return 0
+        #endif
+    }
 }
 
 // MARK: - Shadows
@@ -136,32 +157,110 @@ extension View {
 // MARK: - Animations
 
 enum VayAnimation {
-    private static var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: "enableAnimations") as? Bool ?? true
+    private static var motionLevel: AppSettings.MotionLevel {
+        let defaults = UserDefaults.standard
+        if
+            let raw = defaults.string(forKey: "motionLevel"),
+            let parsed = AppSettings.MotionLevel(rawValue: raw)
+        {
+            return parsed
+        }
+
+        let legacyEnabled = defaults.object(forKey: "enableAnimations") as? Bool ?? true
+        return legacyEnabled ? .full : .off
     }
 
     private static var instant: Animation {
         .linear(duration: 0)
     }
 
+    private static var reducedSpring: Animation {
+        .easeOut(duration: 0.18)
+    }
+
     static var springBounce: Animation {
-        isEnabled ? .spring(response: 0.5, dampingFraction: 0.7) : instant
+        switch motionLevel {
+        case .off:
+            return instant
+        case .reduced:
+            return reducedSpring
+        case .full:
+            return .spring(response: 0.5, dampingFraction: 0.7)
+        }
     }
 
     static var springSmooth: Animation {
-        isEnabled ? .spring(response: 0.4, dampingFraction: 0.85) : instant
+        switch motionLevel {
+        case .off:
+            return instant
+        case .reduced:
+            return reducedSpring
+        case .full:
+            return .spring(response: 0.4, dampingFraction: 0.85)
+        }
     }
 
     static var springSnappy: Animation {
-        isEnabled ? .spring(response: 0.3, dampingFraction: 0.9) : instant
+        switch motionLevel {
+        case .off:
+            return instant
+        case .reduced:
+            return reducedSpring
+        case .full:
+            return .spring(response: 0.3, dampingFraction: 0.9)
+        }
     }
 
     static var easeOut: Animation {
-        isEnabled ? .easeOut(duration: 0.25) : instant
+        switch motionLevel {
+        case .off:
+            return instant
+        case .reduced:
+            return .easeOut(duration: 0.16)
+        case .full:
+            return .easeOut(duration: 0.25)
+        }
     }
 
     static var gentleBounce: Animation {
-        isEnabled ? .spring(response: 0.6, dampingFraction: 0.75) : instant
+        switch motionLevel {
+        case .off:
+            return instant
+        case .reduced:
+            return reducedSpring
+        case .full:
+            return .spring(response: 0.6, dampingFraction: 0.75)
+        }
+    }
+
+    // Motion tokens
+    static var enter: Animation { springSmooth }
+    static var success: Animation { springBounce }
+    static var focus: Animation { springSnappy }
+    static var celebration: Animation { gentleBounce }
+    static var transition: Animation { easeOut }
+}
+
+enum VayMotionToken {
+    case enter
+    case success
+    case focus
+    case celebration
+    case transition
+
+    var animation: Animation {
+        switch self {
+        case .enter:
+            return VayAnimation.enter
+        case .success:
+            return VayAnimation.success
+        case .focus:
+            return VayAnimation.focus
+        case .celebration:
+            return VayAnimation.celebration
+        case .transition:
+            return VayAnimation.transition
+        }
     }
 }
 
@@ -347,34 +446,164 @@ extension View {
 
     @ViewBuilder
     func dismissKeyboardOnTap() -> some View {
-        if #available(iOS 16.0, *) {
+        #if canImport(UIKit)
+            if #available(iOS 16.0, *) {
+                self
+                    .scrollDismissesKeyboard(.interactively)
+                    .onAppear {
+                        KeyboardDismissController.shared.installIfNeeded()
+                    }
+            } else {
+                self.onAppear {
+                    KeyboardDismissController.shared.installIfNeeded()
+                }
+            }
+        #else
             self
-                .scrollDismissesKeyboard(.immediately)
-                .simultaneousGesture(
-                    TapGesture().onEnded {
-                        dismissKeyboard()
-                    },
-                    including: .gesture
-                )
-        } else {
-            self.simultaneousGesture(
-                TapGesture().onEnded {
-                    dismissKeyboard()
-                },
-                including: .gesture
-            )
+        #endif
+    }
+}
+
+#if canImport(UIKit)
+@MainActor
+private final class KeyboardDismissController: NSObject, UIGestureRecognizerDelegate {
+    static let shared = KeyboardDismissController()
+
+    private weak var window: UIWindow?
+    private var tapRecognizer: UITapGestureRecognizer?
+    private var panRecognizer: UIPanGestureRecognizer?
+
+    func installIfNeeded() {
+        guard let keyWindow = Self.resolveKeyWindow() else { return }
+
+        if window === keyWindow, tapRecognizer != nil, panRecognizer != nil {
+            return
         }
+
+        uninstall()
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        keyWindow.addGestureRecognizer(tap)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        pan.cancelsTouchesInView = false
+        pan.delegate = self
+        keyWindow.addGestureRecognizer(pan)
+
+        window = keyWindow
+        tapRecognizer = tap
+        panRecognizer = pan
+    }
+
+    private func uninstall() {
+        if let tapRecognizer {
+            tapRecognizer.view?.removeGestureRecognizer(tapRecognizer)
+        }
+        if let panRecognizer {
+            panRecognizer.view?.removeGestureRecognizer(panRecognizer)
+        }
+        tapRecognizer = nil
+        panRecognizer = nil
+        window = nil
+    }
+
+    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        dismissKeyboard()
+    }
+
+    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        dismissKeyboard()
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if touch.view is UITextField || touch.view is UITextView {
+            return false
+        }
+        return true
     }
 
     private func dismissKeyboard() {
-        #if canImport(UIKit)
         UIApplication.shared.sendAction(
             #selector(UIResponder.resignFirstResponder),
             to: nil,
             from: nil,
             for: nil
         )
-        #endif
+    }
+
+    private static func resolveKeyWindow() -> UIWindow? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)
+    }
+}
+#endif
+
+// MARK: - Motion Components
+
+struct CelebrationBurstView: View {
+    @State private var expanded = false
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<8, id: \.self) { index in
+                Circle()
+                    .fill(index.isMultiple(of: 2) ? Color.vayAccent : Color.vayPrimary)
+                    .frame(width: 8, height: 8)
+                    .offset(y: expanded ? -44 : 0)
+                    .rotationEffect(.degrees(Double(index) * 45))
+                    .opacity(expanded ? 0 : 1)
+            }
+
+            Circle()
+                .fill(Color.vayPrimary.opacity(0.18))
+                .frame(width: expanded ? 86 : 10, height: expanded ? 86 : 10)
+                .opacity(expanded ? 0 : 1)
+        }
+        .onAppear {
+            withAnimation(VayMotionToken.celebration.animation) {
+                expanded = true
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+struct XPToastView: View {
+    let text: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: VaySpacing.sm) {
+            Image(systemName: icon)
+                .foregroundStyle(.white)
+            Text(text)
+                .font(VayFont.label(13))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, VaySpacing.lg)
+        .padding(.vertical, VaySpacing.sm)
+        .background(
+            LinearGradient(
+                colors: [Color.vayPrimary, Color.vayAccent],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+        .clipShape(Capsule())
+        .vayShadow(.cardHover)
     }
 }
 

@@ -184,6 +184,7 @@ struct ReceiptScanView: View {
     }
     
     private func addAllToInventory() async {
+        var addedCount = 0
         for item in scannedItems {
             let product = Product(
                 name: item.name,
@@ -194,11 +195,18 @@ struct ReceiptScanView: View {
             
             do {
                 _ = try await inventoryService.createProduct(product)
+                addedCount += 1
             } catch {
                 continue
             }
         }
-        
+
+        if addedCount > 0 {
+            await MainActor.run {
+                GamificationService.shared.trackReceiptScan(count: addedCount)
+                GamificationService.shared.trackProductAdded(count: addedCount)
+            }
+        }
         onItemsAdded()
         dismiss()
     }

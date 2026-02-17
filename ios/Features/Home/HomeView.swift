@@ -5,11 +5,11 @@ struct HomeView: View {
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
+    @ObservedObject private var gamification = GamificationService.shared
+    @EnvironmentObject private var appSettingsStore: AppSettingsStore
     var onOpenScanner: () -> Void = {}
     var onOpenMealPlan: () -> Void = {}
     var onOpenInventory: () -> Void = {}
-
-    @AppStorage("showHealthCardOnHome") private var storedShowHealthCardOnHome: Bool = true
 
     @State private var products: [Product] = []
     @State private var batches: [Batch] = []
@@ -24,6 +24,7 @@ struct HomeView: View {
     @State private var healthWeightHistory: [HealthKitService.SamplePoint] = []
     @State private var isHealthCardLoading = false
     @State private var healthCardMessage: String?
+    @State private var xpToastTask: Task<Void, Never>?
     private let todayMenuSnapshotStore = TodayMenuSnapshotStore()
 
     private struct TodayPlanProgress {
@@ -61,15 +62,15 @@ struct HomeView: View {
                     }
 
                     revealCard(1) { selectedTodayMenuSection }
-                    revealCard(2) { savingsMoneyCard }
-                    revealCard(3) { progressSummaryCard }
+                    revealCard(2) { budgetWeekCard }
+                    revealCard(3) { savingsMoneyCard }
+                    revealCard(4) { progressSummaryCard }
 
                     if shouldShowHealthCard {
-                        revealCard(4) { healthDynamicsCard }
+                        revealCard(5) { healthDynamicsCard }
                     }
 
-                    revealCard(shouldShowHealthCard ? 5 : 4) { todayPlanProgressCard }
-                    revealCard(shouldShowHealthCard ? 6 : 5) { budgetWeekCard }
+                    revealCard(shouldShowHealthCard ? 6 : 5) { todayPlanProgressCard }
                     revealCard(shouldShowHealthCard ? 7 : 6) { riskSection }
                     revealCard(shouldShowHealthCard ? 8 : 7) { noLossStreakCard }
 
@@ -84,6 +85,14 @@ struct HomeView: View {
             .padding(.horizontal, VaySpacing.lg)
         }
         .background(Color.vayBackground)
+        .overlay(alignment: .top) {
+            if let toast = gamification.lastXPToast {
+                XPToastView(text: toast.text, icon: toast.icon)
+                    .padding(.top, VaySpacing.sm)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(10)
+            }
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -112,13 +121,43 @@ struct HomeView: View {
                 }
             }
         }
-        .onChange(of: storedShowHealthCardOnHome) { _, newValue in
+        .onChange(of: appSettingsStore.settings.showHealthCardOnHome) { _, newValue in
             Task {
                 await loadHealthCardData(
                     ifNeeded: newValue,
                     healthReadEnabled: settings?.healthKitReadEnabled ?? true
                 )
             }
+        }
+        .onChange(of: appSettingsStore.settings) { _, updated in
+            guard settings != updated else { return }
+            applyUpdatedSettings(updated)
+            Task {
+                await recalculateAdaptiveNutritionTarget(using: updated)
+                await loadHealthCardData(
+                    ifNeeded: updated.showHealthCardOnHome,
+                    healthReadEnabled: updated.healthKitReadEnabled
+                )
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .inventoryDidChange)) { _ in
+            Task { await loadData() }
+        }
+        .onChange(of: gamification.lastXPToast) { _, toast in
+            xpToastTask?.cancel()
+            guard toast != nil else { return }
+            xpToastTask = Task {
+                try? await Task.sleep(for: .seconds(2.2))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    withAnimation(VayMotionToken.transition.animation) {
+                        gamification.clearToast()
+                    }
+                }
+            }
+        }
+        .onDisappear {
+            xpToastTask?.cancel()
         }
     }
 
@@ -315,6 +354,10 @@ struct HomeView: View {
                     .font(VayFont.body(14))
                     .foregroundStyle(.secondary)
             }
+
+            Text(weeklyPriceSourceExplanation)
+                .font(VayFont.caption(11))
+                .foregroundStyle(.secondary)
         }
         .vayCard()
         .vayAccessibilityLabel("Бюджет недели")
@@ -703,7 +746,7 @@ struct HomeView: View {
     }
 
     private var shouldShowHealthCard: Bool {
-        storedShowHealthCardOnHome
+        appSettingsStore.settings.showHealthCardOnHome
     }
 
     private var latestWeightValue: Double? {
@@ -815,6 +858,16 @@ struct HomeView: View {
         return priceEntries.filter { $0.date >= weekAgo }
     }
 
+    private var weeklyPriceSourceExplanation: String {
+        if weeklyPriceEntries.isEmpty {
+            return "Цена оценена по базовым fallback-значениям категорий. Добавьте чеки для более точного расчёта."
+        }
+        if weeklyPriceEntries.count < 3 {
+            return "Цена рассчитана по ограниченной истории чеков, точность будет расти с новыми покупками."
+        }
+        return "Цена рассчитана по истории чеков и локальной динамике за последние 7 дней."
+    }
+
     private func rubText(fromMinor minor: Int64) -> String {
         let rub = Double(minor) / 100
         return "\(rub.formatted(.number.precision(.fractionLength(0)))) ₽"
@@ -872,7 +925,7 @@ struct HomeView: View {
             batches = try await inventoryService.listBatches(productId: nil)
             let loadedSettings = try await settingsService.loadSettings()
             settings = loadedSettings
-            storedShowHealthCardOnHome = loadedSettings.showHealthCardOnHome
+            appSettingsStore.update(loadedSettings)
             await recalculateAdaptiveNutritionTarget(using: loadedSettings)
 
             var allEvents: [InventoryEvent] = []
@@ -918,7 +971,7 @@ struct HomeView: View {
 
     private func applyUpdatedSettings(_ loaded: AppSettings) {
         settings = loaded
-        storedShowHealthCardOnHome = loaded.showHealthCardOnHome
+        appSettingsStore.update(loaded)
     }
 
     private func resolvedHomeNutritionTarget(from settings: AppSettings) -> Nutrition {
@@ -943,12 +996,18 @@ struct HomeView: View {
         var automaticDailyCalories: Double?
         var weightKG: Double?
 
+        if settings.macroGoalSource == .automatic {
+            automaticDailyCalories = healthKitService.fallbackAutomaticDailyCalories(
+                targetLossPerWeek: settings.targetWeightDeltaPerWeek
+            )
+        }
+
         if settings.macroGoalSource == .automatic, settings.healthKitReadEnabled {
             if let metrics = try? await healthKitService.fetchLatestMetrics() {
                 automaticDailyCalories = Double(
                     healthKitService.calculateDailyCalories(
                         metrics: metrics,
-                        targetLossPerWeek: settings.dietProfile.targetLossPerWeek
+                        targetLossPerWeek: settings.targetWeightDeltaPerWeek
                     )
                 )
                 weightKG = metrics.weightKG
@@ -967,7 +1026,26 @@ struct HomeView: View {
             )
         )
 
-        adaptiveNutritionTarget = output.baselineDayTarget
+        guard settings.macroGoalSource == .automatic else {
+            adaptiveNutritionTarget = output.baselineDayTarget
+            return
+        }
+
+        let weightHistory = (try? await healthKitService.fetchWeightHistory(days: 14)) ?? []
+        let bodyFatHistory = (try? await healthKitService.fetchBodyFatHistory(days: 14)) ?? []
+        let nutritionHistory = (try? await healthKitService.fetchConsumedNutritionHistory(days: 7)) ?? []
+
+        let coachOutput = DietCoachUseCase().execute(
+            .init(
+                settings: settings,
+                baselineTarget: output.baselineDayTarget,
+                weightHistory: weightHistory,
+                bodyFatHistory: bodyFatHistory,
+                nutritionHistory: nutritionHistory
+            )
+        )
+
+        adaptiveNutritionTarget = coachOutput.adjustedTarget
     }
 
     private func loadHealthCardData(ifNeeded shouldLoad: Bool, healthReadEnabled: Bool) async {

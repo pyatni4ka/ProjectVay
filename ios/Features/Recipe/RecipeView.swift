@@ -343,3 +343,94 @@ struct RecipeView: View {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
+
+struct RecipeImportView: View {
+    let recipeServiceClient: RecipeServiceClient?
+
+    @State private var recipeURL = ""
+    @State private var isLoading = false
+    @State private var parseResponse: RecipeParseResponse?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        List {
+            Section {
+                TextField("https://...", text: $recipeURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+
+                Button(isLoading ? "Парсим..." : "Импортировать рецепт") {
+                    Task { await parseRecipe() }
+                }
+                .disabled(isLoading || recipeURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            } header: {
+                Text("Ссылка на рецепт")
+            }
+
+            if let parsed = parseResponse {
+                Section("Качество парсинга") {
+                    qualityRow("Скор", "\(Int((parsed.quality.score * 100).rounded()))%")
+                    qualityRow("Ингредиенты", "\(parsed.quality.ingredientCount)")
+                    qualityRow("Шаги", "\(parsed.quality.instructionCount)")
+                    qualityRow("КБЖУ", parsed.quality.hasNutrition ? "Да" : "Нет")
+                }
+
+                Section("Нормализованные ингредиенты") {
+                    ForEach(parsed.normalizedIngredients, id: \.normalizedKey) { ingredient in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(ingredient.raw)
+                                .font(VayFont.body(14))
+                            Text("Ключ: \(ingredient.normalizedKey)")
+                                .font(VayFont.caption(11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            if let errorMessage {
+                Section {
+                    Text(errorMessage)
+                        .font(VayFont.caption(12))
+                        .foregroundStyle(Color.vayDanger)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .dismissKeyboardOnTap()
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: VayLayout.tabBarOverlayInset)
+        }
+        .navigationTitle("Импорт рецепта")
+    }
+
+    private func parseRecipe() async {
+        guard let recipeServiceClient else {
+            errorMessage = "Сервис рецептов недоступен."
+            return
+        }
+
+        let trimmed = recipeURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            parseResponse = try await recipeServiceClient.parseRecipe(url: trimmed)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func qualityRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+        }
+    }
+}

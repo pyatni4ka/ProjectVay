@@ -6,6 +6,7 @@ struct RootTabView: View {
     let healthKitService: HealthKitService
     let barcodeLookupService: BarcodeLookupService
     let recipeServiceClient: RecipeServiceClient?
+    @StateObject private var appSettingsStore: AppSettingsStore
 
     enum Tab: Int, CaseIterable {
         case home
@@ -38,8 +39,24 @@ struct RootTabView: View {
     @State private var selectedTab: Tab = .home
     @State private var previousTab: Tab = .home
     @State private var loadedTabs: Set<Tab> = [.home]
+    @State private var tabRootResetTokens: [Tab: UUID] = Dictionary(uniqueKeysWithValues: Tab.allCases.map { ($0, UUID()) })
     @State private var showScannerSheet = false
     @State private var showReceiptScanSheet = false
+
+    init(
+        inventoryService: any InventoryServiceProtocol,
+        settingsService: any SettingsServiceProtocol,
+        healthKitService: HealthKitService,
+        barcodeLookupService: BarcodeLookupService,
+        recipeServiceClient: RecipeServiceClient?
+    ) {
+        self.inventoryService = inventoryService
+        self.settingsService = settingsService
+        self.healthKitService = healthKitService
+        self.barcodeLookupService = barcodeLookupService
+        self.recipeServiceClient = recipeServiceClient
+        _appSettingsStore = StateObject(wrappedValue: AppSettingsStore())
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -86,6 +103,14 @@ struct RootTabView: View {
                 previousTab = newValue
             }
         }
+        .task {
+            await hydrateSettingsStore()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .appSettingsDidChange)) { notification in
+            guard let updated = notification.object as? AppSettings else { return }
+            appSettingsStore.update(updated)
+        }
+        .environmentObject(appSettingsStore)
         .vayDynamicType()
     }
 
@@ -102,10 +127,11 @@ struct RootTabView: View {
                             settingsService: settingsService,
                             healthKitService: healthKitService,
                             onOpenScanner: { showScannerSheet = true },
-                            onOpenMealPlan: { selectedTab = .mealPlan },
-                            onOpenInventory: { selectedTab = .inventory }
+                            onOpenMealPlan: { openTab(.mealPlan) },
+                            onOpenInventory: { openTab(.inventory) }
                         )
                     }
+                    .id(tabRootResetTokens[.home] ?? UUID())
                 case .inventory:
                     NavigationStack {
                         InventoryView(
@@ -114,6 +140,7 @@ struct RootTabView: View {
                             onOpenReceiptScan: { showReceiptScanSheet = true }
                         )
                     }
+                    .id(tabRootResetTokens[.inventory] ?? UUID())
                 case .mealPlan:
                     NavigationStack {
                         MealPlanView(
@@ -124,6 +151,7 @@ struct RootTabView: View {
                             onOpenScanner: { showScannerSheet = true }
                         )
                     }
+                    .id(tabRootResetTokens[.mealPlan] ?? UUID())
                 case .settings:
                     NavigationStack {
                         SettingsView(
@@ -132,6 +160,7 @@ struct RootTabView: View {
                             healthKitService: healthKitService
                         )
                     }
+                    .id(tabRootResetTokens[.settings] ?? UUID())
                 }
             } else {
                 Color.clear
@@ -214,9 +243,7 @@ struct RootTabView: View {
         let isSelected = selectedTab == tab
 
         return Button {
-            withAnimation(VayAnimation.springSmooth) {
-                selectedTab = tab
-            }
+            openTab(tab)
         } label: {
             VStack(spacing: VaySpacing.xs) {
                 Image(systemName: tab.icon)
@@ -240,6 +267,19 @@ struct RootTabView: View {
 
     private func postInventoryDidChange() {
         NotificationCenter.default.post(name: .inventoryDidChange, object: nil)
+    }
+
+    private func openTab(_ tab: Tab) {
+        tabRootResetTokens[tab] = UUID()
+        withAnimation(VayAnimation.springSmooth) {
+            selectedTab = tab
+        }
+    }
+
+    @MainActor
+    private func hydrateSettingsStore() async {
+        guard let loaded = try? await settingsService.loadSettings() else { return }
+        appSettingsStore.update(loaded)
     }
 }
 

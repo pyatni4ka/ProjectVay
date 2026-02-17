@@ -4,10 +4,52 @@ import HealthKit
 #endif
 
 final class HealthKitService {
+    enum ReadAuthorizationRequestStatus {
+        case unavailable
+        case shouldRequest
+        case unnecessary
+        case unknown
+    }
+
+    enum DataAvailabilityDiagnosis: Equatable {
+        case unavailableDevice
+        case readDisabledInSettings
+        case accessNotRequested
+        case accessDenied
+        case noRecords
+        case available
+        case unknown
+
+        var message: String {
+            switch self {
+            case .unavailableDevice:
+                return "Apple Health недоступен на этом устройстве."
+            case .readDisabledInSettings:
+                return "Чтение Apple Health отключено в настройках."
+            case .accessNotRequested:
+                return "Доступ к Apple Health ещё не запрошен."
+            case .accessDenied:
+                return "Доступ к данным Apple Health не выдан."
+            case .noRecords:
+                return "В Apple Health пока нет записей веса/жира."
+            case .available:
+                return "Данные Apple Health доступны."
+            case .unknown:
+                return "Статус данных Apple Health пока не определён."
+            }
+        }
+    }
+
     struct SamplePoint: Identifiable, Equatable {
         var id: Date { date }
         let date: Date
         let value: Double
+    }
+
+    struct DailyNutritionSample: Identifiable, Equatable {
+        var id: Date { date }
+        let date: Date
+        let nutrition: Nutrition
     }
 
     struct UserMetrics {
@@ -38,33 +80,9 @@ final class HealthKitService {
             return false
         }
 
-        guard
-            let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass),
-            let height = HKObjectType.quantityType(forIdentifier: .height),
-            let bodyFat = HKObjectType.quantityType(forIdentifier: .bodyFatPercentage),
-            let activeEnergy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned),
-            let dietaryEnergy = HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed),
-            let dietaryProtein = HKObjectType.quantityType(forIdentifier: .dietaryProtein),
-            let dietaryFatTotal = HKObjectType.quantityType(forIdentifier: .dietaryFatTotal),
-            let dietaryCarbohydrates = HKObjectType.quantityType(forIdentifier: .dietaryCarbohydrates),
-            let dateOfBirth = HKObjectType.characteristicType(forIdentifier: .dateOfBirth),
-            let biologicalSex = HKObjectType.characteristicType(forIdentifier: .biologicalSex)
-        else {
+        guard let readTypes = makeReadTypes() else {
             return false
         }
-
-        let readTypes: Set<HKObjectType> = [
-            bodyMass,
-            height,
-            bodyFat,
-            activeEnergy,
-            dietaryEnergy,
-            dietaryProtein,
-            dietaryFatTotal,
-            dietaryCarbohydrates,
-            dateOfBirth,
-            biologicalSex
-        ]
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
             store.requestAuthorization(toShare: nil, read: readTypes) { granted, error in
@@ -77,6 +95,35 @@ final class HealthKitService {
         }
         #else
         return false
+        #endif
+    }
+
+    func readAccessRequestStatus() async -> ReadAuthorizationRequestStatus {
+        #if canImport(HealthKit)
+        guard HKHealthStore.isHealthDataAvailable() else {
+            return .unavailable
+        }
+
+        guard let readTypes = makeReadTypes() else {
+            return .unavailable
+        }
+
+        return await withCheckedContinuation { continuation in
+            store.getRequestStatusForAuthorization(toShare: Set<HKSampleType>(), read: readTypes) { status, _ in
+                switch status {
+                case .shouldRequest:
+                    continuation.resume(returning: .shouldRequest)
+                case .unnecessary:
+                    continuation.resume(returning: .unnecessary)
+                case .unknown:
+                    continuation.resume(returning: .unknown)
+                @unknown default:
+                    continuation.resume(returning: .unknown)
+                }
+            }
+        }
+        #else
+        return .unavailable
         #endif
     }
 
@@ -147,6 +194,13 @@ final class HealthKitService {
         return Int(adjusted.rounded())
     }
 
+    func fallbackAutomaticDailyCalories(targetLossPerWeek: Double) -> Double {
+        let mediumDeficit = 0.5 * 7700.0 / 7.0
+        let profileDeficit = targetLossPerWeek * 7700.0 / 7.0
+        let baselineForMediumProfile = 2100.0
+        return max(900, baselineForMediumProfile + (mediumDeficit - profileDeficit))
+    }
+
     func fetchWeightHistory(days: Int = 30) async throws -> [SamplePoint] {
         #if canImport(HealthKit)
         return try await quantityHistory(
@@ -171,7 +225,145 @@ final class HealthKitService {
         #endif
     }
 
+    func fetchConsumedNutritionHistory(days: Int = 14) async throws -> [DailyNutritionSample] {
+        #if canImport(HealthKit)
+        let safeDays = max(1, min(days, 90))
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+
+        var result: [DailyNutritionSample] = []
+        result.reserveCapacity(safeDays)
+
+        for offset in (0..<safeDays).reversed() {
+            guard
+                let dayStart = calendar.date(byAdding: .day, value: -offset, to: todayStart),
+                let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart)
+            else {
+                continue
+            }
+
+            let dayNutrition = Nutrition(
+                kcal: try await cumulativeValue(
+                    for: .dietaryEnergyConsumed,
+                    unit: .kilocalorie(),
+                    start: dayStart,
+                    end: dayEnd
+                ),
+                protein: try await cumulativeValue(
+                    for: .dietaryProtein,
+                    unit: .gram(),
+                    start: dayStart,
+                    end: dayEnd
+                ),
+                fat: try await cumulativeValue(
+                    for: .dietaryFatTotal,
+                    unit: .gram(),
+                    start: dayStart,
+                    end: dayEnd
+                ),
+                carbs: try await cumulativeValue(
+                    for: .dietaryCarbohydrates,
+                    unit: .gram(),
+                    start: dayStart,
+                    end: dayEnd
+                )
+            )
+
+            let hasValues =
+                (dayNutrition.kcal ?? 0) > 0 ||
+                (dayNutrition.protein ?? 0) > 0 ||
+                (dayNutrition.fat ?? 0) > 0 ||
+                (dayNutrition.carbs ?? 0) > 0
+
+            if hasValues {
+                result.append(.init(date: dayStart, nutrition: dayNutrition))
+            }
+        }
+
+        return result.sorted(by: { $0.date < $1.date })
+        #else
+        return []
+        #endif
+    }
+
+    func diagnoseDataAvailability(readEnabledInSettings: Bool) async -> DataAvailabilityDiagnosis {
+        guard readEnabledInSettings else { return .readDisabledInSettings }
+
+        #if canImport(HealthKit)
+        guard HKHealthStore.isHealthDataAvailable() else {
+            return .unavailableDevice
+        }
+
+        let requestStatus = await readAccessRequestStatus()
+        switch requestStatus {
+        case .shouldRequest:
+            return .accessNotRequested
+        case .unavailable:
+            return .unavailableDevice
+        case .unknown:
+            break
+        case .unnecessary:
+            break
+        }
+
+        if
+            let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass),
+            store.authorizationStatus(for: bodyMass) == .sharingDenied
+        {
+            return .accessDenied
+        }
+
+        if
+            let bodyFat = HKObjectType.quantityType(forIdentifier: .bodyFatPercentage),
+            store.authorizationStatus(for: bodyFat) == .sharingDenied
+        {
+            return .accessDenied
+        }
+
+        let weight = (try? await fetchWeightHistory(days: 0)) ?? []
+        let fat = (try? await fetchBodyFatHistory(days: 0)) ?? []
+
+        if !weight.isEmpty || !fat.isEmpty {
+            return .available
+        }
+
+        return requestStatus == .unknown ? .unknown : .noRecords
+        #else
+        return .unavailableDevice
+        #endif
+    }
+
     #if canImport(HealthKit)
+    private func makeReadTypes() -> Set<HKObjectType>? {
+        guard
+            let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass),
+            let height = HKObjectType.quantityType(forIdentifier: .height),
+            let bodyFat = HKObjectType.quantityType(forIdentifier: .bodyFatPercentage),
+            let activeEnergy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned),
+            let dietaryEnergy = HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed),
+            let dietaryProtein = HKObjectType.quantityType(forIdentifier: .dietaryProtein),
+            let dietaryFatTotal = HKObjectType.quantityType(forIdentifier: .dietaryFatTotal),
+            let dietaryCarbohydrates = HKObjectType.quantityType(forIdentifier: .dietaryCarbohydrates),
+            let dateOfBirth = HKObjectType.characteristicType(forIdentifier: .dateOfBirth),
+            let biologicalSex = HKObjectType.characteristicType(forIdentifier: .biologicalSex)
+        else {
+            return nil
+        }
+
+        return [
+            bodyMass,
+            height,
+            bodyFat,
+            activeEnergy,
+            dietaryEnergy,
+            dietaryProtein,
+            dietaryFatTotal,
+            dietaryCarbohydrates,
+            dateOfBirth,
+            biologicalSex
+        ]
+    }
+
     private func quantityHistory(
         identifier: HKQuantityTypeIdentifier,
         unit: HKUnit,
@@ -181,11 +373,16 @@ final class HealthKitService {
             return []
         }
 
-        let calendar = Calendar.current
-        let safeDays = max(1, min(days, 365))
-        let end = Date()
-        let start = calendar.date(byAdding: .day, value: -safeDays, to: end) ?? end
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let predicate: NSPredicate?
+        if days > 0 {
+            let calendar = Calendar.current
+            let safeDays = max(1, min(days, 3650))
+            let end = Date()
+            let start = calendar.date(byAdding: .day, value: -safeDays, to: end) ?? end
+            predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        } else {
+            predicate = nil
+        }
         let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[SamplePoint], Error>) in
@@ -216,12 +413,21 @@ final class HealthKitService {
     }
 
     private func todayCumulativeValue(for identifier: HKQuantityTypeIdentifier, unit: HKUnit) async throws -> Double? {
+        let start = Calendar.current.startOfDay(for: Date())
+        let end = Date()
+        return try await cumulativeValue(for: identifier, unit: unit, start: start, end: end)
+    }
+
+    private func cumulativeValue(
+        for identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        start: Date,
+        end: Date
+    ) async throws -> Double? {
         guard let type = HKObjectType.quantityType(forIdentifier: identifier) else {
             return nil
         }
 
-        let start = Calendar.current.startOfDay(for: Date())
-        let end = Date()
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Double?, Error>) in

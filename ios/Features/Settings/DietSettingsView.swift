@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DietSettingsView: View {
     let settingsService: any SettingsServiceProtocol
+    @EnvironmentObject private var appSettingsStore: AppSettingsStore
 
     @State private var settings: AppSettings = .default
     @State private var isLoading = true
@@ -13,6 +14,7 @@ struct DietSettingsView: View {
     @State private var strictMacroTracking = true
     @State private var macroTolerancePercent = 25.0
     @State private var dietProfile: AppSettings.DietProfile = .medium
+    @State private var dietGoalMode: AppSettings.DietGoalMode = .lose
 
     @State private var kcalGoalText = ""
     @State private var proteinGoalText = ""
@@ -24,6 +26,7 @@ struct DietSettingsView: View {
         let strictMacroTracking: Bool
         let macroTolerancePercent: Double
         let dietProfile: AppSettings.DietProfile
+        let dietGoalMode: AppSettings.DietGoalMode
         let kcalGoalText: String
         let proteinGoalText: String
         let fatGoalText: String
@@ -105,6 +108,22 @@ struct DietSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Picker("Режим цели", selection: $dietGoalMode) {
+                    ForEach(AppSettings.DietGoalMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(goalModeDescription(dietGoalMode))
+                    .font(VayFont.caption(12))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, VaySpacing.xs)
+            } header: {
+                sectionHeader(icon: "target", title: "Цель")
+            }
+
             if macroGoalSource == .manual {
                 Section {
                     goalField(icon: "flame.fill", color: .vayCalories, label: "Калории", text: $kcalGoalText, suffix: "ккал")
@@ -139,6 +158,7 @@ struct DietSettingsView: View {
             applyLoadedSettings(updated)
         }
         .onChange(of: autoSaveState) { _, _ in
+            publishLiveDietDraft()
             scheduleAutoSave()
         }
         .onChange(of: macroGoalSource) { _, _ in
@@ -153,6 +173,9 @@ struct DietSettingsView: View {
         .onChange(of: dietProfile) { _, _ in
             Task { await saveSettingsIfValid() }
         }
+        .onChange(of: dietGoalMode) { _, _ in
+            Task { await saveSettingsIfValid() }
+        }
         .onDisappear {
             autoSaveTask?.cancel()
             Task { await saveSettingsIfValid() }
@@ -165,6 +188,7 @@ struct DietSettingsView: View {
             strictMacroTracking: strictMacroTracking,
             macroTolerancePercent: macroTolerancePercent,
             dietProfile: dietProfile,
+            dietGoalMode: dietGoalMode,
             kcalGoalText: kcalGoalText,
             proteinGoalText: proteinGoalText,
             fatGoalText: fatGoalText,
@@ -237,6 +261,17 @@ struct DietSettingsView: View {
         }
     }
 
+    private func goalModeDescription(_ mode: AppSettings.DietGoalMode) -> String {
+        switch mode {
+        case .lose:
+            return "Фокус на снижении веса с адаптивным дефицитом."
+        case .maintain:
+            return "Фокус на удержании текущего веса без агрессивной коррекции."
+        case .gain:
+            return "Фокус на наборе массы с контролируемым профицитом."
+        }
+    }
+
     private func loadSettings() async {
         defer { isLoading = false }
 
@@ -258,6 +293,7 @@ struct DietSettingsView: View {
         strictMacroTracking = loaded.strictMacroTracking
         macroTolerancePercent = loaded.macroTolerancePercent
         dietProfile = loaded.dietProfile
+        dietGoalMode = loaded.dietGoalMode
 
         kcalGoalText = formatGoal(loaded.kcalGoal)
         proteinGoalText = formatGoal(loaded.proteinGoalGrams)
@@ -281,6 +317,7 @@ struct DietSettingsView: View {
         autoSaveTask?.cancel()
         autoSaveTask = nil
 
+        let previous = settings
         let parsedKcal = parseGoal(kcalGoalText)
         let parsedProtein = parseGoal(proteinGoalText)
         let parsedFat = parseGoal(fatGoalText)
@@ -297,6 +334,7 @@ struct DietSettingsView: View {
         updated.strictMacroTracking = strictMacroTracking
         updated.macroTolerancePercent = macroTolerancePercent
         updated.dietProfile = dietProfile
+        updated.dietGoalMode = dietGoalMode
 
         if parsedKcal.valid { updated.kcalGoal = parsedKcal.value }
         if parsedProtein.valid { updated.proteinGoalGrams = parsedProtein.value }
@@ -306,10 +344,42 @@ struct DietSettingsView: View {
         do {
             let saved = try await settingsService.saveSettings(updated)
             settings = saved
+            appSettingsStore.update(saved)
+            if previous.dietProfile != saved.dietProfile {
+                GamificationService.shared.trackDietProfileSwitch()
+            }
             saveErrorMessage = nil
         } catch {
             saveErrorMessage = error.localizedDescription
         }
+    }
+
+    private func publishLiveDietDraft() {
+        guard !isHydratingSettings else { return }
+        let parsedKcal = parseGoal(kcalGoalText)
+        let parsedProtein = parseGoal(proteinGoalText)
+        let parsedFat = parseGoal(fatGoalText)
+        let parsedCarbs = parseGoal(carbsGoalText)
+
+        if macroGoalSource == .manual {
+            guard parsedKcal.valid, parsedProtein.valid, parsedFat.valid, parsedCarbs.valid else {
+                return
+            }
+        }
+
+        var draft = settings
+        draft.macroGoalSource = macroGoalSource
+        draft.strictMacroTracking = strictMacroTracking
+        draft.macroTolerancePercent = macroTolerancePercent
+        draft.dietProfile = dietProfile
+        draft.dietGoalMode = dietGoalMode
+
+        if parsedKcal.valid { draft.kcalGoal = parsedKcal.value }
+        if parsedProtein.valid { draft.proteinGoalGrams = parsedProtein.value }
+        if parsedFat.valid { draft.fatGoalGrams = parsedFat.value }
+        if parsedCarbs.valid { draft.carbsGoalGrams = parsedCarbs.value }
+
+        appSettingsStore.update(draft)
     }
 
     private func parseGoal(_ text: String) -> (value: Double?, valid: Bool) {

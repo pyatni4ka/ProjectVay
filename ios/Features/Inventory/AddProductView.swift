@@ -233,6 +233,9 @@ struct AddProductView: View {
             _ = try await inventoryService.addBatch(batch)
 
             VayHaptic.success()
+            await MainActor.run {
+                GamificationService.shared.trackProductAdded()
+            }
             onSaved(saved)
             dismiss()
         } catch {
