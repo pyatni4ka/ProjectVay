@@ -50,6 +50,7 @@
 		51894195FD3901FA3B969FFC /* AppDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = D709D2660AFBC666C3B526EE /* AppDependencies.swift */; };
 		52133A15A976D65BDD8F4040 /* SettingsAchievementsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D471902CB097EF94F879D3C3 /* SettingsAchievementsView.swift */; };
 		5222704CB6FEDEC72A4307D5 /* HealthKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF886682120A84111FDEFA9 /* HealthKitService.swift */; };
+		5BA0FCA50F2325655FE556E7 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = 1189E0A60F436ACDFFEB11D6 /* Nuke */; };
 		5F304CF40465A14074DB06C7 /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 550CED58D673F03AAAB848B0 /* EmptyStateView.swift */; };
 		60C7BEBA7BE258D1D74E8B4C /* LocalRecipeCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AA1F50486751C0CD5E3069C /* LocalRecipeCatalog.swift */; };
 		618C54D2D55CC4B18E9CB64A /* MacroRecommendationFilterUseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03485DF9403E4E043639179 /* MacroRecommendationFilterUseCase.swift */; };
@@ -123,6 +124,7 @@
 		E83E6D92BD4E9F6F5AD979CE /* InventoryUseCases.swift in Sources */ = {isa = PBXBuildFile; fileRef = A16712EB1737E4E4183CE189 /* InventoryUseCases.swift */; };
 		ECD047177C3627DC4A6D67A8 /* InventoryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45505B88FB09B2D4A26D5F84 /* InventoryRepository.swift */; };
 		EE3DB458F2C660702231A83E /* InventoryEventRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35C75B81459C1E1588E13FA9 /* InventoryEventRecord.swift */; };
+		EEB5AE4725E4CB4EBA40009F /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = AD21B9A9297B3EABC93E8812 /* NukeUI */; };
 		F0DE5F93408D478A226F4D26 /* ScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 777025D3A06BE4314328D5FD /* ScannerService.swift */; };
 		FBF6B6751882D5C9BCEFDEE6 /* NotificationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304FC756B86B6CD7ACC7B581 /* NotificationScheduler.swift */; };
 		FCC3F14F30CC5BD8A2225687 /* PredictionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E19B050C2E456FCE8F4734B /* PredictionService.swift */; };
@@ -250,6 +252,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				771FEDC24BE2EA5D2BA16FB9 /* GRDB in Frameworks */,
+				5BA0FCA50F2325655FE556E7 /* Nuke in Frameworks */,
+				EEB5AE4725E4CB4EBA40009F /* NukeUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -566,6 +570,8 @@
 			name = InventoryAI;
 			packageProductDependencies = (
 				14EE3B600E1CC073E76C050F /* GRDB */,
+				1189E0A60F436ACDFFEB11D6 /* Nuke */,
+				AD21B9A9297B3EABC93E8812 /* NukeUI */,
 			);
 			productName = InventoryAI;
 			productReference = C3BB0E58BEF9C4C604DC9ABF /* InventoryAI.app */;
@@ -642,6 +648,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				6DFAB34ACC8E8BAADCF85531 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				BA9511127D3CD6524E3ABF57 /* XCRemoteSwiftPackageReference "Nuke" */,
 			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
@@ -1160,9 +1167,22 @@
 				minimumVersion = 6.0.0;
 			};
 		};
+		BA9511127D3CD6524E3ABF57 /* XCRemoteSwiftPackageReference "Nuke" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/kean/Nuke.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.8.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		1189E0A60F436ACDFFEB11D6 /* Nuke */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BA9511127D3CD6524E3ABF57 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = Nuke;
+		};
 		14EE3B600E1CC073E76C050F /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 6DFAB34ACC8E8BAADCF85531 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
@@ -1172,6 +1192,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6DFAB34ACC8E8BAADCF85531 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;
+		};
+		AD21B9A9297B3EABC93E8812 /* NukeUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BA9511127D3CD6524E3ABF57 /* XCRemoteSwiftPackageReference "Nuke" */;
+			productName = NukeUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
