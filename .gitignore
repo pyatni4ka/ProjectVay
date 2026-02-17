@@ -28,3 +28,12 @@ ios/DataSources/External/
 
 .qwen/
 gha-creds-*.json
+
+# Xcode user data
+*.xcuserstate
+*.xcuserdata/
+
+# Python cache
+__pycache__/
+*.pyc
+
