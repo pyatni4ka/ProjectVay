@@ -19,7 +19,6 @@ protocol InventoryServiceProtocol {
     func listBatches(productId: UUID?) async throws -> [Batch]
 
     func savePriceEntry(_ entry: PriceEntry) async throws
-    func listPriceHistory(productId: UUID) async throws -> [PriceEntry]
     func listPriceHistory(productId: UUID?) async throws -> [PriceEntry]
 
     func recordEvent(_ event: InventoryEvent) async throws
@@ -30,9 +29,8 @@ protocol InventoryServiceProtocol {
 }
 
 extension InventoryServiceProtocol {
-    func listPriceHistory(productId: UUID?) async throws -> [PriceEntry] {
-        guard let productId else { return [] }
-        return try await listPriceHistory(productId: productId)
+    func listPriceHistory(productId: UUID) async throws -> [PriceEntry] {
+        try await listPriceHistory(productId: Optional(productId))
     }
 }
 

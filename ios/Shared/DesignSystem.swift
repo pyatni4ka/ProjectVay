@@ -505,7 +505,7 @@ private final class KeyboardDismissController: NSObject, UIGestureRecognizerDele
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard hasActiveTextInputResponder(in: window) else { return false }
-        !touchTargetsInteractiveView(touch.view)
+        return !touchTargetsInteractiveView(touch.view)
     }
 
     private func dismissKeyboard() {

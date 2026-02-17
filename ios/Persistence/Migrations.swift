@@ -109,25 +109,6 @@ enum AppMigrations {
             }
         }
 
-        migrator.registerMigration("v5_body_metrics_range") { db in
-            let currentYear = Calendar.current.component(.year, from: Date())
-            try db.alter(table: "app_settings") { table in
-                table.add(column: "body_metrics_range_mode", .text).notNull().defaults(to: "lastMonths")
-                table.add(column: "body_metrics_range_months", .integer).notNull().defaults(to: 12)
-                table.add(column: "body_metrics_range_year", .integer).notNull().defaults(to: currentYear)
-            }
-        }
-
-        migrator.registerMigration("v6_ai_settings_and_price_index") { db in
-            try db.alter(table: "app_settings") { table in
-                table.add(column: "ai_personalization_enabled", .boolean).notNull().defaults(to: true)
-                table.add(column: "ai_cloud_assist_enabled", .boolean).notNull().defaults(to: true)
-                table.add(column: "ai_ru_only_storage", .boolean).notNull().defaults(to: true)
-                table.add(column: "ai_data_consent_accepted_at", .datetime)
-                table.add(column: "ai_data_collection_mode", .text).notNull().defaults(to: "maximal")
-            }
-
-            try db.create(index: "idx_price_entries_date", on: "price_entries", columns: ["date"])
         migrator.registerMigration("v5_batch_purchase_price") { db in
             try db.alter(table: "batches") { table in
                 table.add(column: "purchase_price_minor", .integer)
