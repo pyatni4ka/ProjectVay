@@ -252,6 +252,15 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(settings.dietProfile, .medium)
         XCTAssertEqual(settings.motionLevel, .full)
         XCTAssertEqual(settings.dietGoalMode, .lose)
+        XCTAssertEqual(settings.smartOptimizerProfile, .balanced)
+        XCTAssertEqual(settings.bodyMetricsRangeMode, .lastMonths)
+        XCTAssertEqual(settings.bodyMetricsRangeMonths, 12)
+        XCTAssertEqual(settings.bodyMetricsRangeYear, Calendar.current.component(.year, from: Date()))
+        XCTAssertTrue(settings.aiPersonalizationEnabled)
+        XCTAssertTrue(settings.aiCloudAssistEnabled)
+        XCTAssertTrue(settings.aiRuOnlyStorage)
+        XCTAssertNil(settings.aiDataConsentAcceptedAt)
+        XCTAssertEqual(settings.aiDataCollectionMode, .maximal)
     }
 
     func testBudgetNormalizationConvertsDayToWeekAndMonth() {
@@ -332,6 +341,45 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(settings.macroTolerancePercent, 5)
     }
 
+    func testSettingsNormalizationClampsBodyMetricsRangeBounds() {
+        let currentYear = Calendar.current.component(.year, from: Date())
+
+        let normalized = AppSettings(
+            quietStartMinute: 60,
+            quietEndMinute: 360,
+            expiryAlertsDays: [5, 3, 1],
+            budgetDay: 800,
+            budgetWeek: nil,
+            stores: [.pyaterochka],
+            dislikedList: [],
+            avoidBones: true,
+            bodyMetricsRangeMode: .sinceYear,
+            bodyMetricsRangeMonths: 0,
+            bodyMetricsRangeYear: 1960
+        ).normalized()
+
+        XCTAssertEqual(normalized.bodyMetricsRangeMode, .sinceYear)
+        XCTAssertEqual(normalized.bodyMetricsRangeMonths, 1)
+        XCTAssertEqual(normalized.bodyMetricsRangeYear, 1970)
+
+        let normalizedUpper = AppSettings(
+            quietStartMinute: 60,
+            quietEndMinute: 360,
+            expiryAlertsDays: [5, 3, 1],
+            budgetDay: 800,
+            budgetWeek: nil,
+            stores: [.pyaterochka],
+            dislikedList: [],
+            avoidBones: true,
+            bodyMetricsRangeMode: .year,
+            bodyMetricsRangeMonths: 99,
+            bodyMetricsRangeYear: currentYear + 50
+        ).normalized()
+
+        XCTAssertEqual(normalizedUpper.bodyMetricsRangeMonths, 60)
+        XCTAssertEqual(normalizedUpper.bodyMetricsRangeYear, currentYear)
+    }
+
     func testInvalidPersistedDietProfileFallsBackToMedium() async throws {
         let dbQueue = try AppDatabase.makeInMemoryQueue()
         let service = SettingsService(repository: SettingsRepository(dbQueue: dbQueue))
@@ -345,6 +393,60 @@ final class SettingsServiceTests: XCTestCase {
 
         let loaded = try await service.loadSettings()
         XCTAssertEqual(loaded.dietProfile, .medium)
+    }
+
+    func testInvalidPersistedSmartOptimizerProfileFallsBackToBalanced() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let service = SettingsService(repository: SettingsRepository(dbQueue: dbQueue))
+
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE app_settings SET smart_optimizer_profile = ? WHERE id = ?",
+                arguments: ["unsupported_profile", AppSettingsRecord.singletonID]
+            )
+        }
+
+        let loaded = try await service.loadSettings()
+        XCTAssertEqual(loaded.smartOptimizerProfile, .balanced)
+    }
+
+    func testInvalidPersistedBodyMetricsRangeModeFallsBackToLastMonths() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let service = SettingsService(repository: SettingsRepository(dbQueue: dbQueue))
+
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE app_settings SET body_metrics_range_mode = ?, body_metrics_range_months = ?, body_metrics_range_year = ? WHERE id = ?",
+                arguments: ["unsupported_mode", 120, 1965, AppSettingsRecord.singletonID]
+            )
+        }
+
+        let loaded = try await service.loadSettings()
+        XCTAssertEqual(loaded.bodyMetricsRangeMode, .lastMonths)
+        XCTAssertEqual(loaded.bodyMetricsRangeMonths, 60)
+        XCTAssertEqual(loaded.bodyMetricsRangeYear, 1970)
+    }
+
+    func testInvalidPersistedAIDataCollectionModeFallsBackToMaximal() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let service = SettingsService(repository: SettingsRepository(dbQueue: dbQueue))
+
+        try await dbQueue.write { db in
+            try db.execute(
+                sql: """
+                UPDATE app_settings
+                SET ai_data_collection_mode = ?, ai_personalization_enabled = ?, ai_cloud_assist_enabled = ?, ai_ru_only_storage = ?
+                WHERE id = ?
+                """,
+                arguments: ["unsupported_mode", 1, 1, 1, AppSettingsRecord.singletonID]
+            )
+        }
+
+        let loaded = try await service.loadSettings()
+        XCTAssertEqual(loaded.aiDataCollectionMode, .maximal)
+        XCTAssertTrue(loaded.aiPersonalizationEnabled)
+        XCTAssertTrue(loaded.aiCloudAssistEnabled)
+        XCTAssertTrue(loaded.aiRuOnlyStorage)
     }
 
     func testExtendedSettingsRoundtrip() async throws {
@@ -377,8 +479,17 @@ final class SettingsServiceTests: XCTestCase {
             motionLevel: .off,
             hapticsEnabled: false,
             showHealthCardOnHome: false,
+            aiPersonalizationEnabled: false,
+            aiCloudAssistEnabled: false,
+            aiRuOnlyStorage: true,
+            aiDataConsentAcceptedAt: Date(timeIntervalSince1970: 1_737_500_800),
+            aiDataCollectionMode: .balanced,
+            bodyMetricsRangeMode: .sinceYear,
+            bodyMetricsRangeMonths: 24,
+            bodyMetricsRangeYear: 2025,
             dietProfile: .extreme,
             dietGoalMode: .gain,
+            smartOptimizerProfile: .macroPrecision,
             recipeServiceBaseURLOverride: "http://192.168.0.15:8080"
         )
 
@@ -398,8 +509,17 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(loaded.motionLevel, .off)
         XCTAssertFalse(loaded.hapticsEnabled)
         XCTAssertFalse(loaded.showHealthCardOnHome)
+        XCTAssertFalse(loaded.aiPersonalizationEnabled)
+        XCTAssertFalse(loaded.aiCloudAssistEnabled)
+        XCTAssertTrue(loaded.aiRuOnlyStorage)
+        XCTAssertEqual(loaded.aiDataConsentAcceptedAt, Date(timeIntervalSince1970: 1_737_500_800))
+        XCTAssertEqual(loaded.aiDataCollectionMode, .balanced)
+        XCTAssertEqual(loaded.bodyMetricsRangeMode, .sinceYear)
+        XCTAssertEqual(loaded.bodyMetricsRangeMonths, 24)
+        XCTAssertEqual(loaded.bodyMetricsRangeYear, 2025)
         XCTAssertEqual(loaded.dietProfile, .extreme)
         XCTAssertEqual(loaded.dietGoalMode, .gain)
+        XCTAssertEqual(loaded.smartOptimizerProfile, .macroPrecision)
         XCTAssertEqual(loaded.recipeServiceBaseURLOverride, "http://192.168.0.15:8080")
     }
 }

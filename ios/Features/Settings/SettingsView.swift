@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct SettingsView: View {
     let settingsService: any SettingsServiceProtocol
@@ -6,13 +9,8 @@ struct SettingsView: View {
     let healthKitService: HealthKitService
     @EnvironmentObject private var appSettingsStore: AppSettingsStore
 
-    @AppStorage("preferredColorScheme") private var storedColorScheme: Int = 0
-    @AppStorage("enableAnimations") private var storedAnimationsEnabled: Bool = true
-    @AppStorage("motionLevel") private var storedMotionLevel: String = AppSettings.MotionLevel.full.rawValue
-    @AppStorage("hapticsEnabled") private var storedHapticsEnabled: Bool = true
-    @AppStorage("showHealthCardOnHome") private var storedShowHealthCardOnHome: Bool = true
-
     @State private var settings: AppSettings = .default
+    @State private var lastPersistedSettings: AppSettings = .default
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var isHydratingSettings = false
@@ -33,6 +31,7 @@ struct SettingsView: View {
 
     @State private var budgetInputPeriod: AppSettings.BudgetInputPeriod = .week
     @State private var budgetPrimaryText = ""
+    @FocusState private var isBudgetFieldFocused: Bool
 
     private let themeOptions = ["Системный", "Светлый", "Тёмный"]
 
@@ -144,6 +143,7 @@ struct SettingsView: View {
                     TextField(budgetPrimaryPlaceholder, text: $budgetPrimaryText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
+                        .focused($isBudgetFieldFocused)
                 }
 
                 ForEach(readOnlyBudgetRows, id: \.period.rawValue) { rowData in
@@ -243,6 +243,7 @@ struct SettingsView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
         .dismissKeyboardOnTap()
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: VayLayout.tabBarOverlayInset)
@@ -260,21 +261,16 @@ struct SettingsView: View {
             publishLiveSettingsDraft()
             scheduleAutoSave()
         }
-        .onChange(of: selectedTheme) { _, newValue in
-            storedColorScheme = newValue
+        .onChange(of: selectedTheme) { _, _ in
             Task { await saveSettingsIfValid() }
         }
-        .onChange(of: motionLevel) { _, newValue in
-            storedMotionLevel = newValue.rawValue
-            storedAnimationsEnabled = newValue != .off
+        .onChange(of: motionLevel) { _, _ in
             Task { await saveSettingsIfValid() }
         }
-        .onChange(of: hapticsEnabled) { _, newValue in
-            storedHapticsEnabled = newValue
+        .onChange(of: hapticsEnabled) { _, _ in
             Task { await saveSettingsIfValid() }
         }
         .onChange(of: showHealthCardOnHome) { _, _ in
-            storedShowHealthCardOnHome = showHealthCardOnHome
             Task { await saveSettingsIfValid() }
         }
         .onChange(of: healthKitReadEnabled) { _, _ in
@@ -287,6 +283,9 @@ struct SettingsView: View {
             guard let updated = notification.object as? AppSettings else { return }
             guard updated != settings else { return }
             applyLoadedSettings(updated)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isBudgetFieldFocused = false
         }
         .onDisappear {
             autoSaveTask?.cancel()
@@ -408,13 +407,8 @@ struct SettingsView: View {
                 .font(VayFont.body(15))
 
             Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
     }
 
     private func sectionHeader(icon: String, title: String) -> some View {
@@ -440,31 +434,32 @@ struct SettingsView: View {
     }
 
     private func applyLoadedSettings(_ loaded: AppSettings) {
+        let normalized = loaded.normalized()
         isHydratingSettings = true
         defer { isHydratingSettings = false }
 
-        settings = loaded
+        settings = normalized
+        lastPersistedSettings = normalized
 
-        quietStartDate = DateComponents.from(minutes: loaded.quietStartMinute).asDate
-        quietEndDate = DateComponents.from(minutes: loaded.quietEndMinute).asDate
-        breakfastDate = DateComponents.from(minutes: loaded.mealSchedule.breakfastMinute).asDate
-        lunchDate = DateComponents.from(minutes: loaded.mealSchedule.lunchMinute).asDate
-        dinnerDate = DateComponents.from(minutes: loaded.mealSchedule.dinnerMinute).asDate
+        quietStartDate = DateComponents.from(minutes: normalized.quietStartMinute).asDate
+        quietEndDate = DateComponents.from(minutes: normalized.quietEndMinute).asDate
+        breakfastDate = DateComponents.from(minutes: normalized.mealSchedule.breakfastMinute).asDate
+        lunchDate = DateComponents.from(minutes: normalized.mealSchedule.lunchMinute).asDate
+        dinnerDate = DateComponents.from(minutes: normalized.mealSchedule.dinnerMinute).asDate
 
-        selectedTheme = loaded.preferredColorScheme ?? 0
-        healthKitReadEnabled = loaded.healthKitReadEnabled
-        healthKitWriteEnabled = loaded.healthKitWriteEnabled
-        motionLevel = loaded.motionLevel
-        hapticsEnabled = loaded.hapticsEnabled
-        showHealthCardOnHome = loaded.showHealthCardOnHome
+        selectedTheme = normalized.preferredColorScheme ?? 0
+        healthKitReadEnabled = normalized.healthKitReadEnabled
+        healthKitWriteEnabled = normalized.healthKitWriteEnabled
+        motionLevel = normalized.motionLevel
+        hapticsEnabled = normalized.hapticsEnabled
+        showHealthCardOnHome = normalized.showHealthCardOnHome
 
-        budgetInputPeriod = loaded.budgetInputPeriod
+        budgetInputPeriod = normalized.budgetInputPeriod
         budgetPrimaryText = formatBudgetValue(
-            budgetPrimaryValue(from: loaded, period: loaded.budgetInputPeriod)
+            budgetPrimaryValue(from: normalized, period: normalized.budgetInputPeriod)
         )
 
-        appSettingsStore.update(loaded)
-        syncAppearanceStorage(from: loaded)
+        appSettingsStore.update(normalized)
     }
 
     private func scheduleAutoSave() {
@@ -478,6 +473,7 @@ struct SettingsView: View {
         }
     }
 
+    @MainActor
     private func saveSettingsIfValid() async {
         guard !isHydratingSettings else { return }
         autoSaveTask?.cancel()
@@ -488,17 +484,18 @@ struct SettingsView: View {
         do {
             let saved = try await settingsService.saveSettings(updated)
             settings = saved
+            lastPersistedSettings = saved
             appSettingsStore.update(saved)
-            syncAppearanceStorage(from: saved)
         } catch {
-            errorMessage = error.localizedDescription
+            rollbackToLastPersisted(with: error)
         }
     }
 
+    @MainActor
     private func publishLiveSettingsDraft() {
         guard !isHydratingSettings else { return }
         let draft = makeDraftSettings()
-        appSettingsStore.update(draft)
+        appSettingsStore.publishDraft(draft)
     }
 
     private func makeDraftSettings() -> AppSettings {
@@ -527,12 +524,10 @@ struct SettingsView: View {
         return updated.normalized()
     }
 
-    private func syncAppearanceStorage(from settings: AppSettings) {
-        storedColorScheme = settings.preferredColorScheme ?? 0
-        storedAnimationsEnabled = settings.enableAnimations
-        storedMotionLevel = settings.motionLevel.rawValue
-        storedHapticsEnabled = settings.hapticsEnabled
-        storedShowHealthCardOnHome = settings.showHealthCardOnHome
+    @MainActor
+    private func rollbackToLastPersisted(with error: Error) {
+        errorMessage = error.localizedDescription
+        applyLoadedSettings(lastPersistedSettings)
     }
 
     private func convertBudgetPrimaryInput(

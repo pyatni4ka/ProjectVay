@@ -140,6 +140,8 @@ struct AddProductView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
+        .dismissKeyboardOnTap()
         .navigationTitle("Новый продукт")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

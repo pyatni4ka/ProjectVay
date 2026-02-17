@@ -82,6 +82,7 @@ struct SmartMealPlanGenerateRequest: Codable {
     let avoidBones: Bool
     let cuisine: [String]
     let objective: String?
+    let optimizerProfile: String?
     let macroTolerancePercent: Double?
     let ingredientPriceHints: [IngredientPriceHint]?
 }
@@ -127,6 +128,7 @@ struct SmartMealPlanGenerateResponse: Codable {
     let estimatedTotalCost: Double
     let warnings: [String]
     let objective: String
+    let optimizerProfile: String?
     let costConfidence: Double
     let priceExplanation: [String]
 }
@@ -190,6 +192,13 @@ struct PriceEstimateResponse: Codable {
     let missingIngredients: [String]
 }
 
+enum MealPlanDataSource: String, Codable, Equatable {
+    case serverSmart
+    case serverBasic
+    case localFallback
+    case unknown
+}
+
 struct TodayMenuSnapshot: Codable, Equatable {
     struct Item: Codable, Equatable {
         let mealType: String
@@ -200,6 +209,8 @@ struct TodayMenuSnapshot: Codable, Equatable {
     let generatedAt: Date
     let items: [Item]
     let estimatedCost: Double?
+    let dataSource: MealPlanDataSource?
+    let dataSourceDetails: String?
 }
 
 final class TodayMenuSnapshotStore {
@@ -240,5 +251,50 @@ final class TodayMenuSnapshotStore {
 
     func isFreshForToday(_ snapshot: TodayMenuSnapshot) -> Bool {
         Calendar.current.isDate(snapshot.generatedAt, inSameDayAs: Date())
+    }
+}
+
+struct MealPlanSnapshot: Codable {
+    let generatedAt: Date
+    let rangeRawValue: String
+    let dataSource: MealPlanDataSource
+    let dataSourceDetails: String?
+    let plan: MealPlanGenerateResponse
+}
+
+final class MealPlanSnapshotStore {
+    private let userDefaults: UserDefaults
+    private let key: String
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+
+    init(
+        userDefaults: UserDefaults = .standard,
+        key: String = "vay_last_meal_plan_snapshot"
+    ) {
+        self.userDefaults = userDefaults
+        self.key = key
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        self.encoder = encoder
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self.decoder = decoder
+    }
+
+    func save(_ snapshot: MealPlanSnapshot) {
+        guard let data = try? encoder.encode(snapshot) else { return }
+        userDefaults.set(data, forKey: key)
+    }
+
+    func load() -> MealPlanSnapshot? {
+        guard let data = userDefaults.data(forKey: key) else { return nil }
+        return try? decoder.decode(MealPlanSnapshot.self, from: data)
+    }
+
+    func clear() {
+        userDefaults.removeObject(forKey: key)
     }
 }

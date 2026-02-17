@@ -22,6 +22,7 @@ struct HomeView: View {
     @State private var predictions: [ProductPrediction] = []
     @State private var adaptiveNutritionTarget: Nutrition = .empty
     @State private var healthWeightHistory: [HealthKitService.SamplePoint] = []
+    @State private var selectedHealthWeightDate: Date?
     @State private var isHealthCardLoading = false
     @State private var healthCardMessage: String?
     @State private var xpToastTask: Task<Void, Never>?
@@ -426,23 +427,38 @@ struct HomeView: View {
                 }
 
                 if let latestWeight = latestWeightValue {
-                    HStack {
-                        Text("\(latestWeight.formatted(.number.precision(.fractionLength(0...1)))) кг")
-                            .font(VayFont.title(24))
-                            .foregroundStyle(Color.vayPrimary)
-                        Spacer()
-                        if let delta = weightDeltaValue {
-                            Text("\(signedNumberText(delta, digits: 1)) кг за 14 дней")
+                    if let selectedPoint = selectedHealthWeightPoint {
+                        HStack {
+                            Text("\(selectedPoint.originalValue.formatted(.number.precision(.fractionLength(0...1)))) кг")
+                                .font(VayFont.title(24))
+                                .foregroundStyle(Color.vayPrimary)
+                            Spacer()
+                            Text(homeChartDateText(selectedPoint.date))
                                 .font(VayFont.caption(12))
-                                .foregroundStyle(delta <= 0 ? Color.vaySuccess : Color.vayWarning)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        HStack {
+                            Text("\(latestWeight.formatted(.number.precision(.fractionLength(0...1)))) кг")
+                                .font(VayFont.title(24))
+                                .foregroundStyle(Color.vayPrimary)
+                            Spacer()
+                            if let delta = weightDeltaValue {
+                                Text("\(signedNumberText(delta, digits: 1)) кг \(healthWeightRange.compactDeltaLabel)")
+                                    .font(VayFont.caption(12))
+                                    .foregroundStyle(delta <= 0 ? Color.vaySuccess : Color.vayWarning)
+                            }
                         }
                     }
 
-                    if healthWeightHistory.count >= 2 {
-                        Chart(healthWeightHistory) { point in
+                    if healthWeightDisplayPoints.count >= 2 {
+                        let scale = healthWeightScale
+                        let displayedPoints = healthWeightDisplayPoints
+                        let selectedPoint = selectedHealthWeightPoint
+                        let baseChart = Chart(displayedPoints) { point in
                             LineMark(
                                 x: .value("Дата", point.date),
-                                y: .value("Вес", point.value)
+                                y: .value("Вес", point.plottedValue)
                             )
                             .interpolationMethod(.catmullRom)
                             .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
@@ -456,7 +472,7 @@ struct HomeView: View {
 
                             AreaMark(
                                 x: .value("Дата", point.date),
-                                y: .value("Вес", point.value)
+                                y: .value("Вес", point.plottedValue)
                             )
                             .interpolationMethod(.catmullRom)
                             .foregroundStyle(
@@ -466,11 +482,70 @@ struct HomeView: View {
                                     endPoint: .bottom
                                 )
                             )
+
+                            if point.hasOutlier {
+                                PointMark(
+                                    x: .value("Дата", point.date),
+                                    y: .value("Вес", point.plottedValue)
+                                )
+                                .foregroundStyle(Color.vayPrimary)
+                                .symbolSize(42)
+                                .annotation(position: point.isUpperOutlier ? .top : .bottom) {
+                                    Image(systemName: point.isUpperOutlier ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                                        .font(VayFont.caption(8))
+                                        .foregroundStyle(Color.vayPrimary)
+                                }
+                            }
+
+                            if let selectedPoint, selectedPoint.date == point.date {
+                                RuleMark(x: .value("Выбор", point.date))
+                                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                                    .foregroundStyle(Color.vayPrimary.opacity(0.6))
+
+                                PointMark(
+                                    x: .value("Дата", point.date),
+                                    y: .value("Вес", point.plottedValue)
+                                )
+                                .foregroundStyle(.white)
+                                .symbolSize(74)
+
+                                PointMark(
+                                    x: .value("Дата", point.date),
+                                    y: .value("Вес", point.plottedValue)
+                                )
+                                .foregroundStyle(Color.vayPrimary)
+                                .symbolSize(32)
+                            }
                         }
-                        .frame(height: 104)
-                        .chartXAxis(.hidden)
-                        .chartYAxis(.hidden)
+
+                        applyHomeWeightScale(to: baseChart, scale: scale)
+                            .frame(height: 104)
+                            .chartXAxis(.hidden)
+                            .chartYAxis(.hidden)
+                            .chartOverlay { proxy in
+                                GeometryReader { geometry in
+                                    Rectangle()
+                                        .fill(.clear)
+                                        .contentShape(Rectangle())
+                                        .gesture(
+                                            DragGesture(minimumDistance: 0)
+                                                .onChanged { value in
+                                                    updateHomeChartSelection(
+                                                        location: value.location,
+                                                        proxy: proxy,
+                                                        geometry: geometry,
+                                                        points: displayedPoints
+                                                    )
+                                                }
+                                        )
+                                }
+                            }
                     }
+                } else if hasWeightDataOutsideSelectedPeriod {
+                    Text("Нет данных о весе за выбранный период (\(healthWeightRange.fullLabel)).")
+                        .font(VayFont.body(14))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } else if isHealthCardLoading {
                     HStack(spacing: VaySpacing.sm) {
                         ProgressView()
@@ -639,6 +714,23 @@ struct HomeView: View {
                         }
                     }
 
+                    if let source = snapshot.dataSource {
+                        HStack {
+                            Text("Источник плана")
+                                .font(VayFont.caption(12))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(mealPlanSourceTitle(source))
+                                .font(VayFont.label(12))
+                                .foregroundStyle(Color.vayPrimary)
+                        }
+                    }
+                    if let details = snapshot.dataSourceDetails, !details.isEmpty {
+                        Text(details)
+                            .font(VayFont.caption(11))
+                            .foregroundStyle(.secondary)
+                    }
+
                     if let estimatedCost = snapshot.estimatedCost {
                         HStack {
                             Text("Оценка стоимости")
@@ -724,6 +816,19 @@ struct HomeView: View {
             )
     }
 
+    private struct HealthWeightDisplayPoint: Identifiable {
+        var id: Date { date }
+        let date: Date
+        let originalValue: Double
+        let plottedValue: Double
+        let isLowerOutlier: Bool
+        let isUpperOutlier: Bool
+
+        var hasOutlier: Bool {
+            isLowerOutlier || isUpperOutlier
+        }
+    }
+
     private var expiringSoonBatches: [Batch] {
         batches
             .filter { batch in
@@ -749,12 +854,51 @@ struct HomeView: View {
         appSettingsStore.settings.showHealthCardOnHome
     }
 
+    private var healthWeightRange: BodyMetricsTimeRange {
+        BodyMetricsTimeRange(settings: settings ?? appSettingsStore.settings)
+    }
+
+    private var filteredHealthWeightHistory: [HealthKitService.SamplePoint] {
+        healthWeightRange.filter(points: healthWeightHistory)
+    }
+
+    private var hasWeightDataOutsideSelectedPeriod: Bool {
+        !healthWeightHistory.isEmpty && filteredHealthWeightHistory.isEmpty
+    }
+
+    private var healthWeightScale: DynamicChartScaleDomain? {
+        DynamicChartScaleDomain.resolve(
+            values: filteredHealthWeightHistory.map(\.value),
+            metric: .weightKg
+        )
+    }
+
+    private var healthWeightDisplayPoints: [HealthWeightDisplayPoint] {
+        let scale = healthWeightScale
+        return filteredHealthWeightHistory.map { point in
+            HealthWeightDisplayPoint(
+                date: point.date,
+                originalValue: point.value,
+                plottedValue: scale?.displayValue(for: point.value) ?? point.value,
+                isLowerOutlier: scale?.isLowerOutlier(point.value) ?? false,
+                isUpperOutlier: scale?.isUpperOutlier(point.value) ?? false
+            )
+        }
+    }
+
+    private var selectedHealthWeightPoint: HealthWeightDisplayPoint? {
+        guard let selectedHealthWeightDate else { return nil }
+        return healthWeightDisplayPoints.min {
+            abs($0.date.timeIntervalSince(selectedHealthWeightDate)) < abs($1.date.timeIntervalSince(selectedHealthWeightDate))
+        }
+    }
+
     private var latestWeightValue: Double? {
-        healthWeightHistory.last?.value
+        filteredHealthWeightHistory.last?.value
     }
 
     private var weightDeltaValue: Double? {
-        guard let first = healthWeightHistory.first?.value, let last = healthWeightHistory.last?.value else {
+        guard let first = filteredHealthWeightHistory.first?.value, let last = filteredHealthWeightHistory.last?.value else {
             return nil
         }
         return last - first
@@ -879,6 +1023,51 @@ struct HomeView: View {
         return "\(prefix)\(formatted)"
     }
 
+    @ViewBuilder
+    private func applyHomeWeightScale<ChartContent: View>(
+        to chart: ChartContent,
+        scale: DynamicChartScaleDomain?
+    ) -> some View {
+        if let scale {
+            chart.chartYScale(domain: scale.domain)
+        } else {
+            chart
+        }
+    }
+
+    private func updateHomeChartSelection(
+        location: CGPoint,
+        proxy: ChartProxy,
+        geometry: GeometryProxy,
+        points: [HealthWeightDisplayPoint]
+    ) {
+        guard !points.isEmpty, let plotFrame = proxy.plotFrame else { return }
+        let frame = geometry[plotFrame]
+        guard frame.contains(location) else { return }
+
+        let xPosition = location.x - frame.origin.x
+        guard let resolvedDate: Date = proxy.value(atX: xPosition) else { return }
+        guard let nearestPoint = points.min(by: {
+            abs($0.date.timeIntervalSince(resolvedDate)) < abs($1.date.timeIntervalSince(resolvedDate))
+        }) else {
+            return
+        }
+
+        if selectedHealthWeightDate != nearestPoint.date {
+            selectedHealthWeightDate = nearestPoint.date
+        }
+    }
+
+    private func homeChartDateText(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let currentYear = calendar.component(.year, from: Date())
+        let valueYear = calendar.component(.year, from: date)
+        if currentYear == valueYear {
+            return date.formatted(.dateTime.day().month(.abbreviated))
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated).year())
+    }
+
     private var greetingText: String {
         let hour = Calendar.current.component(.hour, from: Date())
         if hour < 6 { return "Доброй ночи 🌙" }
@@ -897,6 +1086,19 @@ struct HomeView: View {
             return "Ужин"
         default:
             return raw
+        }
+    }
+
+    private func mealPlanSourceTitle(_ source: MealPlanDataSource) -> String {
+        switch source {
+        case .localFallback:
+            return "Локально"
+        case .serverSmart:
+            return "Сервер (smart)"
+        case .serverBasic:
+            return "Сервер"
+        case .unknown:
+            return "Неизвестно"
         }
     }
 
@@ -928,16 +1130,8 @@ struct HomeView: View {
             appSettingsStore.update(loadedSettings)
             await recalculateAdaptiveNutritionTarget(using: loadedSettings)
 
-            var allEvents: [InventoryEvent] = []
-            var allPrices: [PriceEntry] = []
-            for product in products {
-                let productEvents = try await inventoryService.listEvents(productId: product.id)
-                allEvents.append(contentsOf: productEvents)
-                let history = try await inventoryService.listPriceHistory(productId: product.id)
-                allPrices.append(contentsOf: history)
-            }
-            events = allEvents
-            priceEntries = allPrices
+            events = try await inventoryService.listEvents(productId: nil)
+            priceEntries = try await inventoryService.listPriceHistory(productId: nil)
 
             await loadHealthCardData(
                 ifNeeded: loadedSettings.showHealthCardOnHome,
@@ -953,6 +1147,7 @@ struct HomeView: View {
             isLoading = false
         } catch {
             healthWeightHistory = []
+            selectedHealthWeightDate = nil
             healthCardMessage = nil
             isHealthCardLoading = false
             isLoading = false
@@ -970,8 +1165,13 @@ struct HomeView: View {
     }
 
     private func applyUpdatedSettings(_ loaded: AppSettings) {
+        let previousRange = settings.map { BodyMetricsTimeRange(settings: $0) }
         settings = loaded
         appSettingsStore.update(loaded)
+        let nextRange = BodyMetricsTimeRange(settings: loaded)
+        if previousRange != nextRange {
+            selectedHealthWeightDate = nil
+        }
     }
 
     private func resolvedHomeNutritionTarget(from settings: AppSettings) -> Nutrition {
@@ -1051,6 +1251,7 @@ struct HomeView: View {
     private func loadHealthCardData(ifNeeded shouldLoad: Bool, healthReadEnabled: Bool) async {
         guard shouldLoad else {
             healthWeightHistory = []
+            selectedHealthWeightDate = nil
             healthCardMessage = nil
             isHealthCardLoading = false
             return
@@ -1058,6 +1259,7 @@ struct HomeView: View {
 
         guard healthReadEnabled else {
             healthWeightHistory = []
+            selectedHealthWeightDate = nil
             healthCardMessage = "Включите чтение Apple Health в настройках."
             isHealthCardLoading = false
             return
@@ -1067,12 +1269,14 @@ struct HomeView: View {
         defer { isHealthCardLoading = false }
 
         do {
-            let points = try await healthKitService.fetchWeightHistory(days: 14)
+            let points = try await healthKitService.fetchWeightHistory(days: 0)
             let sorted = points.sorted(by: { $0.date < $1.date })
             healthWeightHistory = sorted
+            selectedHealthWeightDate = nil
             healthCardMessage = sorted.isEmpty ? "Данные о весе пока отсутствуют." : nil
         } catch {
             healthWeightHistory = []
+            selectedHealthWeightDate = nil
             healthCardMessage = "Нет доступа к данным Apple Health."
         }
     }

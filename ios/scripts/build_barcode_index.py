@@ -349,9 +349,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--include-off-food",
+        dest="include_off_food",
         action="store_true",
         help="Include openfoodfacts-products.csv.gz source.",
     )
+    parser.add_argument(
+        "--skip-off-food",
+        dest="include_off_food",
+        action="store_false",
+        help="Skip openfoodfacts-products.csv.gz source.",
+    )
+    parser.set_defaults(include_off_food=True)
     return parser.parse_args()
 
 

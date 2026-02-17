@@ -183,12 +183,16 @@ export type MealPlanResponse = {
   shoppingList: string[];
   shoppingListGrouped?: Record<string, string[]>;
   estimatedTotalCost: number;
+  estimatedSavingsRub?: number;
   totalNutrition: Nutrition;
   warnings: string[];
+  ingredientSubstitutions?: IngredientSubstitution[];
+  recommendationReasons?: RecipeRecommendationReason[];
   diversityScore?: number;
   varietyScore?: number;
   optimization?: {
     objective: "cost_macro" | "balanced";
+    profile: "economy_aggressive" | "balanced" | "macro_precision";
     averageMacroDeviation: number;
     averageMealCost: number;
     strictMacroMeals: number;
@@ -230,14 +234,28 @@ export type PriceEstimateResponse = {
 
 export type SmartMealPlanRequest = MealPlanRequest & {
   objective?: "cost_macro" | "balanced";
+  optimizerProfile?: "economy_aggressive" | "balanced" | "macro_precision";
   macroTolerancePercent?: number;
   ingredientPriceHints?: IngredientPriceHint[];
 };
 
 export type SmartMealPlanResponse = MealPlanResponse & {
   objective: "cost_macro" | "balanced";
+  optimizerProfile: "economy_aggressive" | "balanced" | "macro_precision";
   costConfidence: number;
   priceExplanation: string[];
+};
+
+export type RecipeRecommendationReason = {
+  recipeId: string;
+  reasons: string[];
+};
+
+export type IngredientSubstitution = {
+  ingredient: string;
+  substitute: string;
+  reason: "price" | "availability";
+  estimatedSavingsRub?: number;
 };
 
 // External API types
@@ -274,4 +292,42 @@ export type UserMealHistory = {
     dislikedIngredients: string[];
     dietTypes: DietType[];
   };
+};
+
+export type UserFeedbackEventType =
+  | "recipe_view"
+  | "recipe_save"
+  | "recipe_cook"
+  | "recipe_like"
+  | "recipe_dislike"
+  | "meal_plan_accept";
+
+export type UserFeedbackEvent = {
+  userId: string;
+  recipeId: string;
+  eventType: UserFeedbackEventType;
+  timestamp?: string;
+  value?: number;
+};
+
+export type UserTasteProfile = {
+  userId: string;
+  topIngredients: string[];
+  topCuisines: string[];
+  preferredMealTypes: MealType[];
+  dislikedRecipeIds: string[];
+  confidence: number;
+  totalEvents: number;
+};
+
+export type RecommendV2Payload = RecommendPayload & {
+  userId?: string;
+  includeReasons?: boolean;
+};
+
+export type RecommendV2Item = {
+  recipe: Recipe;
+  score: number;
+  reasons: string[];
+  scoreBreakdown: Record<string, number>;
 };

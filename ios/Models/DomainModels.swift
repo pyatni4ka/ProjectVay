@@ -321,6 +321,23 @@ struct AppSettings: Codable, Equatable {
         }
     }
 
+    enum SmartOptimizerProfile: String, Codable, CaseIterable {
+        case economyAggressive = "economy_aggressive"
+        case balanced
+        case macroPrecision = "macro_precision"
+
+        var title: String {
+            switch self {
+            case .economyAggressive:
+                return "Экономия"
+            case .balanced:
+                return "Баланс"
+            case .macroPrecision:
+                return "Макро"
+            }
+        }
+    }
+
     enum DietGoalMode: String, Codable, CaseIterable {
         case lose
         case maintain
@@ -362,6 +379,40 @@ struct AppSettings: Codable, Equatable {
                 return "Меньше"
             case .full:
                 return "Полный"
+            }
+        }
+    }
+
+    enum BodyMetricsRangeMode: String, Codable, CaseIterable {
+        case lastMonths
+        case year
+        case sinceYear
+
+        var title: String {
+            switch self {
+            case .lastMonths:
+                return "N месяцев"
+            case .year:
+                return "Год"
+            case .sinceYear:
+                return "С года"
+            }
+        }
+    }
+
+    enum AIDataCollectionMode: String, Codable, CaseIterable {
+        case conservative
+        case balanced
+        case maximal
+
+        var title: String {
+            switch self {
+            case .conservative:
+                return "Минимальный"
+            case .balanced:
+                return "Сбалансированный"
+            case .maximal:
+                return "Максимальный"
             }
         }
     }
@@ -425,8 +476,17 @@ struct AppSettings: Codable, Equatable {
     var motionLevel: MotionLevel = .full
     var hapticsEnabled: Bool = true
     var showHealthCardOnHome: Bool = true
+    var aiPersonalizationEnabled: Bool = true
+    var aiCloudAssistEnabled: Bool = true
+    var aiRuOnlyStorage: Bool = true
+    var aiDataConsentAcceptedAt: Date?
+    var aiDataCollectionMode: AIDataCollectionMode = .maximal
+    var bodyMetricsRangeMode: BodyMetricsRangeMode = .lastMonths
+    var bodyMetricsRangeMonths: Int = 12
+    var bodyMetricsRangeYear: Int = Calendar.current.component(.year, from: Date())
     var dietProfile: DietProfile = .medium
     var dietGoalMode: DietGoalMode = .lose
+    var smartOptimizerProfile: SmartOptimizerProfile = .balanced
     var recipeServiceBaseURLOverride: String?
 
     static let defaultStores: [Store] = [.pyaterochka, .yandexLavka, .chizhik, .auchan]
@@ -453,8 +513,17 @@ struct AppSettings: Codable, Equatable {
         motionLevel: .full,
         hapticsEnabled: true,
         showHealthCardOnHome: true,
+        aiPersonalizationEnabled: true,
+        aiCloudAssistEnabled: true,
+        aiRuOnlyStorage: true,
+        aiDataConsentAcceptedAt: nil,
+        aiDataCollectionMode: .maximal,
+        bodyMetricsRangeMode: .lastMonths,
+        bodyMetricsRangeMonths: 12,
+        bodyMetricsRangeYear: Calendar.current.component(.year, from: Date()),
         dietProfile: .medium,
         dietGoalMode: .lose,
+        smartOptimizerProfile: .balanced,
         recipeServiceBaseURLOverride: nil
     )
 
@@ -475,6 +544,7 @@ struct AppSettings: Codable, Equatable {
         let normalizedBudgetDay = max(0, budgetDay).rounded(scale: 2)
         let normalizedBudgetWeek = budgetWeek.map { max(0, $0).rounded(scale: 2) }
         let normalizedBudgetMonth = budgetMonth.map { max(0, $0).rounded(scale: 2) }
+        let currentYear = Calendar.current.component(.year, from: Date())
         let resolvedBudget = Self.resolveBudget(
             budgetDay: normalizedBudgetDay,
             budgetWeek: normalizedBudgetWeek,
@@ -517,8 +587,17 @@ struct AppSettings: Codable, Equatable {
         result.motionLevel = resolvedMotionLevel
         result.hapticsEnabled = hapticsEnabled
         result.showHealthCardOnHome = showHealthCardOnHome
+        result.aiPersonalizationEnabled = aiPersonalizationEnabled
+        result.aiCloudAssistEnabled = aiCloudAssistEnabled
+        result.aiRuOnlyStorage = aiRuOnlyStorage
+        result.aiDataConsentAcceptedAt = aiDataConsentAcceptedAt
+        result.aiDataCollectionMode = aiDataCollectionMode
+        result.bodyMetricsRangeMode = bodyMetricsRangeMode
+        result.bodyMetricsRangeMonths = min(max(bodyMetricsRangeMonths, 1), 60)
+        result.bodyMetricsRangeYear = min(max(bodyMetricsRangeYear, 1970), currentYear)
         result.dietProfile = dietProfile
         result.dietGoalMode = dietGoalMode
+        result.smartOptimizerProfile = smartOptimizerProfile
         result.recipeServiceBaseURLOverride = normalizedRecipeServiceURLOverride(recipeServiceBaseURLOverride)
         return result
     }
@@ -681,8 +760,17 @@ extension AppSettings {
         case motionLevel
         case hapticsEnabled
         case showHealthCardOnHome
+        case aiPersonalizationEnabled
+        case aiCloudAssistEnabled
+        case aiRuOnlyStorage
+        case aiDataConsentAcceptedAt
+        case aiDataCollectionMode
+        case bodyMetricsRangeMode
+        case bodyMetricsRangeMonths
+        case bodyMetricsRangeYear
         case dietProfile
         case dietGoalMode
+        case smartOptimizerProfile
         case recipeServiceBaseURLOverride
     }
 
@@ -721,8 +809,31 @@ extension AppSettings {
         motionLevel = try container.decodeIfPresent(MotionLevel.self, forKey: .motionLevel) ?? (enableAnimations ? .full : .off)
         hapticsEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
         showHealthCardOnHome = try container.decodeIfPresent(Bool.self, forKey: .showHealthCardOnHome) ?? true
+        aiPersonalizationEnabled = try container.decodeIfPresent(Bool.self, forKey: .aiPersonalizationEnabled) ?? true
+        aiCloudAssistEnabled = try container.decodeIfPresent(Bool.self, forKey: .aiCloudAssistEnabled) ?? true
+        aiRuOnlyStorage = try container.decodeIfPresent(Bool.self, forKey: .aiRuOnlyStorage) ?? true
+        aiDataConsentAcceptedAt = try container.decodeIfPresent(Date.self, forKey: .aiDataConsentAcceptedAt)
+        if
+            let aiDataCollectionModeRaw = try container.decodeIfPresent(String.self, forKey: .aiDataCollectionMode),
+            let decodedMode = AIDataCollectionMode(rawValue: aiDataCollectionModeRaw)
+        {
+            aiDataCollectionMode = decodedMode
+        } else {
+            aiDataCollectionMode = .maximal
+        }
+        if
+            let bodyMetricsRangeModeRaw = try container.decodeIfPresent(String.self, forKey: .bodyMetricsRangeMode),
+            let decodedMode = BodyMetricsRangeMode(rawValue: bodyMetricsRangeModeRaw)
+        {
+            bodyMetricsRangeMode = decodedMode
+        } else {
+            bodyMetricsRangeMode = .lastMonths
+        }
+        bodyMetricsRangeMonths = try container.decodeIfPresent(Int.self, forKey: .bodyMetricsRangeMonths) ?? 12
+        bodyMetricsRangeYear = try container.decodeIfPresent(Int.self, forKey: .bodyMetricsRangeYear) ?? Calendar.current.component(.year, from: Date())
         dietProfile = try container.decodeIfPresent(DietProfile.self, forKey: .dietProfile) ?? .medium
         dietGoalMode = try container.decodeIfPresent(DietGoalMode.self, forKey: .dietGoalMode) ?? .lose
+        smartOptimizerProfile = try container.decodeIfPresent(SmartOptimizerProfile.self, forKey: .smartOptimizerProfile) ?? .balanced
         recipeServiceBaseURLOverride = try container.decodeIfPresent(String.self, forKey: .recipeServiceBaseURLOverride)
     }
 
@@ -754,8 +865,17 @@ extension AppSettings {
         try container.encode(motionLevel, forKey: .motionLevel)
         try container.encode(hapticsEnabled, forKey: .hapticsEnabled)
         try container.encode(showHealthCardOnHome, forKey: .showHealthCardOnHome)
+        try container.encode(aiPersonalizationEnabled, forKey: .aiPersonalizationEnabled)
+        try container.encode(aiCloudAssistEnabled, forKey: .aiCloudAssistEnabled)
+        try container.encode(aiRuOnlyStorage, forKey: .aiRuOnlyStorage)
+        try container.encodeIfPresent(aiDataConsentAcceptedAt, forKey: .aiDataConsentAcceptedAt)
+        try container.encode(aiDataCollectionMode, forKey: .aiDataCollectionMode)
+        try container.encode(bodyMetricsRangeMode, forKey: .bodyMetricsRangeMode)
+        try container.encode(bodyMetricsRangeMonths, forKey: .bodyMetricsRangeMonths)
+        try container.encode(bodyMetricsRangeYear, forKey: .bodyMetricsRangeYear)
         try container.encode(dietProfile, forKey: .dietProfile)
         try container.encode(dietGoalMode, forKey: .dietGoalMode)
+        try container.encode(smartOptimizerProfile, forKey: .smartOptimizerProfile)
         try container.encodeIfPresent(recipeServiceBaseURLOverride, forKey: .recipeServiceBaseURLOverride)
     }
 }

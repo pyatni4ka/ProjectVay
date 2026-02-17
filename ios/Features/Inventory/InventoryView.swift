@@ -15,6 +15,7 @@ struct InventoryView: View {
     @State private var productToDelete: Product?
     @State private var showDeleteConfirm = false
     @State private var successMessage: String?
+    @State private var reloadTask: Task<Void, Never>?
 
     enum SortOption: String, CaseIterable, Identifiable {
         case name, expiry, quantity
@@ -131,6 +132,8 @@ struct InventoryView: View {
             .listRowBackground(Color.clear)
         }
         .listStyle(.plain)
+        .scrollDismissesKeyboard(.interactively)
+        .dismissKeyboardOnTap()
         .scrollContentBackground(.hidden)
         .background(Color.vayBackground)
         .navigationTitle("Запасы")
@@ -181,7 +184,10 @@ struct InventoryView: View {
             await loadData()
         }
         .onReceive(NotificationCenter.default.publisher(for: .inventoryDidChange)) { _ in
-            Task { await loadData() }
+            scheduleReload()
+        }
+        .onDisappear {
+            reloadTask?.cancel()
         }
         .confirmationDialog(
             "Удалить продукт?",
@@ -536,6 +542,15 @@ struct InventoryView: View {
             withAnimation(VayAnimation.springSmooth) {
                 successMessage = nil
             }
+        }
+    }
+
+    private func scheduleReload() {
+        reloadTask?.cancel()
+        reloadTask = Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            await loadData()
         }
     }
 

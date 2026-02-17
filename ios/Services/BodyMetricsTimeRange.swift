@@ -75,13 +75,7 @@ struct BodyMetricsTimeRange: Equatable {
     func contains(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> Bool {
         let interval = dateInterval(now: now, calendar: calendar)
         if date == interval.end {
-            switch mode {
-            case .lastMonths, .sinceYear:
-                return true
-            case .year:
-                let currentYear = calendar.component(.year, from: now)
-                return year >= currentYear
-            }
+            return true
         }
         return interval.contains(date)
     }

@@ -213,6 +213,7 @@ struct OnboardingFlowView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
         .dismissKeyboardOnTap()
         .navigationTitle("Настройка")
         .task { await loadSettings() }

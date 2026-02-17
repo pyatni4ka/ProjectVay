@@ -33,8 +33,17 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var motionLevel: String
     var hapticsEnabled: Bool
     var showHealthCardOnHome: Bool
+    var aiPersonalizationEnabled: Bool
+    var aiCloudAssistEnabled: Bool
+    var aiRuOnlyStorage: Bool
+    var aiDataConsentAcceptedAt: Date?
+    var aiDataCollectionMode: String
+    var bodyMetricsRangeMode: String
+    var bodyMetricsRangeMonths: Int
+    var bodyMetricsRangeYear: Int?
     var dietProfile: String
     var dietGoalMode: String
+    var smartOptimizerProfile: String
     var recipeServiceBaseURL: String?
     var onboardingCompleted: Bool
 
@@ -68,8 +77,17 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case motionLevel = "motion_level"
         case hapticsEnabled = "haptics_enabled"
         case showHealthCardOnHome = "show_health_card_on_home"
+        case aiPersonalizationEnabled = "ai_personalization_enabled"
+        case aiCloudAssistEnabled = "ai_cloud_assist_enabled"
+        case aiRuOnlyStorage = "ai_ru_only_storage"
+        case aiDataConsentAcceptedAt = "ai_data_consent_accepted_at"
+        case aiDataCollectionMode = "ai_data_collection_mode"
+        case bodyMetricsRangeMode = "body_metrics_range_mode"
+        case bodyMetricsRangeMonths = "body_metrics_range_months"
+        case bodyMetricsRangeYear = "body_metrics_range_year"
         case dietProfile = "diet_profile"
         case dietGoalMode = "diet_goal_mode"
+        case smartOptimizerProfile = "smart_optimizer_profile"
         case recipeServiceBaseURL = "recipe_service_base_url"
         case onboardingCompleted = "onboarding_completed"
     }
@@ -109,8 +127,17 @@ extension AppSettingsRecord {
         motionLevel = normalized.motionLevel.rawValue
         hapticsEnabled = normalized.hapticsEnabled
         showHealthCardOnHome = normalized.showHealthCardOnHome
+        aiPersonalizationEnabled = normalized.aiPersonalizationEnabled
+        aiCloudAssistEnabled = normalized.aiCloudAssistEnabled
+        aiRuOnlyStorage = normalized.aiRuOnlyStorage
+        aiDataConsentAcceptedAt = normalized.aiDataConsentAcceptedAt
+        aiDataCollectionMode = normalized.aiDataCollectionMode.rawValue
+        bodyMetricsRangeMode = normalized.bodyMetricsRangeMode.rawValue
+        bodyMetricsRangeMonths = normalized.bodyMetricsRangeMonths
+        bodyMetricsRangeYear = normalized.bodyMetricsRangeYear
         dietProfile = normalized.dietProfile.rawValue
         dietGoalMode = normalized.dietGoalMode.rawValue
+        smartOptimizerProfile = normalized.smartOptimizerProfile.rawValue
         recipeServiceBaseURL = normalized.recipeServiceBaseURLOverride
         self.onboardingCompleted = onboardingCompleted
     }
@@ -124,7 +151,10 @@ extension AppSettingsRecord {
         let parsedBudgetInputPeriod = AppSettings.BudgetInputPeriod(rawValue: budgetInputPeriod) ?? .week
         let parsedDietProfile = AppSettings.DietProfile(rawValue: dietProfile) ?? .medium
         let parsedMotionLevel = AppSettings.MotionLevel(rawValue: motionLevel) ?? .full
+        let parsedBodyMetricsRangeMode = AppSettings.BodyMetricsRangeMode(rawValue: bodyMetricsRangeMode) ?? .lastMonths
         let parsedDietGoalMode = AppSettings.DietGoalMode(rawValue: dietGoalMode) ?? .lose
+        let parsedSmartOptimizerProfile = AppSettings.SmartOptimizerProfile(rawValue: smartOptimizerProfile) ?? .balanced
+        let parsedAIDataCollectionMode = AppSettings.AIDataCollectionMode(rawValue: aiDataCollectionMode) ?? .maximal
 
         return AppSettings(
             quietStartMinute: quietStartMinute,
@@ -157,8 +187,17 @@ extension AppSettingsRecord {
             motionLevel: parsedMotionLevel,
             hapticsEnabled: hapticsEnabled,
             showHealthCardOnHome: showHealthCardOnHome,
+            aiPersonalizationEnabled: aiPersonalizationEnabled,
+            aiCloudAssistEnabled: aiCloudAssistEnabled,
+            aiRuOnlyStorage: aiRuOnlyStorage,
+            aiDataConsentAcceptedAt: aiDataConsentAcceptedAt,
+            aiDataCollectionMode: parsedAIDataCollectionMode,
+            bodyMetricsRangeMode: parsedBodyMetricsRangeMode,
+            bodyMetricsRangeMonths: bodyMetricsRangeMonths,
+            bodyMetricsRangeYear: bodyMetricsRangeYear ?? Calendar.current.component(.year, from: Date()),
             dietProfile: parsedDietProfile,
             dietGoalMode: parsedDietGoalMode,
+            smartOptimizerProfile: parsedSmartOptimizerProfile,
             recipeServiceBaseURLOverride: recipeServiceBaseURL
         ).normalized()
     }

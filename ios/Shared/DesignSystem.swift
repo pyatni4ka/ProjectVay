@@ -447,19 +447,11 @@ extension View {
     @ViewBuilder
     func dismissKeyboardOnTap() -> some View {
         #if canImport(UIKit)
-            if #available(iOS 16.0, *) {
-                self
-                    .scrollDismissesKeyboard(.interactively)
-                    .onAppear {
-                        KeyboardDismissController.shared.installIfNeeded()
-                    }
-            } else {
-                self.onAppear {
-                    KeyboardDismissController.shared.installIfNeeded()
-                }
-            }
+        self.onAppear {
+            KeyboardDismissController.shared.installIfNeeded()
+        }
         #else
-            self
+        self
         #endif
     }
 }
@@ -471,12 +463,11 @@ private final class KeyboardDismissController: NSObject, UIGestureRecognizerDele
 
     private weak var window: UIWindow?
     private var tapRecognizer: UITapGestureRecognizer?
-    private var panRecognizer: UIPanGestureRecognizer?
 
     func installIfNeeded() {
         guard let keyWindow = Self.resolveKeyWindow() else { return }
 
-        if window === keyWindow, tapRecognizer != nil, panRecognizer != nil {
+        if window === keyWindow, tapRecognizer != nil {
             return
         }
 
@@ -487,35 +478,21 @@ private final class KeyboardDismissController: NSObject, UIGestureRecognizerDele
         tap.delegate = self
         keyWindow.addGestureRecognizer(tap)
 
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
-        pan.cancelsTouchesInView = false
-        pan.delegate = self
-        keyWindow.addGestureRecognizer(pan)
-
         window = keyWindow
         tapRecognizer = tap
-        panRecognizer = pan
     }
 
     private func uninstall() {
         if let tapRecognizer {
             tapRecognizer.view?.removeGestureRecognizer(tapRecognizer)
         }
-        if let panRecognizer {
-            panRecognizer.view?.removeGestureRecognizer(panRecognizer)
-        }
         tapRecognizer = nil
-        panRecognizer = nil
         window = nil
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
         guard recognizer.state == .ended else { return }
-        dismissKeyboard()
-    }
-
-    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-        guard recognizer.state == .ended else { return }
+        guard hasActiveTextInputResponder(in: window) else { return }
         dismissKeyboard()
     }
 
@@ -527,10 +504,8 @@ private final class KeyboardDismissController: NSObject, UIGestureRecognizerDele
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        if touch.view is UITextField || touch.view is UITextView {
-            return false
-        }
-        return true
+        guard hasActiveTextInputResponder(in: window) else { return false }
+        !touchTargetsInteractiveView(touch.view)
     }
 
     private func dismissKeyboard() {
@@ -542,11 +517,57 @@ private final class KeyboardDismissController: NSObject, UIGestureRecognizerDele
         )
     }
 
+    private func touchTargetsInteractiveView(_ view: UIView?) -> Bool {
+        var current = view
+        while let candidate = current {
+            if
+                candidate is UIControl ||
+                candidate is UITextField ||
+                candidate is UITextView
+            {
+                return true
+            }
+
+            let className = NSStringFromClass(type(of: candidate))
+            if
+                className.contains("NavigationBar") ||
+                className.contains("TabBar") ||
+                className.contains("Toolbar") ||
+                className.contains("Button")
+            {
+                return true
+            }
+
+            current = candidate.superview
+        }
+
+        return false
+    }
+
     private static func resolveKeyWindow() -> UIWindow? {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
             .first(where: \.isKeyWindow)
+    }
+
+    private func hasActiveTextInputResponder(in window: UIWindow?) -> Bool {
+        guard let window else { return false }
+        return containsActiveTextInputResponder(in: window)
+    }
+
+    private func containsActiveTextInputResponder(in view: UIView) -> Bool {
+        if view.isFirstResponder, (view is UITextField || view is UITextView) {
+            return true
+        }
+
+        for subview in view.subviews {
+            if containsActiveTextInputResponder(in: subview) {
+                return true
+            }
+        }
+
+        return false
     }
 }
 #endif

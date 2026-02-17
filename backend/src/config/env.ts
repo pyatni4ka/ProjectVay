@@ -7,6 +7,7 @@ const envSchema = z.object({
   // Recipe cache
   RECIPE_CACHE_TTL_SECONDS: z.coerce.number().default(60 * 60 * 24 * 7),
   RECIPE_CACHE_DB_PATH: z.string().default("data/recipe-cache.sqlite"),
+  AI_STORE_DB_PATH: z.string().default("data/ai-store.sqlite"),
   
   // Rate limiting
   RECIPE_FETCH_RATE_WINDOW_MS: z.coerce.number().default(60_000),
@@ -38,6 +39,7 @@ const envSchema = z.object({
   EDAMAM_APP_KEY: z.string().optional(),
   SPOONACULAR_API_KEY: z.string().optional(),
   EXTERNAL_RECIPES_ENABLED: z.string().transform((val) => val !== "false").default("true"),
+  RECOMMEND_V2_ENABLED: z.string().transform((val) => val !== "false").default("true"),
 });
 
 export type Env = z.infer<typeof envSchema>;

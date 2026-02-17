@@ -246,6 +246,8 @@ struct ProductDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
+        .dismissKeyboardOnTap()
         .navigationTitle(product?.name ?? "Товар")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

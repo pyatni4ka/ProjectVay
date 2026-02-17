@@ -27,6 +27,7 @@ struct MealPlanView: View {
     let healthKitService: HealthKitService
     let recipeServiceClient: RecipeServiceClient?
     var onOpenScanner: () -> Void = {}
+    @EnvironmentObject private var appSettingsStore: AppSettingsStore
 
     @State private var selectedRange: PlanRange = .day
     @State private var mealPlan: MealPlanGenerateResponse?
@@ -42,10 +43,15 @@ struct MealPlanView: View {
     @State private var nextMealRecommendations: [RecommendResponse.RankedRecipe] = []
     @State private var healthStatusMessage: String?
     @State private var offlineStatusMessage: String?
+    @State private var mealPlanDataSource: MealPlanDataSource = .unknown
+    @State private var mealPlanDataSourceDetails: String?
+    @State private var lastSavedMealPlan: MealPlanSnapshot?
+    @State private var suppressAutoGenerate = false
     @State private var hasRequestedHealthAccess = false
     @State private var hasInventoryProducts = true
     @State private var availableIngredients: Set<String> = []
     private let todayMenuSnapshotStore = TodayMenuSnapshotStore()
+    private let mealPlanSnapshotStore = MealPlanSnapshotStore()
 
     var body: some View {
         ScrollView {
@@ -114,12 +120,15 @@ struct MealPlanView: View {
             }
         }
         .task {
+            refreshLastSavedPlan()
             await generatePlan()
         }
         .onChange(of: selectedRange) { _, _ in
+            if suppressAutoGenerate { return }
             Task { await generatePlan() }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .appSettingsDidChange)) { _ in
+        .onChange(of: appSettingsStore.settings) { _, _ in
+            if suppressAutoGenerate { return }
             Task { await generatePlan() }
         }
     }
@@ -136,6 +145,33 @@ struct MealPlanView: View {
             }
             .pickerStyle(.segmented)
             .vayAccessibilityLabel("Выбор периода плана", hint: "День или неделя")
+
+            if let lastSavedMealPlan {
+                Button {
+                    applySavedMealPlan(lastSavedMealPlan)
+                } label: {
+                    HStack(spacing: VaySpacing.sm) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Повторить последний план")
+                                .font(VayFont.label(13))
+                            Text(
+                                "\(lastSavedMealPlan.generatedAt.formatted(date: .abbreviated, time: .shortened)) · \(mealPlanDataSourceTitle(lastSavedMealPlan.dataSource))"
+                            )
+                            .font(VayFont.caption(11))
+                            .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.clockwise.circle")
+                            .foregroundStyle(Color.vayPrimary)
+                    }
+                    .padding(VaySpacing.sm)
+                    .background(Color.vayCardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .vayAccessibilityLabel("Повторить последний план питания")
+            }
         }
         .vayCard()
     }
@@ -300,6 +336,19 @@ struct MealPlanView: View {
             }
 
             VStack(alignment: .leading, spacing: VaySpacing.xs) {
+                HStack(spacing: VaySpacing.xs) {
+                    Image(systemName: mealPlanDataSourceIcon(mealPlanDataSource))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.vayPrimary)
+                    Text("Источник: \(mealPlanDataSourceTitle(mealPlanDataSource))")
+                        .font(VayFont.caption(11))
+                        .foregroundStyle(.secondary)
+                }
+                if let mealPlanDataSourceDetails, !mealPlanDataSourceDetails.isEmpty {
+                    Text(mealPlanDataSourceDetails)
+                        .font(VayFont.caption(11))
+                        .foregroundStyle(.secondary)
+                }
                 Text("Оценка стоимости: \(mealPlan.estimatedTotalCost.formatted(.number.precision(.fractionLength(0)))) ₽")
                     .font(VayFont.body(14))
                 if let lastGeneratedAt {
@@ -412,11 +461,10 @@ struct MealPlanView: View {
         do {
             async let productsTask = inventoryService.listProducts(location: nil, search: nil)
             async let expiringBatchesTask = inventoryService.expiringBatches(horizonDays: 5)
-            async let settingsTask = settingsService.loadSettings()
 
             let products = try await productsTask
             let expiringBatches = try await expiringBatchesTask
-            let settings = try await settingsTask
+            let settings = appSettingsStore.settings
             macroGoalSource = settings.macroGoalSource
 
             let nutritionSnapshot = await computeAdaptiveNutritionSnapshot(settings: settings)
@@ -442,6 +490,8 @@ struct MealPlanView: View {
             guard !ingredientKeywords.isEmpty else {
                 hasInventoryProducts = false
                 mealPlan = nil
+                mealPlanDataSource = .unknown
+                mealPlanDataSourceDetails = nil
                 nextMealRecommendations = []
                 offlineStatusMessage = nil
                 errorMessage = nil
@@ -452,6 +502,8 @@ struct MealPlanView: View {
 
             guard let recipeServiceClient else {
                 offlineStatusMessage = "Сервис рецептов сейчас недоступен."
+                mealPlanDataSource = .unknown
+                mealPlanDataSourceDetails = "Подключите backend или используйте сохранённый план."
                 errorMessage = nil
                 return
             }
@@ -481,21 +533,27 @@ struct MealPlanView: View {
                 avoidBones: settings.avoidBones,
                 cuisine: [],
                 objective: "cost_macro",
+                optimizerProfile: settings.smartOptimizerProfile.rawValue,
                 macroTolerancePercent: settings.macroTolerancePercent,
                 ingredientPriceHints: ingredientPriceHints
             )
 
             var smartExplanation: [String] = []
+            var smartFallbackReason: String?
+            var usedSmartGenerator = false
             let generated: MealPlanGenerateResponse
-            if let generatedSmart = try? await recipeServiceClient.generateSmartMealPlan(payload: smartPayload) {
+            do {
+                let generatedSmart = try await recipeServiceClient.generateSmartMealPlan(payload: smartPayload)
                 generated = MealPlanGenerateResponse(
                     days: generatedSmart.days,
                     shoppingList: generatedSmart.shoppingList,
                     estimatedTotalCost: generatedSmart.estimatedTotalCost,
                     warnings: generatedSmart.warnings
                 )
+                usedSmartGenerator = true
                 smartExplanation = generatedSmart.priceExplanation
-            } else {
+            } catch {
+                smartFallbackReason = userFacingErrorMessage(error)
                 let payload = MealPlanGenerateRequest(
                     days: selectedRange.daysCount,
                     ingredientKeywords: ingredientKeywords,
@@ -510,9 +568,20 @@ struct MealPlanView: View {
                 generated = try await recipeServiceClient.generateMealPlan(payload: payload)
             }
 
+            let source = resolvePlanDataSource(for: generated, usedSmartGenerator: usedSmartGenerator)
+            let sourceDetails = resolvePlanDataSourceDetails(
+                source: source,
+                smartFallbackReason: smartFallbackReason
+            )
+
+            mealPlanDataSource = source
+            mealPlanDataSourceDetails = sourceDetails
             mealPlan = generated
-            offlineStatusMessage = nil
-            persistTodayMenuSnapshot(from: generated)
+            offlineStatusMessage = source == .localFallback
+                ? (sourceDetails ?? "Сервер рецептов недоступен, использован локальный каталог.")
+                : nil
+            persistTodayMenuSnapshot(from: generated, dataSource: source, dataSourceDetails: sourceDetails)
+            persistMealPlanSnapshot(from: generated, dataSource: source, dataSourceDetails: sourceDetails)
             await MainActor.run {
                 GamificationService.shared.trackMealPlanGenerated()
                 GamificationService.shared.trackMacroModeDay(source: settings.macroGoalSource)
@@ -583,10 +652,16 @@ struct MealPlanView: View {
                 offlineStatusMessage = nil
                 errorMessage = "Не удалось сгенерировать план: \(userFacingErrorMessage(error))"
             }
+            mealPlanDataSource = .unknown
+            mealPlanDataSourceDetails = nil
         }
     }
 
-    private func persistTodayMenuSnapshot(from plan: MealPlanGenerateResponse) {
+    private func persistTodayMenuSnapshot(
+        from plan: MealPlanGenerateResponse,
+        dataSource: MealPlanDataSource,
+        dataSourceDetails: String?
+    ) {
         guard let firstDay = plan.days.first, !firstDay.entries.isEmpty else {
             return
         }
@@ -602,9 +677,108 @@ struct MealPlanView: View {
         let snapshot = TodayMenuSnapshot(
             generatedAt: Date(),
             items: items,
-            estimatedCost: firstDay.totals.estimatedCost
+            estimatedCost: firstDay.totals.estimatedCost,
+            dataSource: dataSource,
+            dataSourceDetails: dataSourceDetails
         )
         todayMenuSnapshotStore.save(snapshot)
+    }
+
+    private func persistMealPlanSnapshot(
+        from plan: MealPlanGenerateResponse,
+        dataSource: MealPlanDataSource,
+        dataSourceDetails: String?
+    ) {
+        let snapshot = MealPlanSnapshot(
+            generatedAt: Date(),
+            rangeRawValue: selectedRange.rawValue,
+            dataSource: dataSource,
+            dataSourceDetails: dataSourceDetails,
+            plan: plan
+        )
+        mealPlanSnapshotStore.save(snapshot)
+        lastSavedMealPlan = snapshot
+    }
+
+    private func refreshLastSavedPlan() {
+        lastSavedMealPlan = mealPlanSnapshotStore.load()
+    }
+
+    private func applySavedMealPlan(_ snapshot: MealPlanSnapshot) {
+        suppressAutoGenerate = true
+        if let range = PlanRange(rawValue: snapshot.rangeRawValue) {
+            selectedRange = range
+        }
+        mealPlan = snapshot.plan
+        mealPlanDataSource = snapshot.dataSource
+        mealPlanDataSourceDetails = snapshot.dataSourceDetails
+        lastGeneratedAt = snapshot.generatedAt
+        offlineStatusMessage = "Показан сохранённый план."
+        errorMessage = nil
+        DispatchQueue.main.async {
+            suppressAutoGenerate = false
+        }
+    }
+
+    private func resolvePlanDataSource(
+        for plan: MealPlanGenerateResponse,
+        usedSmartGenerator: Bool
+    ) -> MealPlanDataSource {
+        if isLocalGeneratedPlan(plan) {
+            return .localFallback
+        }
+        return usedSmartGenerator ? .serverSmart : .serverBasic
+    }
+
+    private func resolvePlanDataSourceDetails(
+        source: MealPlanDataSource,
+        smartFallbackReason: String?
+    ) -> String? {
+        switch source {
+        case .localFallback:
+            return "Сервер рецептов недоступен, используется локальный каталог."
+        case .serverSmart:
+            return "План собран smart-оптимизатором сервера."
+        case .serverBasic:
+            if let smartFallbackReason, !smartFallbackReason.isEmpty {
+                return "Smart-режим недоступен (\(smartFallbackReason)). Использован базовый серверный генератор."
+            }
+            return "План собран базовым серверным генератором."
+        case .unknown:
+            return nil
+        }
+    }
+
+    private func isLocalGeneratedPlan(_ plan: MealPlanGenerateResponse) -> Bool {
+        plan.warnings.contains { warning in
+            warning.localizedCaseInsensitiveContains("план собран локально")
+        }
+    }
+
+    private func mealPlanDataSourceTitle(_ source: MealPlanDataSource) -> String {
+        switch source {
+        case .localFallback:
+            return "Локальный каталог"
+        case .serverSmart:
+            return "Сервер (smart)"
+        case .serverBasic:
+            return "Сервер (базовый)"
+        case .unknown:
+            return "Не определён"
+        }
+    }
+
+    private func mealPlanDataSourceIcon(_ source: MealPlanDataSource) -> String {
+        switch source {
+        case .localFallback:
+            return "internaldrive.fill"
+        case .serverSmart:
+            return "sparkles"
+        case .serverBasic:
+            return "network"
+        case .unknown:
+            return "questionmark.circle"
+        }
     }
 
     private func computeAdaptiveNutritionSnapshot(settings: AppSettings) async -> AdaptiveNutritionUseCase.Output {

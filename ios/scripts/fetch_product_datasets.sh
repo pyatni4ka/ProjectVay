@@ -6,16 +6,17 @@ IOS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RAW_DIR="$IOS_DIR/DataSources/External/raw"
 INDEX_DIR="$IOS_DIR/DataSources/External/index"
 
-INCLUDE_OFF_FOOD=false
+INCLUDE_OFF_FOOD=true
 FORCE=false
 UHTT_LOCAL_ARCHIVE="${UHTT_LOCAL_ARCHIVE:-/Users/antonpyatnica/Downloads/UhttBarcodeReference-20230913.zip}"
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [--include-off-food] [--force] [--uhtt-local-archive /path/to/UhttBarcodeReference-20230913.zip]
+Usage: $(basename "$0") [--include-off-food] [--skip-off-food] [--force] [--uhtt-local-archive /path/to/UhttBarcodeReference-20230913.zip]
 
 Options:
-  --include-off-food         Also download en.openfoodfacts.org.products.csv.gz (~1.1GB compressed)
+  --include-off-food         Download en.openfoodfacts.org.products.csv.gz (default behavior)
+  --skip-off-food            Skip en.openfoodfacts.org.products.csv.gz
   --force                    Re-download files even if they already exist
   --uhtt-local-archive PATH  Local UHTT zip archive to copy (preferred over network)
   -h, --help                 Show this help
@@ -26,6 +27,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --include-off-food)
       INCLUDE_OFF_FOOD=true
+      shift
+      ;;
+    --skip-off-food)
+      INCLUDE_OFF_FOOD=false
       shift
       ;;
     --force)
@@ -66,10 +71,39 @@ record_manifest() {
   size_bytes="$(stat -f%z "$full_path")"
   local sha256
   sha256="$(shasum -a 256 "$full_path" | awk '{print $1}')"
+  local ingestion_source
+  ingestion_source="$(resolve_ingestion_source "$file_name")"
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$file_name" "$source_url" "$downloaded_at" "$size_bytes" "$sha256" "$license_note" "$license_risk" \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$file_name" "$source_url" "$downloaded_at" "$size_bytes" "$sha256" "$license_note" "$license_risk" "$ingestion_source" \
     >> "$MANIFEST_TSV"
+}
+
+resolve_ingestion_source() {
+  local file_name="$1"
+  case "$file_name" in
+    uhtt-reference-*.zip)
+      echo "uhtt_reference"
+      ;;
+    catalog-barcodes-*.zip)
+      echo "catalog_app"
+      ;;
+    openfoodfacts-products.csv.gz)
+      echo "open_food_facts"
+      ;;
+    openbeautyfacts-products.csv.gz)
+      echo "open_beauty_facts"
+      ;;
+    openpetfoodfacts-products.csv.gz)
+      echo "open_pet_food_facts"
+      ;;
+    openproductsfacts-products.csv.gz)
+      echo "open_products_facts"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
 }
 
 copy_local_file() {
@@ -183,7 +217,7 @@ if [[ "$INCLUDE_OFF_FOOD" == true ]]; then
     "OpenFoodFacts dump (ODbL/DbCL)." \
     "low"
 else
-  echo "[skip] openfoodfacts-products.csv.gz (enable with --include-off-food)"
+  echo "[skip] openfoodfacts-products.csv.gz (--skip-off-food)"
 fi
 
 MANIFEST_PATH="$RAW_DIR/manifest.json"
@@ -198,9 +232,9 @@ entries = []
 with open(tsv_path, "r", encoding="utf-8") as handle:
     reader = csv.reader(handle, delimiter="\t")
     for row in reader:
-        if len(row) != 7:
+        if len(row) != 8:
             continue
-        file_name, source_url, downloaded_at, size_bytes, sha256, license_note, license_risk = row
+        file_name, source_url, downloaded_at, size_bytes, sha256, license_note, license_risk, ingestion_source = row
         entries.append(
             {
                 "file": file_name,
@@ -210,6 +244,7 @@ with open(tsv_path, "r", encoding="utf-8") as handle:
                 "sha256": sha256,
                 "license_note": license_note,
                 "license_risk": license_risk,
+                "ingestion_source": ingestion_source,
             }
         )
 

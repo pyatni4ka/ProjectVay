@@ -19,6 +19,7 @@ protocol InventoryServiceProtocol {
     func listBatches(productId: UUID?) async throws -> [Batch]
 
     func savePriceEntry(_ entry: PriceEntry) async throws
+    func listPriceHistory(productId: UUID) async throws -> [PriceEntry]
     func listPriceHistory(productId: UUID?) async throws -> [PriceEntry]
 
     func recordEvent(_ event: InventoryEvent) async throws
@@ -29,8 +30,9 @@ protocol InventoryServiceProtocol {
 }
 
 extension InventoryServiceProtocol {
-    func listPriceHistory(productId: UUID) async throws -> [PriceEntry] {
-        try await listPriceHistory(productId: Optional(productId))
+    func listPriceHistory(productId: UUID?) async throws -> [PriceEntry] {
+        guard let productId else { return [] }
+        return try await listPriceHistory(productId: productId)
     }
 }
 
@@ -197,9 +199,14 @@ final class InventoryService: InventoryServiceProtocol {
 
     func savePriceEntry(_ entry: PriceEntry) async throws {
         try repository.savePriceEntry(entry)
+        notifyInventoryChanged()
         await MainActor.run {
             GamificationService.shared.trackPriceEntrySaved()
         }
+    }
+
+    func listPriceHistory(productId: UUID) async throws -> [PriceEntry] {
+        try repository.listPriceHistory(productId: productId)
     }
 
     func listPriceHistory(productId: UUID?) async throws -> [PriceEntry] {
@@ -208,6 +215,7 @@ final class InventoryService: InventoryServiceProtocol {
 
     func recordEvent(_ event: InventoryEvent) async throws {
         try repository.saveInventoryEvent(event)
+        notifyInventoryChanged()
     }
 
     func listEvents(productId: UUID?) async throws -> [InventoryEvent] {
@@ -296,7 +304,13 @@ final class InventoryService: InventoryServiceProtocol {
     }
 
     private func notifyInventoryChanged() {
-        NotificationCenter.default.post(name: .inventoryDidChange, object: nil)
+        if Thread.isMainThread {
+            NotificationCenter.default.post(name: .inventoryDidChange, object: nil)
+        } else {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .inventoryDidChange, object: nil)
+            }
+        }
     }
 
     private func proportionalMinor(totalMinor: Int64, ratio: Double) -> Int64 {

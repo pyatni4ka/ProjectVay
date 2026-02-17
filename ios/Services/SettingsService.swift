@@ -80,9 +80,6 @@ actor SettingsService: SettingsServiceProtocol {
         try repository.saveSettings(normalized)
         try await rescheduleAllExpiryNotifications(settings: normalized)
         await MainActor.run {
-            syncMirroredUserDefaults(normalized)
-        }
-        await MainActor.run {
             NotificationCenter.default.post(name: .appSettingsDidChange, object: normalized)
         }
         return normalized
@@ -118,6 +115,7 @@ actor SettingsService: SettingsServiceProtocol {
         let products = try inventoryRepository.listProducts(location: nil, search: nil)
         let batches = try inventoryRepository.listBatches(productId: nil)
         let events = try inventoryRepository.listInventoryEvents(productId: nil)
+
         let prices = try inventoryRepository.listPriceHistory(productId: nil)
 
         let snapshot = LocalDataExportSnapshot(
@@ -199,7 +197,6 @@ actor SettingsService: SettingsServiceProtocol {
         try repository.setOnboardingCompleted(true)
         try await rescheduleAllExpiryNotifications(settings: normalizedSettings)
         await MainActor.run {
-            syncMirroredUserDefaults(normalizedSettings)
             NotificationCenter.default.post(name: .appSettingsDidChange, object: normalizedSettings)
         }
     }
@@ -223,7 +220,6 @@ actor SettingsService: SettingsServiceProtocol {
         try repository.saveSettings(.default)
         try repository.setOnboardingCompleted(!resetOnboarding)
         await MainActor.run {
-            syncMirroredUserDefaults(.default)
             NotificationCenter.default.post(name: .appSettingsDidChange, object: AppSettings.default)
         }
     }
@@ -293,26 +289,37 @@ actor SettingsService: SettingsServiceProtocol {
         return formatter.string(from: date)
     }
 
-    @MainActor
-    private func syncMirroredUserDefaults(_ settings: AppSettings) {
-        let defaults = UserDefaults.standard
-        defaults.set(settings.preferredColorScheme ?? 0, forKey: "preferredColorScheme")
-        defaults.set(settings.enableAnimations, forKey: "enableAnimations")
-        defaults.set(settings.motionLevel.rawValue, forKey: "motionLevel")
-        defaults.set(settings.hapticsEnabled, forKey: "hapticsEnabled")
-        defaults.set(settings.showHealthCardOnHome, forKey: "showHealthCardOnHome")
-    }
 }
 
 @MainActor
 final class AppSettingsStore: ObservableObject {
     @Published private(set) var settings: AppSettings = .default
+    private(set) var lastPersistedSettings: AppSettings = .default
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     func update(_ settings: AppSettings) {
         let normalized = settings.normalized()
+        lastPersistedSettings = normalized
         self.settings = normalized
+        syncMirroredUserDefaults(normalized)
+    }
 
-        let defaults = UserDefaults.standard
+    func publishDraft(_ settings: AppSettings) {
+        let normalized = settings.normalized()
+        self.settings = normalized
+        syncMirroredUserDefaults(normalized)
+    }
+
+    func rollbackToLastPersisted() {
+        settings = lastPersistedSettings
+        syncMirroredUserDefaults(lastPersistedSettings)
+    }
+
+    private func syncMirroredUserDefaults(_ normalized: AppSettings) {
         defaults.set(normalized.preferredColorScheme ?? 0, forKey: "preferredColorScheme")
         defaults.set(normalized.enableAnimations, forKey: "enableAnimations")
         defaults.set(normalized.motionLevel.rawValue, forKey: "motionLevel")

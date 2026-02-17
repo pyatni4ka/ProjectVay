@@ -28,6 +28,7 @@ final class DatabaseMigrationTests: XCTestCase {
             XCTAssertTrue(indexNames.contains("idx_batches_expiry_date"))
             XCTAssertTrue(indexNames.contains("idx_batches_location"))
             XCTAssertTrue(indexNames.contains("idx_price_entries_product_date"))
+            XCTAssertTrue(indexNames.contains("idx_price_entries_date"))
             XCTAssertTrue(indexNames.contains("idx_events_product_timestamp"))
             XCTAssertTrue(indexNames.contains("idx_internal_code_mappings_product"))
 
@@ -58,6 +59,15 @@ final class DatabaseMigrationTests: XCTestCase {
             XCTAssertTrue(appSettingsColumns.contains("show_health_card_on_home"))
             XCTAssertTrue(appSettingsColumns.contains("motion_level"))
             XCTAssertTrue(appSettingsColumns.contains("diet_goal_mode"))
+            XCTAssertTrue(appSettingsColumns.contains("smart_optimizer_profile"))
+            XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_mode"))
+            XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_months"))
+            XCTAssertTrue(appSettingsColumns.contains("body_metrics_range_year"))
+            XCTAssertTrue(appSettingsColumns.contains("ai_personalization_enabled"))
+            XCTAssertTrue(appSettingsColumns.contains("ai_cloud_assist_enabled"))
+            XCTAssertTrue(appSettingsColumns.contains("ai_ru_only_storage"))
+            XCTAssertTrue(appSettingsColumns.contains("ai_data_consent_accepted_at"))
+            XCTAssertTrue(appSettingsColumns.contains("ai_data_collection_mode"))
 
             let batchColumns = try String.fetchAll(
                 db,
@@ -88,5 +98,14 @@ final class DatabaseMigrationTests: XCTestCase {
         XCTAssertNil(settings.recipeServiceBaseURLOverride)
         XCTAssertEqual(settings.motionLevel, .full)
         XCTAssertEqual(settings.dietGoalMode, .lose)
+        XCTAssertEqual(settings.smartOptimizerProfile, .balanced)
+        XCTAssertEqual(settings.bodyMetricsRangeMode, .lastMonths)
+        XCTAssertEqual(settings.bodyMetricsRangeMonths, 12)
+        XCTAssertEqual(settings.bodyMetricsRangeYear, Calendar.current.component(.year, from: Date()))
+        XCTAssertTrue(settings.aiPersonalizationEnabled)
+        XCTAssertTrue(settings.aiCloudAssistEnabled)
+        XCTAssertTrue(settings.aiRuOnlyStorage)
+        XCTAssertNil(settings.aiDataConsentAcceptedAt)
+        XCTAssertEqual(settings.aiDataCollectionMode, .maximal)
     }
 }

@@ -99,6 +99,8 @@ struct EditBatchView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
+        .dismissKeyboardOnTap()
         .navigationTitle(batch == nil ? "Новая партия" : "Редактирование")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {

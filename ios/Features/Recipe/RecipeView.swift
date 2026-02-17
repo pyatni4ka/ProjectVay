@@ -1,5 +1,7 @@
 import SwiftUI
 import UIKit
+import Nuke
+import NukeUI
 
 struct RecipeView: View {
     let recipe: Recipe
@@ -79,15 +81,25 @@ struct RecipeView: View {
 
     private var heroCard: some View {
         ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: recipe.imageURL) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                Rectangle()
-                    .fill(Color.vayCardBackground)
-                    .overlay(SwiftUI.ProgressView())
+            LazyImage(url: recipe.imageURL) { state in
+                if let image = state.image {
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Rectangle()
+                        .fill(Color.vayCardBackground)
+                        .overlay(SwiftUI.ProgressView())
+                }
             }
+            .processors([
+                ImageProcessors.Resize(
+                    size: CGSize(width: 1200, height: 720),
+                    contentMode: .aspectFill
+                )
+            ])
+            .priority(.high)
+            .pipeline(ImagePipeline.shared)
             .frame(height: 240)
             .clipShape(RoundedRectangle(cornerRadius: VayRadius.xl, style: .continuous))
 
@@ -398,6 +410,7 @@ struct RecipeImportView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
         .dismissKeyboardOnTap()
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: VayLayout.tabBarOverlayInset)

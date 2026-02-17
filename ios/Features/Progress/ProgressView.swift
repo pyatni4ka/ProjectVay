@@ -900,16 +900,8 @@ struct ProgressTrackingView: View {
             products = try await inventoryService.listProducts(location: nil, search: nil)
             batches = try await inventoryService.listBatches(productId: nil)
 
-            var allEvents: [InventoryEvent] = []
-            var allPrices: [PriceEntry] = []
-            for product in products {
-                let productEvents = try await inventoryService.listEvents(productId: product.id)
-                allEvents.append(contentsOf: productEvents)
-                let prices = try await inventoryService.listPriceHistory(productId: product.id)
-                allPrices.append(contentsOf: prices)
-            }
-            events = allEvents
-            priceEntries = allPrices
+            events = try await inventoryService.listEvents(productId: nil)
+            priceEntries = try await inventoryService.listPriceHistory(productId: nil)
             isLoading = false
         } catch {
             isLoading = false

@@ -70,29 +70,21 @@ struct RootTabView: View {
             customTabBar
         }
         .ignoresSafeArea(.keyboard)
-        .sheet(isPresented: $showScannerSheet, onDismiss: {
-            postInventoryDidChange()
-        }) {
+        .sheet(isPresented: $showScannerSheet) {
             NavigationStack {
                 ScannerView(
                     inventoryService: inventoryService,
                     barcodeLookupService: barcodeLookupService,
                     initialMode: .add,
-                    onInventoryChanged: {
-                        postInventoryDidChange()
-                    }
+                    onInventoryChanged: {}
                 )
             }
         }
-        .sheet(isPresented: $showReceiptScanSheet, onDismiss: {
-            postInventoryDidChange()
-        }) {
+        .sheet(isPresented: $showReceiptScanSheet) {
             NavigationStack {
                 ReceiptScanView(
                     inventoryService: inventoryService,
-                    onItemsAdded: {
-                        postInventoryDidChange()
-                    }
+                    onItemsAdded: {}
                 )
             }
         }
@@ -265,11 +257,12 @@ struct RootTabView: View {
         )
     }
 
-    private func postInventoryDidChange() {
-        NotificationCenter.default.post(name: .inventoryDidChange, object: nil)
-    }
-
     private func openTab(_ tab: Tab) {
+        if selectedTab == tab {
+            tabRootResetTokens[tab] = UUID()
+            return
+        }
+
         tabRootResetTokens[tab] = UUID()
         withAnimation(VayAnimation.springSmooth) {
             selectedTab = tab

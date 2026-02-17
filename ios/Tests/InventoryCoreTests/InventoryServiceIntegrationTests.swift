@@ -165,6 +165,78 @@ final class InventoryServiceIntegrationTests: XCTestCase {
         XCTAssertEqual(removeEvent?.estimatedValueMinor, 24600)
     }
 
+    func testSavePriceEntryPublishesInventoryDidChangeNotification() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let repository = InventoryRepository(dbQueue: dbQueue)
+        let settingsRepository = SettingsRepository(dbQueue: dbQueue)
+        let scheduler = NotificationSchedulerSpy()
+        let service = InventoryService(
+            repository: repository,
+            settingsRepository: settingsRepository,
+            notificationScheduler: scheduler
+        )
+
+        let product = Product(
+            barcode: nil,
+            name: "Бананы",
+            brand: nil,
+            category: "Фрукты",
+            defaultUnit: .g,
+            disliked: false,
+            mayContainBones: false
+        )
+        try repository.upsertProduct(product)
+
+        let notification = XCTNSNotificationExpectation(name: .inventoryDidChange)
+
+        try await service.savePriceEntry(
+            PriceEntry(
+                productId: product.id,
+                store: .pyaterochka,
+                price: 199
+            )
+        )
+
+        await fulfillment(of: [notification], timeout: 1.0)
+    }
+
+    func testRecordEventPublishesInventoryDidChangeNotification() async throws {
+        let dbQueue = try AppDatabase.makeInMemoryQueue()
+        let repository = InventoryRepository(dbQueue: dbQueue)
+        let settingsRepository = SettingsRepository(dbQueue: dbQueue)
+        let scheduler = NotificationSchedulerSpy()
+        let service = InventoryService(
+            repository: repository,
+            settingsRepository: settingsRepository,
+            notificationScheduler: scheduler
+        )
+
+        let product = Product(
+            barcode: nil,
+            name: "Хлеб",
+            brand: nil,
+            category: "Хлебобулочные",
+            defaultUnit: .pcs,
+            disliked: false,
+            mayContainBones: false
+        )
+        try repository.upsertProduct(product)
+
+        let notification = XCTNSNotificationExpectation(name: .inventoryDidChange)
+
+        try await service.recordEvent(
+            InventoryEvent(
+                type: .adjust,
+                productId: product.id,
+                quantityDelta: 1,
+                reason: .unknown,
+                note: "Тестовая корректировка"
+            )
+        )
+
+        await fulfillment(of: [notification], timeout: 1.0)
+    }
+
     func testWriteOffExpiredBatchMarksExpiredReason() async throws {
         let dbQueue = try AppDatabase.makeInMemoryQueue()
         let repository = InventoryRepository(dbQueue: dbQueue)

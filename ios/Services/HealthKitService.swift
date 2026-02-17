@@ -4,11 +4,20 @@ import HealthKit
 #endif
 
 final class HealthKitService {
-    enum ReadAuthorizationRequestStatus {
+    enum ReadAuthorizationRequestStatus: Equatable {
         case unavailable
         case shouldRequest
         case unnecessary
         case unknown
+    }
+
+    enum ReadAccessState: Equatable {
+        case readDisabled
+        case unavailable
+        case needsRequest
+        case denied
+        case authorizedNoData
+        case authorizedWithData
     }
 
     enum DataAvailabilityDiagnosis: Equatable {
@@ -125,6 +134,75 @@ final class HealthKitService {
         #else
         return .unavailable
         #endif
+    }
+
+    func readAccessState(
+        readEnabledInSettings: Bool,
+        hasAnyData: Bool? = nil
+    ) async -> ReadAccessState {
+        #if canImport(HealthKit)
+        let available = HKHealthStore.isHealthDataAvailable()
+        let requestStatus = available ? await readAccessRequestStatus() : .unavailable
+        let denied = available ? isReadAccessDenied() : false
+
+        let resolvedHasData: Bool
+        if let hasAnyData {
+            resolvedHasData = hasAnyData
+        } else if available {
+            let weight = (try? await fetchWeightHistory(days: 0)) ?? []
+            let fat = (try? await fetchBodyFatHistory(days: 0)) ?? []
+            resolvedHasData = !weight.isEmpty || !fat.isEmpty
+        } else {
+            resolvedHasData = false
+        }
+
+        return Self.resolveReadAccessState(
+            readEnabledInSettings: readEnabledInSettings,
+            isHealthDataAvailable: available,
+            requestStatus: requestStatus,
+            isDenied: denied,
+            hasAnyData: resolvedHasData
+        )
+        #else
+        return Self.resolveReadAccessState(
+            readEnabledInSettings: readEnabledInSettings,
+            isHealthDataAvailable: false,
+            requestStatus: .unavailable,
+            isDenied: false,
+            hasAnyData: hasAnyData ?? false
+        )
+        #endif
+    }
+
+    static func resolveReadAccessState(
+        readEnabledInSettings: Bool,
+        isHealthDataAvailable: Bool,
+        requestStatus: ReadAuthorizationRequestStatus,
+        isDenied: Bool,
+        hasAnyData: Bool
+    ) -> ReadAccessState {
+        guard readEnabledInSettings else {
+            return .readDisabled
+        }
+
+        guard isHealthDataAvailable else {
+            return .unavailable
+        }
+
+        switch requestStatus {
+        case .unavailable:
+            return .unavailable
+        case .shouldRequest, .unknown:
+            return .needsRequest
+        case .unnecessary:
+            break
+        }
+
+        if isDenied {
+            return .denied
+        }
+
+        return hasAnyData ? .authorizedWithData : .authorizedNoData
     }
 
     func fetchLatestMetrics() async throws -> UserMetrics {
@@ -493,6 +571,22 @@ final class HealthKitService {
         default:
             return nil
         }
+    }
+
+    private func isReadAccessDenied() -> Bool {
+        guard
+            let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass),
+            let bodyFat = HKObjectType.quantityType(forIdentifier: .bodyFatPercentage)
+        else {
+            return false
+        }
+
+        let deniedTypes = [
+            store.authorizationStatus(for: bodyMass),
+            store.authorizationStatus(for: bodyFat)
+        ]
+
+        return deniedTypes.contains(.sharingDenied)
     }
     #endif
 }

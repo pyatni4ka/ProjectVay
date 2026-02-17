@@ -14,6 +14,7 @@ import { rankRecipes, calculateDiversityScore } from "./recommendation.js";
 
 const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner"];
 const DAY_NAMES = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
+type OptimizerProfile = "economy_aggressive" | "balanced" | "macro_precision";
 
 export function generateMealPlan(
   candidates: Recipe[],
@@ -21,6 +22,7 @@ export function generateMealPlan(
   startDate: Date = new Date(),
   options: {
     objective?: "cost_macro" | "balanced";
+    optimizerProfile?: OptimizerProfile;
     macroTolerancePercent?: number;
     ingredientPriceHints?: IngredientPriceHint[];
   } = {}
@@ -37,6 +39,7 @@ export function generateMealPlan(
 
   const recipeHistory = new Set(request.userHistory ?? []);
   const objective = options.objective ?? "balanced";
+  const optimizerProfile = options.optimizerProfile ?? "balanced";
   const macroTolerance = clampNumber((options.macroTolerancePercent ?? 25) / 100, 0.05, 0.6);
   const hintPriceByIngredient = buildHintPriceMap(options.ingredientPriceHints ?? []);
   const defaultIngredientCost = resolveDefaultIngredientCost(hintPriceByIngredient);
@@ -199,6 +202,7 @@ export function generateMealPlan(
         const lowConfidencePenalty = 1 - item.resolvedCost.confidence;
         const objectiveScore = composeObjectiveScore({
           objective,
+          optimizerProfile,
           normalizedCost,
           macroDeviation: item.macroDeviation,
           repetitionPenalty: item.repetitionPenalty,
@@ -347,6 +351,10 @@ export function generateMealPlan(
     );
   }
 
+  if (optimizerProfile === "macro_precision" && relaxedMacroMeals > 0) {
+    warnings.push("Профиль «Максимум КБЖУ» не смог строго закрыть все слоты: расширен пул кандидатов.");
+  }
+
   if (lowConfidenceCostMeals > 0) {
     warnings.push(
       `Для ${lowConfidenceCostMeals} приёмов пищи оценка цены построена по fallback-модели (мало локальных цен).`
@@ -361,10 +369,10 @@ export function generateMealPlan(
     warnings.push("Рекомендуем добавить больше разнообразных продуктов для лучшего плана.");
   }
 
-  const averageMacroDeviation = optimizerEvaluatedMeals > 0
+  const averageMacroDeviationValue = optimizerEvaluatedMeals > 0
     ? optimizerMacroDeviationSum / optimizerEvaluatedMeals
     : 0;
-  const averageMealCost = optimizerEvaluatedMeals > 0
+  const averageMealCostValue = optimizerEvaluatedMeals > 0
     ? optimizerCostSum / optimizerEvaluatedMeals
     : 0;
 
@@ -384,8 +392,9 @@ export function generateMealPlan(
     varietyScore: round2(varietyScore),
     optimization: {
       objective,
-      averageMacroDeviation: round2(averageMacroDeviation),
-      averageMealCost: round2(averageMealCost),
+      profile: optimizerProfile,
+      averageMacroDeviation: round2(averageMacroDeviationValue),
+      averageMealCost: round2(averageMealCostValue),
       strictMacroMeals,
       relaxedMacroMeals,
       repeatedRecipeMeals,
@@ -589,6 +598,7 @@ function normalizeCostSignal(input: {
 
 function composeObjectiveScore(input: {
   objective: "cost_macro" | "balanced";
+  optimizerProfile: OptimizerProfile;
   normalizedCost: number;
   macroDeviation: number;
   repetitionPenalty: number;
@@ -599,7 +609,89 @@ function composeObjectiveScore(input: {
   expiringBonus: number;
   baseRankBonus: number;
 }): number {
-  const profile = input.objective === "cost_macro"
+  const profile = resolveScoringWeights(input.objective, input.optimizerProfile);
+
+  const weighted =
+    profile.macro * input.macroDeviation +
+    profile.cost * input.normalizedCost +
+    profile.repetition * input.repetitionPenalty +
+    profile.convenience * input.conveniencePenalty +
+    profile.availability * input.availabilityPenalty +
+    profile.history * input.historyPenalty +
+    profile.confidence * input.lowConfidencePenalty -
+    profile.expiringBonus * input.expiringBonus -
+    profile.rankBonus * clampNumber(input.baseRankBonus, 0, 2);
+
+  return round2(weighted);
+}
+
+function resolveScoringWeights(
+  objective: "cost_macro" | "balanced",
+  optimizerProfile: OptimizerProfile
+): {
+  macro: number;
+  cost: number;
+  repetition: number;
+  convenience: number;
+  availability: number;
+  history: number;
+  confidence: number;
+  expiringBonus: number;
+  rankBonus: number;
+} {
+  if (optimizerProfile === "economy_aggressive") {
+    return objective === "balanced"
+      ? {
+        macro: 0.34,
+        cost: 0.33,
+        repetition: 0.12,
+        convenience: 0.07,
+        availability: 0.07,
+        history: 0.05,
+        confidence: 0.04,
+        expiringBonus: 0.06,
+        rankBonus: 0.08
+      }
+      : {
+        macro: 0.3,
+        cost: 0.42,
+        repetition: 0.1,
+        convenience: 0.06,
+        availability: 0.06,
+        history: 0.04,
+        confidence: 0.04,
+        expiringBonus: 0.06,
+        rankBonus: 0.07
+      };
+  }
+
+  if (optimizerProfile === "macro_precision") {
+    return objective === "balanced"
+      ? {
+        macro: 0.58,
+        cost: 0.08,
+        repetition: 0.14,
+        convenience: 0.08,
+        availability: 0.08,
+        history: 0.07,
+        confidence: 0.03,
+        expiringBonus: 0.08,
+        rankBonus: 0.1
+      }
+      : {
+        macro: 0.62,
+        cost: 0.12,
+        repetition: 0.12,
+        convenience: 0.06,
+        availability: 0.08,
+        history: 0.06,
+        confidence: 0.03,
+        expiringBonus: 0.07,
+        rankBonus: 0.1
+      };
+  }
+
+  return objective === "cost_macro"
     ? {
       macro: 0.42,
       cost: 0.26,
@@ -622,19 +714,6 @@ function composeObjectiveScore(input: {
       expiringBonus: 0.08,
       rankBonus: 0.1
     };
-
-  const weighted =
-    profile.macro * input.macroDeviation +
-    profile.cost * input.normalizedCost +
-    profile.repetition * input.repetitionPenalty +
-    profile.convenience * input.conveniencePenalty +
-    profile.availability * input.availabilityPenalty +
-    profile.history * input.historyPenalty +
-    profile.confidence * input.lowConfidencePenalty -
-    profile.expiringBonus * input.expiringBonus -
-    profile.rankBonus * clampNumber(input.baseRankBonus, 0, 2);
-
-  return round2(weighted);
 }
 
 function repetitionPenaltyScore(input: {

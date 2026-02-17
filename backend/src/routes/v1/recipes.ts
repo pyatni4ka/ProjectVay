@@ -2,7 +2,7 @@ import { Router } from "express";
 import { defaultRecipeSourceWhitelist, recipeSourceWhitelistFromEnv } from "../../config/recipeSources.js";
 import { mockRecipes } from "../../data/mockRecipes.js";
 import { generateMealPlan } from "../../services/mealPlan.js";
-import { rankRecipes } from "../../services/recommendation.js";
+import { rankRecipes, rankRecipesV2 } from "../../services/recommendation.js";
 import { CacheStore } from "../../services/cacheStore.js";
 import { PersistentRecipeCache } from "../../services/persistentRecipeCache.js";
 import { fetchAndParseRecipe, fetchAndParseRecipeDetailed, RecipeScraperError } from "../../services/recipeScraper.js";
@@ -10,8 +10,10 @@ import { RecipeIndex } from "../../services/recipeIndex.js";
 import { isURLAllowedByWhitelist, parseRecipeURL } from "../../services/sourcePolicy.js";
 import { lookupBarcode, type BarcodeLookupResult } from "../../services/barcodeLookup.js";
 import { searchExternalRecipes } from "../../services/externalRecipes.js";
-import { personalizeRecipes, buildUserTasteProfile } from "../../services/personalization.js";
 import { estimateIngredientsPrice } from "../../services/priceEstimator.js";
+import { buildRecommendationReasons } from "../../services/recommendationExplanation.js";
+import { UserFeedbackStore } from "../../services/userFeedbackStore.js";
+import { suggestIngredientSubstitutions } from "../../services/ingredientSubstitutions.js";
 import { getEnv } from "../../config/env.js";
 import type {
   MealPlanRequest,
@@ -19,7 +21,7 @@ import type {
   RecommendPayload,
   Recipe,
   SmartMealPlanRequest,
-  UserMealHistory
+  UserFeedbackEvent
 } from "../../types/contracts.js";
 
 const router = Router();
@@ -41,7 +43,7 @@ const FETCH_RATE_LIMIT_MAX = Number(process.env.RECIPE_FETCH_RATE_MAX ?? 30);
 const barcodeRateLimitState = new Map<string, { count: number; resetAt: number }>();
 const BARCODE_RATE_LIMIT_WINDOW_MS = Number(process.env.BARCODE_LOOKUP_RATE_WINDOW_MS ?? 60_000);
 const BARCODE_RATE_LIMIT_MAX = Number(process.env.BARCODE_LOOKUP_RATE_MAX ?? 120);
-const userHistoryStore = new Map<string, UserMealHistory>();
+const userFeedbackStore = makeUserFeedbackStore();
 
 router.get("/recipes/search", (req, res) => {
   const q = String(req.query.q ?? "");
@@ -123,34 +125,91 @@ router.post("/user/history", (req, res) => {
     return res.status(400).json({ error: "userId is required" });
   }
 
-  const history: UserMealHistory = {
-    userId,
-    meals: Array.isArray(req.body.meals)
-      ? req.body.meals
-        .filter((item): item is { date: string; recipeId: string; mealType: "breakfast" | "lunch" | "dinner" | "snack"; rating?: number } =>
-          isRecord(item) && typeof item.date === "string" && typeof item.recipeId === "string" && typeof item.mealType === "string"
-        )
-      : [],
-    preferences: {
-      favoriteCuisines: toStringArray((req.body.preferences as any)?.favoriteCuisines),
-      dislikedIngredients: toStringArray((req.body.preferences as any)?.dislikedIngredients),
-      dietTypes: toStringArray((req.body.preferences as any)?.dietTypes) as any
-    }
-  };
+  const historyEvents = Array.isArray(req.body.meals)
+    ? req.body.meals
+      .filter((item): item is { date: string; recipeId: string; mealType: "breakfast" | "lunch" | "dinner" | "snack"; rating?: number } =>
+        isRecord(item) && typeof item.date === "string" && typeof item.recipeId === "string" && typeof item.mealType === "string"
+      )
+      .map((meal) => ({
+        userId,
+        recipeId: meal.recipeId,
+        eventType: (meal.rating != null && meal.rating < 3 ? "recipe_dislike" : "recipe_cook") as UserFeedbackEvent["eventType"],
+        timestamp: meal.date,
+        value: meal.rating != null ? Math.max(-2, Math.min(2, meal.rating - 3)) : undefined
+      }))
+    : [];
 
-  userHistoryStore.set(userId, history);
-  res.json({ ok: true, savedMeals: history.meals.length });
+  const saved = userFeedbackStore?.appendEvents(userId, historyEvents) ?? 0;
+  res.json({ ok: true, savedMeals: saved });
 });
 
 router.get("/user/:userId/taste-profile", (req, res) => {
   const userId = String(req.params.userId ?? "").trim();
-  const history = userHistoryStore.get(userId);
-  if (!history) {
-    return res.status(404).json({ error: "history_not_found" });
+  if (!userId) return res.status(400).json({ error: "userId is required" });
+  if (!userFeedbackStore) return res.status(503).json({ error: "storage_unavailable" });
+
+  const profile = userFeedbackStore.buildTasteProfile(userId, recipeIndex.all());
+  return res.json(profile);
+});
+
+router.post("/user/events", (req, res) => {
+  if (!isRecord(req.body)) {
+    return res.status(400).json({ error: "invalid_events_payload" });
   }
 
-  const profile = buildUserTasteProfile(history);
+  const userId = String(req.body.userId ?? "").trim();
+  if (!userId) {
+    return res.status(400).json({ error: "userId is required" });
+  }
+  if (!userFeedbackStore) {
+    return res.status(503).json({ error: "storage_unavailable" });
+  }
+
+  const events = Array.isArray(req.body.events) ? req.body.events : [];
+  const saved = userFeedbackStore.appendEvents(userId, events as Array<Partial<UserFeedbackEvent>>);
+  return res.json({ ok: true, saved });
+});
+
+router.get("/user/:userId/profile", (req, res) => {
+  const userId = String(req.params.userId ?? "").trim();
+  if (!userId) return res.status(400).json({ error: "userId is required" });
+  if (!userFeedbackStore) return res.status(503).json({ error: "storage_unavailable" });
+
+  const profile = userFeedbackStore.buildTasteProfile(userId, recipeIndex.all());
   return res.json(profile);
+});
+
+router.post("/recipes/recommend/v2", async (req, res) => {
+  const payload = normalizeRecommendPayload(req.body);
+  if (!payload) {
+    return res.status(400).json({ error: "invalid_recommend_payload" });
+  }
+  if (!env.RECOMMEND_V2_ENABLED) {
+    return res.status(404).json({ error: "recommend_v2_disabled" });
+  }
+
+  const userId = String(req.body?.userId ?? "").trim();
+  const profile = userId && userFeedbackStore
+    ? userFeedbackStore.buildTasteProfile(userId, recipeIndex.all())
+    : null;
+
+  const ranked = rankRecipesV2(recipeIndex.all(), payload, { tasteProfile: profile });
+  const includeReasons = toOptionalBoolean(req.body?.includeReasons) ?? true;
+
+  return res.json({
+    items: ranked.slice(0, payload.limit ?? 30).map((item) => ({
+      recipe: item.recipe,
+      score: item.score,
+      reasons: includeReasons ? buildRecommendationReasons({
+        recipe: item.recipe,
+        scoreBreakdown: item.scoreBreakdown,
+        maxReasons: 3
+      }) : [],
+      scoreBreakdown: item.scoreBreakdown
+    })),
+    personalizationApplied: Boolean(profile && profile.totalEvents > 0),
+    profileConfidence: profile?.confidence ?? 0
+  });
 });
 
 router.post("/recipes/recommend/personalized", (req, res) => {
@@ -160,17 +219,15 @@ router.post("/recipes/recommend/personalized", (req, res) => {
   }
 
   const userId = String(req.body?.userId ?? "").trim();
-  const history = userId ? userHistoryStore.get(userId) ?? null : null;
-
-  const ranked = rankRecipes(recipeIndex.all(), payload);
-  const personalized = personalizeRecipes(
-    ranked.map((item) => item.recipe),
-    history
-  );
+  const profile = userId && userFeedbackStore
+    ? userFeedbackStore.buildTasteProfile(userId, recipeIndex.all())
+    : null;
+  const ranked = rankRecipesV2(recipeIndex.all(), payload, { tasteProfile: profile });
+  const personalized = ranked.map((item) => item.recipe);
 
   return res.json({
     items: personalized.slice(0, payload.limit ?? 30),
-    personalizationApplied: Boolean(history)
+    personalizationApplied: Boolean(profile && profile.totalEvents > 0)
   });
 });
 
@@ -348,54 +405,59 @@ router.post("/prices/estimate", async (req, res) => {
   return res.json(result);
 });
 
+router.get("/prices/compare", async (req, res) => {
+  const ingredients = String(req.query.ingredients ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (ingredients.length === 0) {
+    return res.status(400).json({ error: "ingredients is required" });
+  }
+
+  const estimate = await estimateIngredientsPrice({
+    ingredients,
+    region: "RU",
+    currency: "RUB"
+  });
+
+  const baseline = estimate.totalEstimatedRub;
+  const substitutionHints = suggestIngredientSubstitutions(ingredients, 20);
+  const potentialSavingsRub = substitutionHints
+    .map((item) => item.estimatedSavingsRub ?? 0)
+    .reduce((sum, value) => sum + value, 0);
+
+  return res.json({
+    items: estimate.items,
+    totalEstimatedRub: baseline,
+    estimatedBestCaseRub: Math.max(0, baseline - potentialSavingsRub),
+    potentialSavingsRub,
+    substitutions: substitutionHints,
+    confidence: estimate.confidence,
+    missingIngredients: estimate.missingIngredients
+  });
+});
+
 router.post("/meal-plan/smart-generate", async (req, res) => {
   const payload = normalizeSmartMealPlanPayload(req.body);
   if (!payload) {
     return res.status(400).json({ error: "invalid_meal_plan_payload" });
   }
 
-  let pool = recipeIndex.all();
-  const includeExternal = Boolean(req.body?.includeExternal);
-  if (includeExternal) {
-    const external = await searchExternalRecipes({
-      query: payload.ingredientKeywords.join(" "),
-      ingredients: payload.ingredientKeywords,
-      cuisine: payload.cuisine?.[0],
-      maxCalories: payload.targets.kcal,
-      limit: 40
-    });
-    pool = dedupeRecipes([...pool, ...external.recipes]);
+  const response = await buildSmartMealPlanResponse(payload, Boolean(req.body?.includeExternal));
+  return res.json(response);
+});
+
+router.post("/meal-plan/smart-v2", async (req, res) => {
+  const payload = normalizeSmartMealPlanPayload(req.body);
+  if (!payload) {
+    return res.status(400).json({ error: "invalid_meal_plan_payload" });
   }
 
-  const objective = payload.objective ?? "cost_macro";
-  const plan = generateMealPlan(pool, payload, new Date(), {
-    objective,
-    macroTolerancePercent: payload.macroTolerancePercent,
-    ingredientPriceHints: payload.ingredientPriceHints
+  const response = await buildSmartMealPlanResponse(payload, Boolean(req.body?.includeExternal), {
+    includeRecommendationReasons: true,
+    includeSubstitutions: true
   });
-
-  const estimate = await estimateIngredientsPrice({
-    ingredients: plan.shoppingList,
-    hints: payload.ingredientPriceHints ?? [],
-    region: "RU",
-    currency: "RUB"
-  });
-
-  return res.json({
-    ...plan,
-    objective,
-    costConfidence: estimate.confidence,
-    priceExplanation: [
-      `Оценка построена для региона RU, валюта RUB.`,
-      `Уверенность по цене: ${(estimate.confidence * 100).toFixed(0)}%.`,
-      plan.optimization
-        ? `Оптимизатор: среднее отклонение КБЖУ ${(plan.optimization.averageMacroDeviation * 100).toFixed(0)}%, средняя цена приёма пищи ${plan.optimization.averageMealCost.toFixed(0)} ₽.`
-        : "Оптимизатор: базовый режим.",
-      estimate.missingIngredients.length > 0
-        ? `Без ценовых подсказок осталось: ${estimate.missingIngredients.slice(0, 5).join(", ")}`
-        : "Все ингредиенты оценены по локальным источникам."
-    ]
-  });
+  return res.json(response);
 });
 
 router.post("/meal-plan/optimize", (req, res) => {
@@ -506,6 +568,107 @@ function makePersistentRecipeCache(): PersistentRecipeCache | null {
   }
 }
 
+function makeUserFeedbackStore(): UserFeedbackStore | null {
+  const dbPath = env.AI_STORE_DB_PATH || process.env.AI_STORE_DB_PATH || "data/ai-store.sqlite";
+  try {
+    return new UserFeedbackStore({ dbPath });
+  } catch (error) {
+    console.error("[user-feedback-store] failed to init", error);
+    return null;
+  }
+}
+
+async function buildSmartMealPlanResponse(
+  payload: SmartMealPlanRequest,
+  includeExternal: boolean,
+  options: {
+    includeRecommendationReasons?: boolean;
+    includeSubstitutions?: boolean;
+  } = {}
+) {
+  let pool = recipeIndex.all();
+  if (includeExternal) {
+    const external = await searchExternalRecipes({
+      query: payload.ingredientKeywords.join(" "),
+      ingredients: payload.ingredientKeywords,
+      cuisine: payload.cuisine?.[0],
+      maxCalories: payload.targets.kcal,
+      limit: 40
+    });
+    pool = dedupeRecipes([...pool, ...external.recipes]);
+  }
+
+  const objective = payload.objective ?? "cost_macro";
+  const optimizerProfile = payload.optimizerProfile ?? "balanced";
+  const plan = generateMealPlan(pool, payload, new Date(), {
+    objective,
+    optimizerProfile,
+    macroTolerancePercent: payload.macroTolerancePercent,
+    ingredientPriceHints: payload.ingredientPriceHints
+  });
+
+  const estimate = await estimateIngredientsPrice({
+    ingredients: plan.shoppingList,
+    hints: payload.ingredientPriceHints ?? [],
+    region: "RU",
+    currency: "RUB"
+  });
+
+  const substitutions = options.includeSubstitutions
+    ? suggestIngredientSubstitutions(plan.shoppingList)
+    : [];
+  const estimatedSavingsRub = substitutions
+    .map((item) => item.estimatedSavingsRub ?? 0)
+    .reduce((sum, value) => sum + value, 0);
+  const recommendationReasons = options.includeRecommendationReasons
+    ? plan.days
+      .flatMap((day) => day.entries)
+      .map((entry) => ({
+        recipeId: entry.recipe.id,
+        reasons: buildRecommendationReasons({
+          recipe: entry.recipe,
+          scoreBreakdown: {
+            nutritionFit: entry.kcal > 0 ? clamp(1 - Math.abs((payload.targets.kcal ?? entry.kcal) - entry.kcal) / Math.max(payload.targets.kcal ?? entry.kcal, 1), 0, 1) : 0.5,
+            budgetFit: payload.budget?.perMeal
+              ? clamp(1 - entry.estimatedCost / Math.max(payload.budget.perMeal, 1), 0, 1)
+              : 0.5,
+            availabilityFit: overlap(entry.recipe.ingredients, payload.ingredientKeywords),
+            prepTimeFit: payload.maxPrepTime
+              ? clamp(1 - Math.max((entry.recipe.times?.totalMinutes ?? 0) - payload.maxPrepTime, 0) / Math.max(payload.maxPrepTime, 1), 0, 1)
+              : 0.5,
+            personalTasteFit: 0.5,
+            cuisineFit: payload.cuisine?.includes(entry.recipe.cuisine ?? "") ? 1 : 0.45
+          },
+          maxReasons: 3
+        })
+      }))
+    : [];
+
+  return {
+    ...plan,
+    estimatedSavingsRub,
+    ingredientSubstitutions: substitutions,
+    recommendationReasons,
+    objective,
+    optimizerProfile,
+    costConfidence: estimate.confidence,
+    priceExplanation: [
+      `Оценка построена для региона RU, валюта RUB.`,
+      `Уверенность по цене: ${(estimate.confidence * 100).toFixed(0)}%.`,
+      `Профиль оптимизации: ${optimizerProfile}.`,
+      plan.optimization
+        ? `Оптимизатор: среднее отклонение КБЖУ ${(plan.optimization.averageMacroDeviation * 100).toFixed(0)}%, средняя цена приёма пищи ${plan.optimization.averageMealCost.toFixed(0)} ₽.`
+        : "Оптимизатор: базовый режим.",
+      substitutions.length > 0
+        ? `Найдено замен по цене/наличию: ${substitutions.length}.`
+        : "Замен по цене/наличию не найдено.",
+      estimate.missingIngredients.length > 0
+        ? `Без ценовых подсказок осталось: ${estimate.missingIngredients.slice(0, 5).join(", ")}`
+        : "Все ингредиенты оценены по локальным источникам."
+    ]
+  };
+}
+
 function normalizeMealPlanPayload(body: unknown): MealPlanRequest | null {
   if (!isRecord(body)) {
     return null;
@@ -567,6 +730,7 @@ function normalizeSmartMealPlanPayload(body: unknown): SmartMealPlanRequest | nu
   return {
     ...base,
     objective: toOptionalString(body.objective) === "balanced" ? "balanced" : "cost_macro",
+    optimizerProfile: normalizeOptimizerProfile(body.optimizerProfile),
     macroTolerancePercent: toOptionalNumber(body.macroTolerancePercent),
     ingredientPriceHints: normalizeIngredientPriceHints(body.ingredientPriceHints)
   };
@@ -723,6 +887,18 @@ function normalizeIngredientPriceHints(value: unknown): SmartMealPlanRequest["in
   return items.length > 0 ? items : undefined;
 }
 
+function normalizeOptimizerProfile(value: unknown): SmartMealPlanRequest["optimizerProfile"] {
+  const profile = toOptionalString(value);
+  switch (profile) {
+    case "economy_aggressive":
+    case "balanced":
+    case "macro_precision":
+      return profile;
+    default:
+      return "balanced";
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -742,6 +918,24 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   return fallback;
 }
 
+function clamp(value: number, minValue: number, maxValue: number): number {
+  return Math.min(Math.max(value, minValue), maxValue);
+}
+
+function overlap(left: string[], right: string[]): number {
+  if (left.length === 0 || right.length === 0) {
+    return 0;
+  }
+  const rightSet = new Set(right.map((item) => item.trim().toLowerCase()).filter(Boolean));
+  let matches = 0;
+  for (const item of left) {
+    if (rightSet.has(item.trim().toLowerCase())) {
+      matches += 1;
+    }
+  }
+  return matches / Math.max(left.length, 1);
+}
+
 function dedupeRecipes(items: Recipe[]): Recipe[] {
   const byId = new Map<string, Recipe>();
   for (const item of items) {
@@ -749,3 +943,10 @@ function dedupeRecipes(items: Recipe[]): Recipe[] {
   }
   return Array.from(byId.values());
 }
+
+export const __routeInternals = {
+  normalizeMealPlanPayload,
+  normalizeSmartMealPlanPayload,
+  normalizePriceEstimatePayload,
+  normalizeRecommendPayload
+};

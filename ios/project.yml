@@ -21,6 +21,43 @@ packages:
     from: 12.8.0
 
 targets:
+  InventoryCore:
+    type: framework
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Models
+      - path: Persistence
+      - path: Repositories
+      - path: Services
+      - path: Shared
+      - path: UseCases
+    dependencies:
+      - package: GRDB
+        product: GRDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.projectvay.inventorycore
+        PRODUCT_NAME: InventoryCore
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+
+  InventoryCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: Tests/InventoryCoreTests
+    dependencies:
+      - target: InventoryCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.projectvay.inventorycore.tests
+        PRODUCT_NAME: InventoryCoreTests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+
   InventoryAI:
     type: application
     platform: iOS
@@ -74,3 +111,20 @@ targets:
           CODE_SIGN_ENTITLEMENTS: App/InventoryAI.entitlements
         Release:
           CODE_SIGN_ENTITLEMENTS: App/InventoryAI.entitlements
+
+schemes:
+  InventoryAI:
+    build:
+      targets:
+        InventoryAI: all
+    test:
+      targets:
+        - InventoryCoreTests
+
+  InventoryCore:
+    build:
+      targets:
+        InventoryCore: all
+    test:
+      targets:
+        - InventoryCoreTests

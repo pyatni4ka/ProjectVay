@@ -14,6 +14,7 @@ struct AppConfig {
     let enableGoUPC: Bool
     let allowInsecureLookupEndpoints: Bool
     let recipeServiceBaseURL: URL?
+    let localRecipeDatasetPath: String?
     let allowInsecureRecipeServiceURL: Bool
     let eanDBApiKey: String?
     let rfLookupBaseURL: URL?
@@ -99,6 +100,10 @@ struct AppConfig {
             allowInsecure: allowInsecureRecipeServiceURL
         )
 
+        let localRecipeDatasetPath = nonEmpty(
+            env["LOCAL_RECIPE_DATASET_PATH"] ?? stringValue(info["LocalRecipeDatasetPath"])
+        )
+
         let timeoutSeconds = doubleValue(
             env["LOOKUP_TIMEOUT_SECONDS"] ?? stringValue(info["LookupTimeoutSeconds"]),
             fallback: 3.0
@@ -148,6 +153,7 @@ struct AppConfig {
             enableGoUPC: enableGoUPC,
             allowInsecureLookupEndpoints: allowInsecureLookupEndpoints,
             recipeServiceBaseURL: recipeServiceBaseURL,
+            localRecipeDatasetPath: localRecipeDatasetPath,
             allowInsecureRecipeServiceURL: allowInsecureRecipeServiceURL,
             eanDBApiKey: eanDBApiKey,
             rfLookupBaseURL: rfLookupBaseURL,

@@ -198,6 +198,32 @@ enum AppMigrations {
                 """)
         }
 
+        migrator.registerMigration("v11_smart_optimizer_profile") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "smart_optimizer_profile", .text).notNull().defaults(to: "balanced")
+            }
+        }
+
+        migrator.registerMigration("v12_body_metrics_range") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "body_metrics_range_mode", .text).notNull().defaults(to: "lastMonths")
+                table.add(column: "body_metrics_range_months", .integer).notNull().defaults(to: 12)
+                table.add(column: "body_metrics_range_year", .integer)
+            }
+        }
+
+        migrator.registerMigration("v13_ai_settings_and_price_index") { db in
+            try db.create(index: "idx_price_entries_date", on: "price_entries", columns: ["date"])
+
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "ai_personalization_enabled", .boolean).notNull().defaults(to: true)
+                table.add(column: "ai_cloud_assist_enabled", .boolean).notNull().defaults(to: true)
+                table.add(column: "ai_ru_only_storage", .boolean).notNull().defaults(to: true)
+                table.add(column: "ai_data_consent_accepted_at", .datetime)
+                table.add(column: "ai_data_collection_mode", .text).notNull().defaults(to: "maximal")
+            }
+        }
+
         return migrator
     }
 }

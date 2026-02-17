@@ -25,3 +25,6 @@ legacy/
 
 # Local external barcode datasets
 ios/DataSources/External/
+
+.qwen/
+gha-creds-*.json

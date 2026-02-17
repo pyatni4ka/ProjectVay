@@ -5,7 +5,8 @@ import type {
   Season, 
   DietType,
   MealType,
-  Nutrition 
+  Nutrition,
+  UserTasteProfile
 } from "../types/contracts.js";
 import { nutritionFit, overlapScore } from "../utils/normalize.js";
 
@@ -14,6 +15,12 @@ export type RankedRecipe = {
   score: number;
   scoreBreakdown: Record<string, number>;
   matchedFilters: string[];
+};
+
+export type RankedRecipeV2 = {
+  recipe: Recipe;
+  score: number;
+  scoreBreakdown: Record<string, number>;
 };
 
 const DIET_WEIGHT = 0.12;
@@ -279,4 +286,124 @@ export function calculateDiversityScore(recipes: Recipe[]): number {
   
   const uniqueRatio = (cuisines.size + mealTypes.size) / (recipes.length * 2);
   return Math.min(1, uniqueRatio);
+}
+
+export function rankRecipesV2(
+  candidates: Recipe[],
+  payload: RecommendPayload,
+  context: { tasteProfile?: UserTasteProfile | null } = {}
+): RankedRecipeV2[] {
+  const limit = payload.limit ?? 30;
+  const baseRanked = rankRecipes(candidates, { ...payload, limit: Math.max(limit * 3, 60) });
+  const tasteProfile = context.tasteProfile ?? null;
+
+  return baseRanked
+    .map((item) => {
+      const recipe = item.recipe;
+      const nutritionFitScore = clamp(item.scoreBreakdown.nutrition ?? 0.5, 0, 1);
+      const budgetFitScore = clamp(item.scoreBreakdown.budget ?? 0.5, 0, 1);
+      const availabilityFitScore = clamp(
+        calculateAvailabilityFit(recipe.ingredients, payload.ingredientKeywords),
+        0,
+        1
+      );
+      const prepTimeFitScore = clamp(
+        calculatePrepTimeFit(recipe, payload.maxPrepTime),
+        0,
+        1
+      );
+      const cuisineFitScore = clamp(
+        calculateCuisineFit(recipe, payload.cuisine),
+        0,
+        1
+      );
+      const personalTasteFitScore = clamp(
+        calculatePersonalTasteFit(recipe, tasteProfile),
+        0,
+        1
+      );
+      const repetitionPenalty = payload.excludeRecentRecipes?.includes(recipe.id) ? 1 : 0;
+
+      const score =
+        0.35 * nutritionFitScore +
+        0.14 * budgetFitScore +
+        0.16 * availabilityFitScore +
+        0.10 * prepTimeFitScore +
+        0.08 * cuisineFitScore +
+        0.17 * personalTasteFitScore -
+        0.12 * repetitionPenalty +
+        0.10 * clamp(item.score, 0, 1.6);
+
+      return {
+        recipe,
+        score: Math.max(0, score),
+        scoreBreakdown: {
+          nutritionFit: nutritionFitScore,
+          budgetFit: budgetFitScore,
+          availabilityFit: availabilityFitScore,
+          prepTimeFit: prepTimeFitScore,
+          cuisineFit: cuisineFitScore,
+          personalTasteFit: personalTasteFitScore,
+          repetitionPenalty,
+          legacyRankBoost: clamp(item.score, 0, 1.6)
+        }
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+function calculateAvailabilityFit(ingredients: string[], inStockKeywords: string[]): number {
+  if (ingredients.length === 0 || inStockKeywords.length === 0) {
+    return 0.45;
+  }
+  return overlapScore(ingredients, inStockKeywords);
+}
+
+function calculatePrepTimeFit(recipe: Recipe, maxPrepTime?: number): number {
+  if (!maxPrepTime || maxPrepTime <= 0) {
+    return 0.55;
+  }
+  const totalMinutes = recipe.times?.totalMinutes ?? estimateCookTime(recipe);
+  return clamp(1 - (Math.max(totalMinutes - maxPrepTime, 0) / Math.max(maxPrepTime, 1)), 0, 1);
+}
+
+function calculateCuisineFit(recipe: Recipe, preferredCuisines?: string[]): number {
+  if (!preferredCuisines || preferredCuisines.length === 0) {
+    return 0.5;
+  }
+  if (!recipe.cuisine) {
+    return 0.35;
+  }
+  const normalized = recipe.cuisine.toLowerCase();
+  return preferredCuisines.some((item) => item.toLowerCase() === normalized) ? 1 : 0.25;
+}
+
+function calculatePersonalTasteFit(recipe: Recipe, profile: UserTasteProfile | null): number {
+  if (!profile || profile.totalEvents <= 0) {
+    return 0.5;
+  }
+
+  if (profile.dislikedRecipeIds.includes(recipe.id)) {
+    return 0;
+  }
+
+  const ingredientSet = new Set(recipe.ingredients.map((item) => item.toLowerCase()));
+  const ingredientMatches = profile.topIngredients.filter((item) => ingredientSet.has(item.toLowerCase())).length;
+  const ingredientScore = profile.topIngredients.length > 0
+    ? ingredientMatches / profile.topIngredients.length
+    : 0.4;
+
+  const cuisineScore = recipe.cuisine && profile.topCuisines.length > 0
+    ? (profile.topCuisines.map((item) => item.toLowerCase()).includes(recipe.cuisine.toLowerCase()) ? 1 : 0.35)
+    : 0.45;
+
+  const mealTypeSet = new Set(recipe.mealTypes ?? []);
+  const mealTypeMatches = profile.preferredMealTypes.filter((item) => mealTypeSet.has(item)).length;
+  const mealTypeScore = profile.preferredMealTypes.length > 0
+    ? mealTypeMatches / profile.preferredMealTypes.length
+    : 0.4;
+
+  const weighted = 0.45 * ingredientScore + 0.35 * cuisineScore + 0.2 * mealTypeScore;
+  return clamp(weighted * profile.confidence + 0.35 * (1 - profile.confidence), 0, 1);
 }

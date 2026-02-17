@@ -1,5 +1,8 @@
 import Charts
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct BodyMetricsView: View {
     let settingsService: any SettingsServiceProtocol
@@ -8,7 +11,6 @@ struct BodyMetricsView: View {
 
     @State private var settings: AppSettings = .default
     @State private var isHydratingSettings = false
-    @State private var autoSaveTask: Task<Void, Never>?
 
     @State private var isLoading = true
     @State private var metrics = HealthKitService.UserMetrics(
@@ -25,9 +27,16 @@ struct BodyMetricsView: View {
     @State private var bodyFatHistory: [HealthKitService.SamplePoint] = []
     @State private var healthStatusMessage: String?
     @State private var isRequestingHealthAccess = false
-    @State private var healthReadAccessStatus: HealthKitService.ReadAuthorizationRequestStatus = .unknown
+    @State private var healthReadAccessState: HealthKitService.ReadAccessState = .unavailable
 
     @State private var desiredWeightText = ""
+    @State private var isEditingDesiredWeight = false
+    @State private var selectedWeightDate: Date?
+    @State private var selectedBodyFatDate: Date?
+    @State private var chartRangeMode: AppSettings.BodyMetricsRangeMode = .lastMonths
+    @State private var chartRangeMonths = 12
+    @State private var chartRangeYear = Calendar.current.component(.year, from: Date())
+    @State private var isHydratingChartRange = false
 
     var body: some View {
         ScrollView {
@@ -35,19 +44,26 @@ struct BodyMetricsView: View {
                 desiredWeightCard
                 healthOverviewCard
                 todayNutritionCard
+                chartRangeCard
                 chartCard(
                     title: "Вес (доступные данные)",
                     icon: "scalemass.fill",
-                    points: weightHistory,
+                    points: filteredWeightHistory,
                     valueSuffix: "кг",
-                    lineColor: .vayPrimary
+                    lineColor: .vayPrimary,
+                    metricKind: .weightKg,
+                    hasRawData: !weightHistory.isEmpty,
+                    selectedDate: $selectedWeightDate
                 )
                 chartCard(
                     title: "Жир (доступные данные)",
                     icon: "drop.fill",
-                    points: bodyFatHistory,
+                    points: filteredBodyFatHistory,
                     valueSuffix: "%",
-                    lineColor: .vaySecondary
+                    lineColor: .vaySecondary,
+                    metricKind: .bodyFatPercent,
+                    hasRawData: !bodyFatHistory.isEmpty,
+                    selectedDate: $selectedBodyFatDate
                 )
 
                 if let healthStatusMessage {
@@ -61,6 +77,7 @@ struct BodyMetricsView: View {
             .padding(.bottom, VaySpacing.huge)
         }
         .background(Color.vayBackground)
+        .scrollDismissesKeyboard(.interactively)
         .dismissKeyboardOnTap()
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: VayLayout.tabBarOverlayInset)
@@ -71,22 +88,32 @@ struct BodyMetricsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .appSettingsDidChange)) { notification in
             guard let updated = notification.object as? AppSettings else { return }
-            let previous = settings
-            settings = updated
-            desiredWeightText = formatDesiredWeight(updated.weightGoalKg)
-            Task {
-                await recalculateAutoGoalNutrition(for: updated)
-                if shouldReloadHealthData(previous: previous, next: updated) {
-                    await loadHealthData()
-                }
-            }
+            handleSettingsUpdate(updated)
         }
-        .onChange(of: desiredWeightText) { _, _ in
-            scheduleAutoSave()
+        .onChange(of: appSettingsStore.settings) { _, updated in
+            handleSettingsUpdate(updated)
+        }
+        .onChange(of: chartRangeMode) { _, _ in
+            guard !isHydratingSettings, !isHydratingChartRange else { return }
+            selectedWeightDate = nil
+            selectedBodyFatDate = nil
+            Task { await saveChartRangeIfNeeded() }
+        }
+        .onChange(of: chartRangeMonths) { _, _ in
+            guard !isHydratingSettings, !isHydratingChartRange else { return }
+            selectedWeightDate = nil
+            selectedBodyFatDate = nil
+            Task { await saveChartRangeIfNeeded() }
+        }
+        .onChange(of: chartRangeYear) { _, _ in
+            guard !isHydratingSettings, !isHydratingChartRange else { return }
+            selectedWeightDate = nil
+            selectedBodyFatDate = nil
+            Task { await saveChartRangeIfNeeded() }
         }
         .onDisappear {
-            autoSaveTask?.cancel()
-            Task { await saveDesiredWeightIfValid() }
+            guard isEditingDesiredWeight else { return }
+            Task { _ = await saveDesiredWeightIfValid() }
         }
     }
 
@@ -95,19 +122,71 @@ struct BodyMetricsView: View {
             HStack {
                 sectionHeader(icon: "target", title: "Желаемый вес")
                 Spacer()
+                if isEditingDesiredWeight {
+                    Button("Отмена") {
+                        cancelDesiredWeightEditing()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.vayPrimary)
+                    .font(VayFont.label(13))
+                } else {
+                    Button("Изменить") {
+                        beginDesiredWeightEditing()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.vayPrimary)
+                    .font(VayFont.label(13))
+                }
             }
 
-            HStack(spacing: VaySpacing.sm) {
-                TextField("кг", text: $desiredWeightText)
-                    .keyboardType(.decimalPad)
-                    .font(VayFont.title(24))
-                Text("кг")
-                    .font(VayFont.label(14))
-                    .foregroundStyle(.secondary)
+            if isEditingDesiredWeight {
+                HStack(spacing: VaySpacing.sm) {
+                    TextField("кг", text: $desiredWeightText)
+                        .keyboardType(.decimalPad)
+                        .font(VayFont.title(24))
+                    Text("кг")
+                        .font(VayFont.label(14))
+                        .foregroundStyle(.secondary)
+                }
+
+                let parsed = parseDesiredWeight()
+                if !parsed.valid {
+                    Text("Введите корректный вес от 0 до 500 кг.")
+                        .font(VayFont.caption(12))
+                        .foregroundStyle(Color.vayWarning)
+                }
+
+                HStack(spacing: VaySpacing.sm) {
+                    Button("Сохранить") {
+                        Task { _ = await saveDesiredWeightIfValid() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.vayPrimary)
+
+                    Button("Очистить") {
+                        Task { await clearDesiredWeight() }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.vayPrimary)
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: VaySpacing.xs) {
+                    if let goal = settings.weightGoalKg {
+                        Text(metricText(goal, digits: 1))
+                            .font(VayFont.title(24))
+                        Text("кг")
+                            .font(VayFont.label(14))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Не задан")
+                            .font(VayFont.title(24))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             if let currentWeight = metrics.weightKG {
-                let delta = currentWeight - (parseDesiredWeight().value ?? currentWeight)
+                let delta = currentWeight - (resolvedDesiredWeightForDelta ?? currentWeight)
                 Text("Текущий вес: \(metricText(currentWeight, digits: 1)) кг · Дельта до цели: \(signedText(delta, digits: 1)) кг")
                     .font(VayFont.caption(12))
                     .foregroundStyle(.secondary)
@@ -146,7 +225,7 @@ struct BodyMetricsView: View {
                         .font(VayFont.body(14))
                         .foregroundStyle(.secondary)
 
-                    if shouldShowHealthAccessButton {
+                    if shouldShowHealthRequestButton {
                         Button {
                             Task { await requestHealthAccess() }
                         } label: {
@@ -164,6 +243,17 @@ struct BodyMetricsView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(Color.vayPrimary)
                         .disabled(isRequestingHealthAccess)
+                    }
+
+                    if shouldShowOpenSettingsButton {
+                        Button {
+                            openSystemSettings()
+                        } label: {
+                            Label("Открыть настройки iOS", systemImage: "gearshape")
+                                .font(VayFont.label(13))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Color.vayPrimary)
                     }
 
                     if let healthStatusMessage {
@@ -211,21 +301,119 @@ struct BodyMetricsView: View {
         .vayCard()
     }
 
+    private var chartRangeCard: some View {
+        VStack(alignment: .leading, spacing: VaySpacing.md) {
+            sectionHeader(icon: "calendar", title: "Период графиков")
+
+            Picker("Режим периода", selection: $chartRangeMode) {
+                ForEach(AppSettings.BodyMetricsRangeMode.allCases, id: \.rawValue) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            switch chartRangeMode {
+            case .lastMonths:
+                Stepper(value: $chartRangeMonths, in: 1...60) {
+                    Text("Последние \(chartRangeMonths) мес.")
+                        .font(VayFont.body(14))
+                }
+            case .year, .sinceYear:
+                Picker("Год", selection: $chartRangeYear) {
+                    ForEach(availableChartYears, id: \.self) { year in
+                        Text("\(year)").tag(year)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(Color.vayPrimary)
+            }
+
+            Text(activeChartRange.fullLabel)
+                .font(VayFont.caption(12))
+                .foregroundStyle(.secondary)
+        }
+        .vayCard()
+    }
+
+    private struct ChartDisplayPoint: Identifiable {
+        var id: Date { date }
+        let date: Date
+        let originalValue: Double
+        let plottedValue: Double
+        let isLowerOutlier: Bool
+        let isUpperOutlier: Bool
+
+        var hasOutlier: Bool {
+            isLowerOutlier || isUpperOutlier
+        }
+    }
+
+    private var activeChartRange: BodyMetricsTimeRange {
+        BodyMetricsTimeRange(
+            mode: chartRangeMode,
+            months: chartRangeMonths,
+            year: chartRangeYear
+        )
+    }
+
+    private var filteredWeightHistory: [HealthKitService.SamplePoint] {
+        activeChartRange.filter(points: weightHistory)
+    }
+
+    private var filteredBodyFatHistory: [HealthKitService.SamplePoint] {
+        activeChartRange.filter(points: bodyFatHistory)
+    }
+
+    private var availableChartYears: [Int] {
+        BodyMetricsTimeRange.availableYears(
+            from: [weightHistory, bodyFatHistory],
+            selectedYear: chartRangeYear
+        )
+    }
+
     private func chartCard(
         title: String,
         icon: String,
         points: [HealthKitService.SamplePoint],
         valueSuffix: String,
-        lineColor: Color
+        lineColor: Color,
+        metricKind: DynamicChartMetricKind,
+        hasRawData: Bool,
+        selectedDate: Binding<Date?>
     ) -> some View {
-        VStack(alignment: .leading, spacing: VaySpacing.md) {
+        let scale = DynamicChartScaleDomain.resolve(
+            values: points.map(\.value),
+            metric: metricKind
+        )
+        let displayedPoints = chartDisplayPoints(points: points, scale: scale)
+        let selectedPoint = selectedChartPoint(
+            points: displayedPoints,
+            selectedDate: selectedDate.wrappedValue
+        )
+
+        return VStack(alignment: .leading, spacing: VaySpacing.md) {
             sectionHeader(icon: icon, title: title)
 
-            if points.count >= 2 {
-                Chart(points) { point in
+            if let selectedPoint {
+                Text(
+                    "Выбрано: \(metricText(selectedPoint.originalValue, digits: 1)) \(valueSuffix) · \(chartSelectionDateText(selectedPoint.date))"
+                    + (selectedPoint.hasOutlier ? " · выброс" : "")
+                )
+                .font(VayFont.caption(12))
+                .foregroundStyle(.secondary)
+            } else if let latestPoint = displayedPoints.last {
+                Text(
+                    "Последнее: \(metricText(latestPoint.originalValue, digits: 1)) \(valueSuffix) · \(chartSelectionDateText(latestPoint.date))"
+                )
+                .font(VayFont.caption(12))
+                .foregroundStyle(.secondary)
+            }
+
+            if displayedPoints.count >= 2 {
+                let baseChart = Chart(displayedPoints) { point in
                     LineMark(
                         x: .value("Дата", point.date),
-                        y: .value("Значение", point.value)
+                        y: .value("Значение", point.plottedValue)
                     )
                     .foregroundStyle(lineColor)
                     .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
@@ -233,7 +421,7 @@ struct BodyMetricsView: View {
 
                     AreaMark(
                         x: .value("Дата", point.date),
-                        y: .value("Значение", point.value)
+                        y: .value("Значение", point.plottedValue)
                     )
                     .foregroundStyle(
                         LinearGradient(
@@ -243,7 +431,46 @@ struct BodyMetricsView: View {
                         )
                     )
                     .interpolationMethod(.catmullRom)
+
+                    if point.hasOutlier {
+                        PointMark(
+                            x: .value("Дата", point.date),
+                            y: .value("Значение", point.plottedValue)
+                        )
+                        .foregroundStyle(lineColor)
+                        .symbolSize(52)
+                        .annotation(position: point.isUpperOutlier ? .top : .bottom, alignment: .center) {
+                            Image(systemName: point.isUpperOutlier ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                                .font(VayFont.caption(9))
+                                .foregroundStyle(lineColor)
+                        }
+                    }
+
+                    if let selectedPoint, selectedPoint.date == point.date {
+                        RuleMark(x: .value("Выбор", point.date))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(lineColor.opacity(0.55))
+
+                        PointMark(
+                            x: .value("Дата", point.date),
+                            y: .value("Значение", point.plottedValue)
+                        )
+                        .foregroundStyle(.white)
+                        .symbolSize(86)
+
+                        PointMark(
+                            x: .value("Дата", point.date),
+                            y: .value("Значение", point.plottedValue)
+                        )
+                        .foregroundStyle(lineColor)
+                        .symbolSize(38)
+                    }
                 }
+                applyScale(
+                    to: baseChart,
+                    scale: scale,
+                    valueSuffix: valueSuffix
+                )
                 .frame(height: 140)
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 4)) { _ in
@@ -251,19 +478,28 @@ struct BodyMetricsView: View {
                             .font(VayFont.caption(9))
                     }
                 }
-                .chartYAxis {
-                    AxisMarks(position: .leading) { value in
-                        AxisValueLabel {
-                            if let axisValue = value.as(Double.self) {
-                                Text("\(axisValue.formatted(.number.precision(.fractionLength(0...1)))) \(valueSuffix)")
-                            }
-                        }
-                        .font(VayFont.caption(9))
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        Rectangle()
+                            .fill(.clear)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        updateSelectionDate(
+                                            location: value.location,
+                                            proxy: proxy,
+                                            geometry: geometry,
+                                            points: displayedPoints,
+                                            selection: selectedDate
+                                        )
+                                    }
+                            )
                     }
                 }
-            } else if let point = points.last {
+            } else if let point = displayedPoints.last {
                 VStack(alignment: .leading, spacing: VaySpacing.xs) {
-                    Text("\(point.value.formatted(.number.precision(.fractionLength(0...1)))) \(valueSuffix)")
+                    Text("\(point.originalValue.formatted(.number.precision(.fractionLength(0...1)))) \(valueSuffix)")
                         .font(VayFont.title(24))
                         .foregroundStyle(lineColor)
                     Text(point.date.formatted(.dateTime.day().month(.abbreviated).year()))
@@ -272,7 +508,7 @@ struct BodyMetricsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Text("Недостаточно данных для графика.")
+                Text(hasRawData ? "Нет данных за выбранный период." : "Недостаточно данных для графика.")
                     .font(VayFont.body(14))
                     .foregroundStyle(.secondary)
             }
@@ -322,10 +558,8 @@ struct BodyMetricsView: View {
     }
 
     private func loadInitialData() async {
-        await refreshHealthReadAccessStatus()
         await loadSettings()
         await loadHealthData()
-        await recalculateAutoGoalNutrition(for: settings)
     }
 
     private func loadSettings() async {
@@ -334,8 +568,11 @@ struct BodyMetricsView: View {
 
         do {
             let loaded = try await settingsService.loadSettings()
-            settings = loaded
-            desiredWeightText = formatDesiredWeight(loaded.weightGoalKg)
+            settings = loaded.normalized()
+            applyChartRangeFromSettings(settings)
+            desiredWeightText = formatDesiredWeight(settings.weightGoalKg)
+            isEditingDesiredWeight = false
+            appSettingsStore.update(settings)
         } catch {
             healthStatusMessage = "Не удалось загрузить настройки: \(error.localizedDescription)"
         }
@@ -357,7 +594,10 @@ struct BodyMetricsView: View {
             todayNutrition = .empty
             weightHistory = []
             bodyFatHistory = []
+            selectedWeightDate = nil
+            selectedBodyFatDate = nil
             healthStatusMessage = "Чтение Apple Health отключено в настройках."
+            await refreshHealthReadAccessState(hasAnyData: false)
             await recalculateAutoGoalNutrition(for: settings)
             return
         }
@@ -392,6 +632,8 @@ struct BodyMetricsView: View {
         if bodyFatHistory.isEmpty, let latestBodyFat = metrics.bodyFatPercent {
             bodyFatHistory = [.init(date: Date(), value: latestBodyFat * 100)]
         }
+        selectedWeightDate = nil
+        selectedBodyFatDate = nil
 
         let hasMetricsData =
             metrics.heightCM != nil
@@ -423,6 +665,7 @@ struct BodyMetricsView: View {
             healthStatusMessage = diagnosis.message
         }
 
+        await refreshHealthReadAccessState(hasAnyData: hasAnyHealthData)
         await recalculateAutoGoalNutrition(for: settings)
     }
 
@@ -438,13 +681,14 @@ struct BodyMetricsView: View {
 
         do {
             let granted = try await healthKitService.requestReadAccess()
-            await refreshHealthReadAccessStatus()
             if granted {
                 var updated = settings
                 updated.healthKitReadEnabled = true
                 settings = try await settingsService.saveSettings(updated)
                 appSettingsStore.update(settings)
-                desiredWeightText = formatDesiredWeight(settings.weightGoalKg)
+                if !isEditingDesiredWeight {
+                    desiredWeightText = formatDesiredWeight(settings.weightGoalKg)
+                }
                 await loadHealthData()
                 await recalculateAutoGoalNutrition(for: settings)
                 healthStatusMessage = "Доступ к Apple Health предоставлен."
@@ -454,62 +698,268 @@ struct BodyMetricsView: View {
         } catch {
             healthStatusMessage = "Не удалось запросить доступ: \(error.localizedDescription)"
         }
+
+        await refreshHealthReadAccessState(hasAnyData: hasAnyHealthData)
     }
 
-    private var shouldShowHealthAccessButton: Bool {
+    private var shouldShowHealthRequestButton: Bool {
         guard !hasAnyHealthData else { return false }
-        return healthReadAccessStatus == .shouldRequest
+        return healthReadAccessState == .needsRequest
+    }
+
+    private var shouldShowOpenSettingsButton: Bool {
+        guard !hasAnyHealthData else { return false }
+        return healthReadAccessState == .denied
     }
 
     private var healthAccessInfoMessage: String? {
-        switch healthReadAccessStatus {
-        case .unnecessary:
-            return "Доступ к Apple Health уже настроен. Проверьте, что в приложении Здоровье есть данные веса и состава тела."
+        switch healthReadAccessState {
+        case .authorizedNoData:
+            return "Доступ к Apple Health уже настроен. Добавьте записи веса или процента жира в приложении Здоровье."
+        case .denied:
+            return "Доступ к Apple Health запрещён. Разрешите чтение веса и состава тела в настройках iOS."
         case .unavailable:
             return "Apple Health недоступен на этом устройстве."
-        case .unknown:
-            return "Статус доступа пока не определён. Откройте приложение Здоровье и проверьте разрешения."
-        case .shouldRequest:
+        case .readDisabled:
+            return "Чтение Apple Health отключено в настройках."
+        case .needsRequest, .authorizedWithData:
             return nil
         }
     }
 
-    private func refreshHealthReadAccessStatus() async {
-        healthReadAccessStatus = await healthKitService.readAccessRequestStatus()
+    private func refreshHealthReadAccessState(hasAnyData: Bool? = nil) async {
+        healthReadAccessState = await healthKitService.readAccessState(
+            readEnabledInSettings: settings.healthKitReadEnabled,
+            hasAnyData: hasAnyData
+        )
     }
 
-    private func scheduleAutoSave() {
-        guard !isHydratingSettings else { return }
+    private func handleSettingsUpdate(_ updated: AppSettings) {
+        let normalized = updated.normalized()
+        guard normalized != settings else { return }
+        let previous = settings
+        settings = normalized
+        applyChartRangeFromSettings(normalized)
+        if !isEditingDesiredWeight {
+            desiredWeightText = formatDesiredWeight(normalized.weightGoalKg)
+        }
 
-        autoSaveTask?.cancel()
-        autoSaveTask = Task {
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            await saveDesiredWeightIfValid()
+        Task {
+            if shouldReloadHealthData(previous: previous, next: normalized) {
+                await loadHealthData()
+            } else {
+                await refreshHealthReadAccessState(hasAnyData: hasAnyHealthData)
+                await recalculateAutoGoalNutrition(for: normalized)
+            }
         }
     }
 
-    private func saveDesiredWeightIfValid() async {
-        guard !isHydratingSettings else { return }
-        autoSaveTask?.cancel()
-        autoSaveTask = nil
+    private func applyChartRangeFromSettings(_ settings: AppSettings) {
+        let range = BodyMetricsTimeRange(settings: settings)
+        let needsUpdate =
+            chartRangeMode != range.mode
+            || chartRangeMonths != range.months
+            || chartRangeYear != range.year
+        guard needsUpdate else { return }
+
+        isHydratingChartRange = true
+        chartRangeMode = range.mode
+        chartRangeMonths = range.months
+        chartRangeYear = range.year
+        isHydratingChartRange = false
+    }
+
+    private func saveChartRangeIfNeeded() async {
+        guard !isHydratingSettings, !isHydratingChartRange else { return }
+
+        let range = BodyMetricsTimeRange(
+            mode: chartRangeMode,
+            months: chartRangeMonths,
+            year: chartRangeYear
+        )
+
+        if chartRangeMonths != range.months {
+            chartRangeMonths = range.months
+        }
+        if chartRangeYear != range.year {
+            chartRangeYear = range.year
+        }
+
+        var updated = settings
+        updated.bodyMetricsRangeMode = range.mode
+        updated.bodyMetricsRangeMonths = range.months
+        updated.bodyMetricsRangeYear = range.year
+
+        let noChanges =
+            updated.bodyMetricsRangeMode == settings.bodyMetricsRangeMode
+            && updated.bodyMetricsRangeMonths == settings.bodyMetricsRangeMonths
+            && updated.bodyMetricsRangeYear == settings.bodyMetricsRangeYear
+        guard !noChanges else { return }
+
+        do {
+            settings = try await settingsService.saveSettings(updated)
+            appSettingsStore.update(settings)
+            healthStatusMessage = nil
+        } catch {
+            applyChartRangeFromSettings(settings)
+            healthStatusMessage = "Не удалось сохранить период графиков: \(error.localizedDescription)"
+        }
+    }
+
+    private func openSystemSettings() {
+        #if canImport(UIKit)
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+        #endif
+    }
+
+    private var resolvedDesiredWeightForDelta: Double? {
+        if isEditingDesiredWeight {
+            return parseDesiredWeight().value ?? settings.weightGoalKg
+        }
+        return settings.weightGoalKg
+    }
+
+    private func beginDesiredWeightEditing() {
+        desiredWeightText = formatDesiredWeight(settings.weightGoalKg)
+        isEditingDesiredWeight = true
+    }
+
+    private func cancelDesiredWeightEditing() {
+        desiredWeightText = formatDesiredWeight(settings.weightGoalKg)
+        isEditingDesiredWeight = false
+    }
+
+    private func clearDesiredWeight() async {
+        desiredWeightText = ""
+        _ = await saveDesiredWeightIfValid()
+    }
+
+    @discardableResult
+    private func saveDesiredWeightIfValid() async -> Bool {
+        guard !isHydratingSettings else { return false }
         let parsed = parseDesiredWeight()
-        guard parsed.valid else { return }
+        guard parsed.valid else {
+            healthStatusMessage = "Введите корректный вес от 0 до 500 кг."
+            return false
+        }
 
         let previousWeightGoal = settings.weightGoalKg
+        if previousWeightGoal == parsed.value {
+            desiredWeightText = formatDesiredWeight(settings.weightGoalKg)
+            isEditingDesiredWeight = false
+            healthStatusMessage = nil
+            return true
+        }
+
         var updated = settings
         updated.weightGoalKg = parsed.value
 
         do {
             settings = try await settingsService.saveSettings(updated)
             appSettingsStore.update(settings)
+            desiredWeightText = formatDesiredWeight(settings.weightGoalKg)
+            isEditingDesiredWeight = false
             if previousWeightGoal != settings.weightGoalKg, settings.weightGoalKg != nil {
                 GamificationService.shared.trackBodyGoalSet()
             }
             healthStatusMessage = nil
+            return true
         } catch {
             healthStatusMessage = "Не удалось сохранить целевой вес: \(error.localizedDescription)"
+            return false
         }
+    }
+
+    @ViewBuilder
+    private func applyScale<ChartContent: View>(
+        to chart: ChartContent,
+        scale: DynamicChartScaleDomain?,
+        valueSuffix: String
+    ) -> some View {
+        if let scale {
+            chart
+                .chartYScale(domain: scale.domain)
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: .stride(by: scale.step)) { value in
+                        AxisValueLabel {
+                            if let axisValue = value.as(Double.self) {
+                                Text("\(axisValue.formatted(.number.precision(.fractionLength(0...1)))) \(valueSuffix)")
+                            }
+                        }
+                        .font(VayFont.caption(9))
+                    }
+                }
+        } else {
+            chart
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisValueLabel {
+                            if let axisValue = value.as(Double.self) {
+                                Text("\(axisValue.formatted(.number.precision(.fractionLength(0...1)))) \(valueSuffix)")
+                            }
+                        }
+                        .font(VayFont.caption(9))
+                    }
+                }
+        }
+    }
+
+    private func chartDisplayPoints(
+        points: [HealthKitService.SamplePoint],
+        scale: DynamicChartScaleDomain?
+    ) -> [ChartDisplayPoint] {
+        points.map { point in
+            ChartDisplayPoint(
+                date: point.date,
+                originalValue: point.value,
+                plottedValue: scale?.displayValue(for: point.value) ?? point.value,
+                isLowerOutlier: scale?.isLowerOutlier(point.value) ?? false,
+                isUpperOutlier: scale?.isUpperOutlier(point.value) ?? false
+            )
+        }
+    }
+
+    private func selectedChartPoint(points: [ChartDisplayPoint], selectedDate: Date?) -> ChartDisplayPoint? {
+        guard let selectedDate else { return nil }
+        return points.min {
+            abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate))
+        }
+    }
+
+    private func updateSelectionDate(
+        location: CGPoint,
+        proxy: ChartProxy,
+        geometry: GeometryProxy,
+        points: [ChartDisplayPoint],
+        selection: Binding<Date?>
+    ) {
+        guard !points.isEmpty, let plotFrame = proxy.plotFrame else { return }
+        let frame = geometry[plotFrame]
+        guard frame.contains(location) else { return }
+
+        let xPosition = location.x - frame.origin.x
+        guard let resolvedDate: Date = proxy.value(atX: xPosition) else { return }
+
+        guard let nearestPoint = points.min(by: {
+            abs($0.date.timeIntervalSince(resolvedDate)) < abs($1.date.timeIntervalSince(resolvedDate))
+        }) else {
+            return
+        }
+
+        if selection.wrappedValue != nearestPoint.date {
+            selection.wrappedValue = nearestPoint.date
+        }
+    }
+
+    private func chartSelectionDateText(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let currentYear = calendar.component(.year, from: Date())
+        let valueYear = calendar.component(.year, from: date)
+        if currentYear == valueYear {
+            return date.formatted(.dateTime.day().month(.abbreviated))
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated).year())
     }
 
     private func recalculateAutoGoalNutrition(for settings: AppSettings) async {

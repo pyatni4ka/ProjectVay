@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Recipe, RecipeParseResponse } from "../types/contracts.js";
-import { normalizeIngredients } from "./ingredientNormalizer.js";
+import { normalizeIngredients as normalizeIngredientList } from "./ingredientNormalizer.js";
 import { buildRecipeQualityReport } from "./recipeQuality.js";
 
 export class RecipeScraperError extends Error {
@@ -99,7 +99,7 @@ export function parseRecipeFromHTMLDetailed(url: string, html: string): RecipePa
     throw new RecipeScraperError("Recipe has no image", "missing_image");
   }
 
-  const ingredients = normalizeIngredients(recipeNode.recipeIngredient);
+  const ingredients = parseRawIngredients(recipeNode.recipeIngredient);
   if (ingredients.length === 0) {
     throw new RecipeScraperError("Recipe has no ingredients", "missing_ingredients");
   }
@@ -128,7 +128,7 @@ export function parseRecipeFromHTMLDetailed(url: string, html: string): RecipePa
     tags: normalizeTags(recipeNode.keywords, recipeNode.recipeCuisine, recipeNode.recipeCategory)
   };
 
-  const normalized = normalizeIngredients(recipe.ingredients);
+  const normalized = normalizeIngredientList(recipe.ingredients);
   const quality = buildRecipeQualityReport(recipe);
   const diagnostics: string[] = [];
   if (quality.missingFields.length > 0) {
@@ -254,7 +254,7 @@ function extractImageURL(value: unknown): string | null {
   return null;
 }
 
-function normalizeIngredients(value: unknown): string[] {
+function parseRawIngredients(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value
       .map((item) => (typeof item === "string" ? item.trim() : ""))

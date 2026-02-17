@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import Nuke
 
 struct AppDependencies {
     let inventoryService: InventoryService
@@ -8,8 +9,11 @@ struct AppDependencies {
     let scannerService: ScannerService
     let barcodeLookupService: BarcodeLookupService
     let recipeServiceClient: RecipeServiceClient?
+    private static var didConfigureImagePipeline = false
 
     static func makeLive() throws -> AppDependencies {
+        configureImagePipelineIfNeeded()
+
         let config = AppConfig.live()
         let dbQueue = try AppDatabase.makeDatabaseQueue()
         let inventoryRepository = InventoryRepository(dbQueue: dbQueue)
@@ -72,8 +76,9 @@ struct AppDependencies {
         let resolvedRecipeServiceBaseURL = config.recipeServiceBaseURL
         syncGlobalAppearanceSettings(persistedSettings)
 
+        let localRecipeCatalog = LocalRecipeCatalog(datasetPathOverride: config.localRecipeDatasetPath)
         let recipeServiceClient = resolvedRecipeServiceBaseURL.map {
-            RecipeServiceClient(baseURL: $0)
+            RecipeServiceClient(baseURL: $0, localCatalog: localRecipeCatalog)
         }
 
         return AppDependencies(
@@ -93,5 +98,28 @@ struct AppDependencies {
         defaults.set(settings.motionLevel.rawValue, forKey: "motionLevel")
         defaults.set(settings.hapticsEnabled, forKey: "hapticsEnabled")
         defaults.set(settings.showHealthCardOnHome, forKey: "showHealthCardOnHome")
+    }
+
+    private static func configureImagePipelineIfNeeded() {
+        guard !didConfigureImagePipeline else { return }
+        didConfigureImagePipeline = true
+
+        let configuration = URLSessionConfiguration.default
+        configuration.requestCachePolicy = .returnCacheDataElseLoad
+        configuration.urlCache = URLCache(
+            memoryCapacity: 64 * 1024 * 1024,
+            diskCapacity: 512 * 1024 * 1024,
+            diskPath: "com.projectvay.inventoryai.urlcache"
+        )
+
+        let dataLoader = DataLoader(configuration: configuration)
+        let dataCache = try? DataCache(name: "com.projectvay.inventoryai.nuke")
+        ImagePipeline.shared = ImagePipeline {
+            $0.dataLoader = dataLoader
+            $0.imageCache = ImageCache.shared
+            $0.dataCache = dataCache
+            $0.isTaskCoalescingEnabled = true
+            $0.isRateLimiterEnabled = true
+        }
     }
 }

@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rankRecipes } from "../src/services/recommendation.js";
+import { rankRecipes, rankRecipesV2 } from "../src/services/recommendation.js";
 import { mockRecipes } from "../src/data/mockRecipes.js";
+import { buildTasteProfileFromEvents } from "../src/services/personalizationModel.js";
+import { buildRecommendationReasons } from "../src/services/recommendationExplanation.js";
 import type { Recipe } from "../src/types/contracts.js";
 
 test("rankRecipes penalizes disliked ingredients", () => {
@@ -97,4 +99,68 @@ test("rankRecipes applies strict nutrition filter when enabled", () => {
   });
 
   assert.deepEqual(ranked.map((item) => item.recipe.id), ["strict_match"]);
+});
+
+test("rankRecipesV2 boosts user taste profile matches", () => {
+  const candidates: Recipe[] = [
+    {
+      id: "fav_recipe",
+      title: "Курица с рисом",
+      imageURL: "https://images.example/fav.jpg",
+      sourceName: "example.ru",
+      sourceURL: "https://example.ru/fav",
+      ingredients: ["курица", "рис", "лук"],
+      instructions: ["Приготовить"],
+      cuisine: "Домашняя",
+      mealTypes: ["lunch"],
+      nutrition: { kcal: 620, protein: 42, fat: 20, carbs: 58 },
+      estimatedCost: 220
+    },
+    {
+      id: "other_recipe",
+      title: "Паста",
+      imageURL: "https://images.example/other.jpg",
+      sourceName: "example.ru",
+      sourceURL: "https://example.ru/other",
+      ingredients: ["макароны", "сыр"],
+      instructions: ["Приготовить"],
+      cuisine: "Итальянская",
+      mealTypes: ["dinner"],
+      nutrition: { kcal: 620, protein: 30, fat: 20, carbs: 90 },
+      estimatedCost: 230
+    }
+  ];
+
+  const profile = buildTasteProfileFromEvents(
+    "u1",
+    [
+      { userId: "u1", recipeId: "fav_recipe", eventType: "recipe_like", timestamp: new Date().toISOString() },
+      { userId: "u1", recipeId: "fav_recipe", eventType: "recipe_cook", timestamp: new Date().toISOString() }
+    ],
+    candidates
+  );
+
+  const ranked = rankRecipesV2(candidates, {
+    ingredientKeywords: ["курица", "рис"],
+    expiringSoonKeywords: [],
+    targets: { kcal: 620, protein: 42, fat: 22, carbs: 60 },
+    budget: { perMeal: 260 }
+  }, { tasteProfile: profile });
+
+  assert.equal(ranked[0]?.recipe.id, "fav_recipe");
+});
+
+test("recommendation reasons include nutrition and budget hints", () => {
+  const reasons = buildRecommendationReasons({
+    recipe: mockRecipes[0]!,
+    scoreBreakdown: {
+      nutritionFit: 0.9,
+      budgetFit: 0.8,
+      availabilityFit: 0.6
+    },
+    maxReasons: 3
+  });
+
+  assert.ok(reasons.length > 0);
+  assert.ok(reasons.some((item) => item.includes("КБЖУ")));
 });
