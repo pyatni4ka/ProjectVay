@@ -5,7 +5,7 @@
 ### Database / Migrations
 - Проверка создания таблиц: `products`, `batches`, `price_entries`, `inventory_events`, `app_settings`, `internal_code_mappings`.
 - Проверка индексов: `idx_products_barcode`, `idx_batches_expiry_date`, `idx_batches_location`, `idx_price_entries_product_date`, `idx_events_product_timestamp`, `idx_internal_code_mappings_product`.
-- Проверка seed default настроек.
+- Проверка seed default настроек + новых полей `strict_macro_tracking`, `macro_tolerance_percent`.
 
 ### Repository
 - CRUD товара и партии.
@@ -22,6 +22,8 @@
 - Флаг `onboarding_completed` корректно сохраняется и читается.
 - Экспорт локальных данных создаёт валидный JSON snapshot (settings/products/batches/prices/events).
 - `deleteAllLocalData` очищает инвентарь и сбрасывает onboarding/settings.
+- Декодирование legacy-настроек без macro-полей использует дефолты (backward compatibility импорта).
+- Нормализация настроек ограничивает допуск КБЖУ (диапазон 5...60%).
 
 ### Scanner / Lookup
 - Парсинг EAN-13.
@@ -89,6 +91,7 @@
 - Для режима `День` цель и меню адаптируются к уже съеденному КБЖУ из Apple Health (записи Yazio).
 - Для режима `Неделя` используется базовая дневная цель без агрессивной коррекции.
 - Отдельно отображаются рекомендации на следующий приём пищи по целевому КБЖУ.
+- При включённом строгом режиме рецепты дополнительно фильтруются по допуску КБЖУ; при отсутствии точных совпадений показываются ближайшие.
 
 ### Настройки
 - Изменение quiet hours и шаблона дней.
@@ -129,6 +132,7 @@ npm run build
 - `sourcePolicy` отклоняет небезопасные URL/хосты и проверяет whitelist.
 - `PersistentRecipeCache` сохраняет/читает recipe и удаляет просроченные записи.
 - `mealPlan` генерирует 3 приёма в день и корректно ограничивает диапазон дней (1..7).
+- `recommendation` усиливает приоритет рецептов, ближе попадающих в целевое КБЖУ (учитывается штраф macro deviation).
 
 ### API/Integration
 - `POST /recipes/fetch`:

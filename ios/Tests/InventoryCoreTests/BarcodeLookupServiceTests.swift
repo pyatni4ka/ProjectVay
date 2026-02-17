@@ -329,7 +329,7 @@ private final class MockInventoryService: InventoryServiceProtocol {
 
     func savePriceEntry(_ entry: PriceEntry) async throws {}
 
-    func listPriceHistory(productId: UUID) async throws -> [PriceEntry] { [] }
+    func listPriceHistory(productId: UUID?) async throws -> [PriceEntry] { [] }
 
     func recordEvent(_ event: InventoryEvent) async throws {}
 

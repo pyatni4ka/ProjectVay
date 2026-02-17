@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct SettingsView: View {
     let settingsService: any SettingsServiceProtocol
@@ -14,6 +17,8 @@ struct SettingsView: View {
     @State private var budgetWeekText = ""
     @State private var dislikedText = "кускус"
     @State private var avoidBones = true
+    @State private var strictMacroTracking = true
+    @State private var macroTolerancePercent = 25.0
     @State private var selectedStores = Set(AppSettings.default.stores)
 
     @State private var isSaving = false
@@ -25,8 +30,14 @@ struct SettingsView: View {
     @State private var exportedFileURL: URL?
     @State private var showDeleteConfirmation = false
     @State private var showImportPicker = false
+    @FocusState private var focusedBudgetField: BudgetField?
 
     private let calendar = Calendar.current
+
+    private enum BudgetField {
+        case day
+        case week
+    }
 
     var body: some View {
         Form {
@@ -39,10 +50,24 @@ struct SettingsView: View {
             Section("Питание") {
                 TextField("Бюджет ₽/день", text: $budgetDayText)
                     .keyboardType(.decimalPad)
+                    .focused($focusedBudgetField, equals: .day)
                 TextField("Бюджет ₽/неделя", text: $budgetWeekText)
                     .keyboardType(.decimalPad)
+                    .focused($focusedBudgetField, equals: .week)
                 TextField("Нелюбимые продукты", text: $dislikedText)
                 Toggle("Кости допустимы редко", isOn: $avoidBones)
+                Toggle("Строго подбирать КБЖУ", isOn: $strictMacroTracking)
+                if strictMacroTracking {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Допуск по КБЖУ")
+                            Spacer()
+                            Text("±\(Int(macroTolerancePercent))%")
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $macroTolerancePercent, in: 5...60, step: 5)
+                    }
+                }
             }
 
             Section("Расписание приёмов") {
@@ -106,6 +131,8 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Настройки")
+        .scrollDismissesKeyboard(.interactively)
+        .dismissKeyboardOnTap()
         .task {
             await load()
         }
@@ -139,6 +166,9 @@ struct SettingsView: View {
                 errorMessage = error.localizedDescription
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            focusedBudgetField = nil
+        }
     }
 
     private func toggleStore(_ store: Store) {
@@ -162,6 +192,8 @@ struct SettingsView: View {
             budgetWeekText = settings.budgetWeek?.formattedSimple ?? ""
             dislikedText = settings.dislikedList.joined(separator: ", ")
             avoidBones = settings.avoidBones
+            strictMacroTracking = settings.strictMacroTracking
+            macroTolerancePercent = settings.macroTolerancePercent
             selectedStores = Set(settings.stores)
         } catch {
             errorMessage = error.localizedDescription
@@ -204,7 +236,9 @@ struct SettingsView: View {
                 breakfastMinute: minuteOfDay(breakfastDate),
                 lunchMinute: minuteOfDay(lunchDate),
                 dinnerMinute: minuteOfDay(dinnerDate)
-            )
+            ),
+            strictMacroTracking: strictMacroTracking,
+            macroTolerancePercent: macroTolerancePercent
         ).normalized()
 
         isSaving = true

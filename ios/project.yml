@@ -1,0 +1,56 @@
+name: InventoryAI
+options:
+  createIntermediateGroups: true
+  minimumXcodeGenVersion: 2.38.0
+
+settings:
+  base:
+    SWIFT_VERSION: 5.10
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    TARGETED_DEVICE_FAMILY: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: 26.0
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: 6.0.0
+  Nuke:
+    url: https://github.com/kean/Nuke.git
+    from: 12.8.0
+
+targets:
+  InventoryAI:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: App
+      - path: Features
+      - path: Models
+      - path: Persistence
+      - path: Repositories
+      - path: Services
+      - path: Shared
+      - path: UseCases
+    dependencies:
+      - package: GRDB
+        product: GRDB
+      - package: Nuke
+        product: Nuke
+      - package: Nuke
+        product: NukeUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.projectvay.inventoryai
+        PRODUCT_NAME: InventoryAI
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ДомИнвентарь
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.food-and-drink
+        INFOPLIST_KEY_NSHealthShareUsageDescription: Нужно для чтения веса, жира и КБЖУ из Apple Health.
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: Нужно для синхронизации данных питания и прогресса.
+        INFOPLIST_KEY_NSCameraUsageDescription: Камера нужна для сканирования штрихкодов и DataMatrix.
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        SUPPORTS_MACCATALYST: NO
+        CODE_SIGN_STYLE: Automatic

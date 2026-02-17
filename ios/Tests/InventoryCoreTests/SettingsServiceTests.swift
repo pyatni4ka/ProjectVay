@@ -219,6 +219,92 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(importedBatches.count, 1)
         XCTAssertEqual(importedBatches.first?.quantity ?? 0, 3, accuracy: 0.001)
     }
+
+    func testDecodeLegacySettingsWithoutMacroFieldsUsesDefaults() throws {
+        let legacyJSON = """
+        {
+          "quietStartMinute": 60,
+          "quietEndMinute": 360,
+          "expiryAlertsDays": [5,3,1],
+          "budgetDay": 800,
+          "budgetWeek": null,
+          "stores": ["pyaterochka","yandexLavka"],
+          "dislikedList": ["кускус"],
+          "avoidBones": true,
+          "mealSchedule": {
+            "breakfastMinute": 480,
+            "lunchMinute": 780,
+            "dinnerMinute": 1140
+          }
+        }
+        """
+
+        let settings = try JSONDecoder().decode(AppSettings.self, from: Data(legacyJSON.utf8))
+        XCTAssertTrue(settings.strictMacroTracking)
+        XCTAssertEqual(settings.macroTolerancePercent, 25)
+        XCTAssertEqual(settings.bodyMetricsRangeMode, .lastMonths)
+        XCTAssertEqual(settings.bodyMetricsRangeMonths, 12)
+        XCTAssertTrue(settings.aiPersonalizationEnabled)
+        XCTAssertTrue(settings.aiCloudAssistEnabled)
+        XCTAssertTrue(settings.aiRuOnlyStorage)
+        XCTAssertEqual(settings.aiDataCollectionMode, .maximal)
+    }
+
+    func testSettingsNormalizationClampsMacroTolerance() {
+        let settings = AppSettings(
+            quietStartMinute: 60,
+            quietEndMinute: 360,
+            expiryAlertsDays: [5, 3, 1],
+            budgetDay: 800,
+            budgetWeek: nil,
+            stores: [.pyaterochka],
+            dislikedList: ["кускус"],
+            avoidBones: true,
+            mealSchedule: .default,
+            strictMacroTracking: true,
+            macroTolerancePercent: 1
+        ).normalized()
+
+        XCTAssertEqual(settings.macroTolerancePercent, 5)
+    }
+
+    func testDecodeSettingsWithInvalidModeRawValuesFallsBackToDefaults() throws {
+        let json = """
+        {
+          "quietStartMinute": 60,
+          "quietEndMinute": 360,
+          "expiryAlertsDays": [5,3,1],
+          "budgetDay": 800,
+          "budgetWeek": null,
+          "stores": ["pyaterochka","yandexLavka"],
+          "dislikedList": ["кускус"],
+          "avoidBones": true,
+          "mealSchedule": {
+            "breakfastMinute": 480,
+            "lunchMinute": 780,
+            "dinnerMinute": 1140
+          },
+          "strictMacroTracking": true,
+          "macroTolerancePercent": 25,
+          "bodyMetricsRangeMode": "invalid_mode",
+          "bodyMetricsRangeMonths": 120,
+          "bodyMetricsRangeYear": 1900,
+          "aiPersonalizationEnabled": true,
+          "aiCloudAssistEnabled": false,
+          "aiRuOnlyStorage": true,
+          "aiDataCollectionMode": "unknown_mode"
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8)).normalized()
+        let currentYear = Calendar.current.component(.year, from: Date())
+
+        XCTAssertEqual(decoded.bodyMetricsRangeMode, .lastMonths)
+        XCTAssertEqual(decoded.bodyMetricsRangeMonths, 60)
+        XCTAssertEqual(decoded.bodyMetricsRangeYear, currentYear >= 1970 ? currentYear : 1970)
+        XCTAssertEqual(decoded.aiDataCollectionMode, .maximal)
+        XCTAssertFalse(decoded.aiCloudAssistEnabled)
+    }
 }
 
 private actor NotificationSchedulerSpy: NotificationScheduling {

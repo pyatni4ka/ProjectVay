@@ -9,6 +9,7 @@ struct InventoryView: View {
     @State private var snapshot = InventorySnapshot(products: [], expiringSoon: [], productByID: [:])
     @State private var isPresentingAddProduct = false
     @State private var isPresentingScanner = false
+    @State private var scannerMode: ScannerView.ScannerMode = .add
     @State private var batchPendingWriteOff: Batch?
     @State private var errorMessage: String?
 
@@ -27,8 +28,16 @@ struct InventoryView: View {
         .searchable(text: $searchText, prompt: "Поиск по товарам")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button("Сканировать") {
-                    isPresentingScanner = true
+                Menu("Сканировать") {
+                    Button("Добавить по штрихкоду") {
+                        scannerMode = .add
+                        isPresentingScanner = true
+                    }
+
+                    Button("Списать по штрихкоду") {
+                        scannerMode = .writeOff
+                        isPresentingScanner = true
+                    }
                 }
 
                 Button("Добавить") {
@@ -48,6 +57,7 @@ struct InventoryView: View {
                 ScannerView(
                     inventoryService: inventoryService,
                     barcodeLookupService: barcodeLookupService,
+                    initialMode: scannerMode,
                     onInventoryChanged: {
                         await reload()
                     }

@@ -8,35 +8,97 @@ enum ScanPayload {
 
 final class ScannerService {
     func parse(code: String) -> ScanPayload {
-        if code.count == 13, CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: code)) {
-            return .ean13(code)
+        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if normalized.count == 13, CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: normalized)) {
+            return .ean13(normalized)
         }
 
-        if code.contains("01") || code.contains("17") {
-            let gtin = extractAI01(code)
-            let expiry = extractAI17(code)
-            return .dataMatrix(raw: code, gtin: gtin, expiryDate: expiry)
+        if let parsedDataMatrix = parseDataMatrix(raw: normalized) {
+            return .dataMatrix(raw: normalized, gtin: parsedDataMatrix.gtin, expiryDate: parsedDataMatrix.expiryDate)
         }
 
-        return .internalCode(code: code, parsedWeightGrams: parseInternalWeight(code))
+        return .internalCode(code: normalized, parsedWeightGrams: parseInternalWeight(normalized))
     }
 
-    private func extractAI01(_ value: String) -> String? {
-        guard let range = value.range(of: "01") else { return nil }
-        let suffix = value[range.upperBound...]
-        return String(suffix.prefix(14))
+    private func parseDataMatrix(raw: String) -> (gtin: String?, expiryDate: Date?)? {
+        let cleaned = normalizeDataMatrixPayload(raw)
+        guard !cleaned.isEmpty else { return nil }
+
+        let gtin = extractAI(code: cleaned, ai: "01", length: 14)
+        let expiryRaw = extractAI(code: cleaned, ai: "17", length: 6)
+        let expiryDate = expiryRaw.flatMap(parseYYMMDD)
+
+        guard gtin != nil || expiryDate != nil else {
+            return nil
+        }
+
+        return (gtin: gtin, expiryDate: expiryDate)
     }
 
-    private func extractAI17(_ value: String) -> Date? {
-        guard let range = value.range(of: "17") else { return nil }
-        let suffix = value[range.upperBound...]
-        let digits = String(suffix.prefix(6))
+    private func extractAI(code: String, ai: String, length: Int) -> String? {
+        guard !ai.isEmpty, length > 0, code.count >= ai.count + length else {
+            return nil
+        }
+
+        let characters = Array(code)
+        let aiCharacters = Array(ai)
+        let maxStart = characters.count - aiCharacters.count - length
+        guard maxStart >= 0 else { return nil }
+
+        for start in 0...maxStart {
+            let aiSlice = characters[start..<(start + aiCharacters.count)]
+            if !zip(aiSlice, aiCharacters).allSatisfy({ $0 == $1 }) {
+                continue
+            }
+
+            let dataStart = start + aiCharacters.count
+            let dataEnd = dataStart + length
+            let valueSlice = characters[dataStart..<dataEnd]
+            if valueSlice.allSatisfy({ $0.isNumber }) {
+                return String(valueSlice)
+            }
+        }
+
+        return nil
+    }
+
+    private func normalizeDataMatrixPayload(_ raw: String) -> String {
+        var value = raw
+        if value.hasPrefix("]d2") || value.hasPrefix("]Q3") {
+            value.removeFirst(3)
+        }
+
+        return value.filter { character in
+            character.isNumber || character == "\u{001D}"
+        }
+    }
+
+    private func parseYYMMDD(_ digits: String) -> Date? {
         guard digits.count == 6 else { return nil }
+        let yearPart = digits.prefix(2)
+        let monthPart = digits.dropFirst(2).prefix(2)
+        let dayPart = digits.suffix(2)
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyMMdd"
-        formatter.timeZone = .current
-        return formatter.date(from: digits)
+        guard
+            let year = Int(yearPart),
+            let month = Int(monthPart),
+            let day = Int(dayPart),
+            (1...12).contains(month),
+            (1...31).contains(day)
+        else {
+            return nil
+        }
+
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone.current
+        components.year = 2000 + year
+        components.month = month
+        components.day = day
+        components.hour = 12
+
+        return components.date
     }
 
     private func parseInternalWeight(_ code: String) -> Double? {

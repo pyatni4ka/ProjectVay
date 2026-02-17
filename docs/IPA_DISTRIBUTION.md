@@ -23,12 +23,15 @@
 - `BARCODE_LOOKUP_RATE_MAX`, `BARCODE_LOOKUP_RATE_WINDOW_MS`
 
 ## 4) Подпись и сборка
-1. В Xcode выбрать target `InventoryAI`.
-2. Настроить `Signing & Capabilities`:
+1. Сгенерировать проект (если ещё не создан):
+   - `cd /Users/antonpyatnica/Downloads/ProjectVay/ios`
+   - `xcodegen generate`
+2. Открыть `ios/InventoryAI.xcodeproj` и выбрать target `InventoryAI`.
+3. Настроить `Signing & Capabilities`:
    - `HealthKit` (read),
    - Push/Notifications.
-3. `Product -> Archive`.
-4. Через Organizer:
+4. `Product -> Archive`.
+5. Через Organizer:
    - `Distribute App -> TestFlight` (предпочтительно),
    - или `Distribute App -> Ad Hoc` и экспорт `.ipa`.
 

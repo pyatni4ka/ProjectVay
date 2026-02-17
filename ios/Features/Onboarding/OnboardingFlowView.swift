@@ -14,6 +14,8 @@ struct OnboardingFlowView: View {
     @State private var budgetWeekText = ""
     @State private var dislikedText = "кускус"
     @State private var avoidBones = true
+    @State private var strictMacroTracking = true
+    @State private var macroTolerancePercent = 25.0
     @State private var selectedStores = Set(AppSettings.default.stores)
 
     @State private var notificationsGranted: Bool?
@@ -65,6 +67,21 @@ struct OnboardingFlowView: View {
             Section("Нелюбимые продукты") {
                 TextField("Список через запятую", text: $dislikedText)
                 Toggle("Кости допустимы редко", isOn: $avoidBones)
+            }
+
+            Section("КБЖУ на следующий приём") {
+                Toggle("Строго подбирать блюда по КБЖУ", isOn: $strictMacroTracking)
+                if strictMacroTracking {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Допуск")
+                            Spacer()
+                            Text("±\(Int(macroTolerancePercent))%")
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $macroTolerancePercent, in: 5...60, step: 5)
+                    }
+                }
             }
 
             Section("Магазины") {
@@ -130,6 +147,8 @@ struct OnboardingFlowView: View {
             budgetWeekText = settings.budgetWeek?.formattedSimple ?? ""
             dislikedText = settings.dislikedList.joined(separator: ", ")
             avoidBones = settings.avoidBones
+            strictMacroTracking = settings.strictMacroTracking
+            macroTolerancePercent = settings.macroTolerancePercent
             selectedStores = Set(settings.stores)
         } catch {
             errorMessage = error.localizedDescription
@@ -172,7 +191,9 @@ struct OnboardingFlowView: View {
                 breakfastMinute: minuteOfDay(breakfastDate),
                 lunchMinute: minuteOfDay(lunchDate),
                 dinnerMinute: minuteOfDay(dinnerDate)
-            )
+            ),
+            strictMacroTracking: strictMacroTracking,
+            macroTolerancePercent: macroTolerancePercent
         ).normalized()
 
         isSaving = true

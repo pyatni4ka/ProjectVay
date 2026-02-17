@@ -83,6 +83,11 @@ struct MealPlanView: View {
         let statusMessage: String?
     }
 
+    private struct MacroFilterOutcome {
+        let items: [RecommendResponse.RankedRecipe]
+        let note: String?
+    }
+
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
@@ -327,10 +332,23 @@ struct MealPlanView: View {
                     exclude: settings.dislikedList,
                     avoidBones: settings.avoidBones,
                     cuisine: [],
-                    limit: 10
+                    limit: 25
                 )
                 let recommended = try await recipeServiceClient.recommend(payload: recommendPayload)
-                nextMealRecommendations = recommended.items
+                let macroFiltered = applyMacroFilter(
+                    recommended.items,
+                    target: nutritionSnapshot.nextMealTarget,
+                    settings: settings
+                )
+                nextMealRecommendations = macroFiltered.items
+
+                if let note = macroFiltered.note {
+                    if let current = healthStatusMessage, !current.isEmpty {
+                        healthStatusMessage = "\(current) \(note)"
+                    } else {
+                        healthStatusMessage = note
+                    }
+                }
             } catch {
                 nextMealRecommendations = []
                 let fallback = "Не удалось обновить рекомендации на следующий приём."
@@ -366,7 +384,8 @@ struct MealPlanView: View {
 
         do {
             let healthValues = try await healthKitService.fetchTodayConsumedNutrition()
-            let hasAnyValue = [healthValues.kcal, healthValues.protein, healthValues.fat, healthValues.carbs].contains { $0 != nil }
+            let hasAnyValue = [healthValues.kcal, healthValues.protein, healthValues.fat, healthValues.carbs]
+                .contains { $0 != nil && ($0 ?? 0) > 0 }
             if hasAnyValue {
                 consumedToday = normalizeNutrition(healthValues)
                 healthMessage = "Меню адаптировано по съеденному КБЖУ из Apple Health."
@@ -469,5 +488,98 @@ struct MealPlanView: View {
         default:
             return raw
         }
+    }
+
+    private func applyMacroFilter(
+        _ items: [RecommendResponse.RankedRecipe],
+        target: Nutrition,
+        settings: AppSettings
+    ) -> MacroFilterOutcome {
+        guard !items.isEmpty else {
+            return MacroFilterOutcome(items: items, note: nil)
+        }
+
+        guard settings.strictMacroTracking else {
+            return MacroFilterOutcome(items: items, note: nil)
+        }
+
+        let tolerance = settings.macroTolerancePercent / 100
+        let sortedByMacroDistance = items.sorted {
+            macroDistance(recipeNutrition: $0.recipe.nutrition, target: target) <
+                macroDistance(recipeNutrition: $1.recipe.nutrition, target: target)
+        }
+
+        let strict = sortedByMacroDistance.filter {
+            isWithinTolerance(recipeNutrition: $0.recipe.nutrition, target: target, tolerance: tolerance)
+        }
+
+        if !strict.isEmpty {
+            return MacroFilterOutcome(
+                items: strict,
+                note: "Рекомендации отфильтрованы строго по КБЖУ (±\(Int(settings.macroTolerancePercent))%)."
+            )
+        }
+
+        return MacroFilterOutcome(
+            items: Array(sortedByMacroDistance.prefix(10)),
+            note: "Строгий фильтр КБЖУ не дал точных совпадений, показаны ближайшие блюда."
+        )
+    }
+
+    private func isWithinTolerance(recipeNutrition: Nutrition?, target: Nutrition, tolerance: Double) -> Bool {
+        guard let recipeNutrition else { return false }
+
+        let checks: [(Double?, Double?)] = [
+            (target.kcal, recipeNutrition.kcal),
+            (target.protein, recipeNutrition.protein),
+            (target.fat, recipeNutrition.fat),
+            (target.carbs, recipeNutrition.carbs)
+        ]
+
+        for (targetValue, actualValue) in checks {
+            guard let targetValue, targetValue > 0 else {
+                continue
+            }
+            guard let actualValue, actualValue >= 0 else {
+                return false
+            }
+
+            let deviation = abs(actualValue - targetValue) / max(targetValue, 1)
+            if deviation > tolerance {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    private func macroDistance(recipeNutrition: Nutrition?, target: Nutrition) -> Double {
+        guard let recipeNutrition else {
+            return 10
+        }
+
+        let checks: [(Double?, Double?)] = [
+            (target.kcal, recipeNutrition.kcal),
+            (target.protein, recipeNutrition.protein),
+            (target.fat, recipeNutrition.fat),
+            (target.carbs, recipeNutrition.carbs)
+        ]
+
+        var sum = 0.0
+        var count = 0.0
+        for (targetValue, actualValue) in checks {
+            guard let targetValue, targetValue > 0 else {
+                continue
+            }
+            guard let actualValue else {
+                return 9
+            }
+            let deviation = abs(actualValue - targetValue) / max(targetValue, 1)
+            sum += deviation
+            count += 1
+        }
+
+        guard count > 0 else { return 8 }
+        return sum / count
     }
 }

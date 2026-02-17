@@ -25,7 +25,7 @@ struct ScannerView: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var mode: ScannerMode = .add
+    @State private var mode: ScannerMode
     @State private var manualCode: String = ""
     @State private var isProcessing = false
     @State private var lastScannedCode: String = ""
@@ -41,6 +41,18 @@ struct ScannerView: View {
     @State private var showCreateProductSheet = false
     @State private var isQuickActionInProgress = false
     @State private var quickActionMessage: String?
+
+    init(
+        inventoryService: any InventoryServiceProtocol,
+        barcodeLookupService: BarcodeLookupService,
+        initialMode: ScannerMode = .add,
+        onInventoryChanged: @escaping () async -> Void
+    ) {
+        self.inventoryService = inventoryService
+        self.barcodeLookupService = barcodeLookupService
+        self.onInventoryChanged = onInventoryChanged
+        _mode = State(initialValue: initialMode)
+    }
 
     private var scannerAvailable: Bool {
         DataScannerViewController.isSupported && DataScannerViewController.isAvailable

@@ -203,6 +203,18 @@ struct InventoryEvent: Identifiable, Codable, Equatable {
 }
 
 struct AppSettings: Codable, Equatable {
+    enum BodyMetricsRangeMode: String, Codable, CaseIterable {
+        case lastMonths
+        case year
+        case sinceYear
+    }
+
+    enum AIDataCollectionMode: String, Codable, CaseIterable {
+        case conservative
+        case balanced
+        case maximal
+    }
+
     struct MealSchedule: Codable, Equatable {
         var breakfastMinute: Int
         var lunchMinute: Int
@@ -241,6 +253,16 @@ struct AppSettings: Codable, Equatable {
     var dislikedList: [String]
     var avoidBones: Bool
     var mealSchedule: MealSchedule = .default
+    var strictMacroTracking: Bool = true
+    var macroTolerancePercent: Double = 25
+    var bodyMetricsRangeMode: BodyMetricsRangeMode = .lastMonths
+    var bodyMetricsRangeMonths: Int = 12
+    var bodyMetricsRangeYear: Int = Calendar.current.component(.year, from: Date())
+    var aiPersonalizationEnabled: Bool = true
+    var aiCloudAssistEnabled: Bool = true
+    var aiRuOnlyStorage: Bool = true
+    var aiDataConsentAcceptedAt: Date?
+    var aiDataCollectionMode: AIDataCollectionMode = .maximal
 
     static let defaultStores: [Store] = [.pyaterochka, .yandexLavka, .chizhik, .auchan]
 
@@ -253,7 +275,17 @@ struct AppSettings: Codable, Equatable {
         stores: defaultStores,
         dislikedList: ["кускус"],
         avoidBones: true,
-        mealSchedule: .default
+        mealSchedule: .default,
+        strictMacroTracking: true,
+        macroTolerancePercent: 25,
+        bodyMetricsRangeMode: .lastMonths,
+        bodyMetricsRangeMonths: 12,
+        bodyMetricsRangeYear: Calendar.current.component(.year, from: Date()),
+        aiPersonalizationEnabled: true,
+        aiCloudAssistEnabled: true,
+        aiRuOnlyStorage: true,
+        aiDataConsentAcceptedAt: nil,
+        aiDataCollectionMode: .maximal
     )
 
     func normalized() -> AppSettings {
@@ -270,6 +302,9 @@ struct AppSettings: Codable, Equatable {
             }
 
         let normalizedStores = stores.isEmpty ? Self.defaultStores : stores
+        let currentYear = Calendar.current.component(.year, from: Date())
+        let normalizedBodyRangeMonths = min(max(bodyMetricsRangeMonths, 1), 60)
+        let normalizedBodyRangeYear = min(max(bodyMetricsRangeYear, 1970), currentYear)
 
         return AppSettings(
             quietStartMinute: Self.clampMinute(quietStartMinute),
@@ -280,7 +315,17 @@ struct AppSettings: Codable, Equatable {
             stores: normalizedStores,
             dislikedList: normalizedDisliked,
             avoidBones: avoidBones,
-            mealSchedule: mealSchedule.normalized()
+            mealSchedule: mealSchedule.normalized(),
+            strictMacroTracking: strictMacroTracking,
+            macroTolerancePercent: min(max(macroTolerancePercent, 5), 60),
+            bodyMetricsRangeMode: bodyMetricsRangeMode,
+            bodyMetricsRangeMonths: normalizedBodyRangeMonths,
+            bodyMetricsRangeYear: normalizedBodyRangeYear,
+            aiPersonalizationEnabled: aiPersonalizationEnabled,
+            aiCloudAssistEnabled: aiCloudAssistEnabled,
+            aiRuOnlyStorage: aiRuOnlyStorage,
+            aiDataConsentAcceptedAt: aiDataConsentAcceptedAt,
+            aiDataCollectionMode: aiDataCollectionMode
         )
     }
 
@@ -290,6 +335,91 @@ struct AppSettings: Codable, Equatable {
 
     static func clampMinute(_ minute: Int) -> Int {
         min(max(minute, 0), 23 * 60 + 59)
+    }
+}
+
+extension AppSettings {
+    private enum CodingKeys: String, CodingKey {
+        case quietStartMinute
+        case quietEndMinute
+        case expiryAlertsDays
+        case budgetDay
+        case budgetWeek
+        case stores
+        case dislikedList
+        case avoidBones
+        case mealSchedule
+        case strictMacroTracking
+        case macroTolerancePercent
+        case bodyMetricsRangeMode
+        case bodyMetricsRangeMonths
+        case bodyMetricsRangeYear
+        case aiPersonalizationEnabled
+        case aiCloudAssistEnabled
+        case aiRuOnlyStorage
+        case aiDataConsentAcceptedAt
+        case aiDataCollectionMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        quietStartMinute = try container.decode(Int.self, forKey: .quietStartMinute)
+        quietEndMinute = try container.decode(Int.self, forKey: .quietEndMinute)
+        expiryAlertsDays = try container.decode([Int].self, forKey: .expiryAlertsDays)
+        budgetDay = try container.decode(Decimal.self, forKey: .budgetDay)
+        budgetWeek = try container.decodeIfPresent(Decimal.self, forKey: .budgetWeek)
+        stores = try container.decode([Store].self, forKey: .stores)
+        dislikedList = try container.decode([String].self, forKey: .dislikedList)
+        avoidBones = try container.decode(Bool.self, forKey: .avoidBones)
+        mealSchedule = try container.decodeIfPresent(MealSchedule.self, forKey: .mealSchedule) ?? .default
+        strictMacroTracking = try container.decodeIfPresent(Bool.self, forKey: .strictMacroTracking) ?? true
+        macroTolerancePercent = try container.decodeIfPresent(Double.self, forKey: .macroTolerancePercent) ?? 25
+        if
+            let rawRangeMode = try container.decodeIfPresent(String.self, forKey: .bodyMetricsRangeMode),
+            let parsedRangeMode = BodyMetricsRangeMode(rawValue: rawRangeMode)
+        {
+            bodyMetricsRangeMode = parsedRangeMode
+        } else {
+            bodyMetricsRangeMode = .lastMonths
+        }
+        bodyMetricsRangeMonths = try container.decodeIfPresent(Int.self, forKey: .bodyMetricsRangeMonths) ?? 12
+        bodyMetricsRangeYear = try container.decodeIfPresent(Int.self, forKey: .bodyMetricsRangeYear)
+            ?? Calendar.current.component(.year, from: Date())
+        aiPersonalizationEnabled = try container.decodeIfPresent(Bool.self, forKey: .aiPersonalizationEnabled) ?? true
+        aiCloudAssistEnabled = try container.decodeIfPresent(Bool.self, forKey: .aiCloudAssistEnabled) ?? true
+        aiRuOnlyStorage = try container.decodeIfPresent(Bool.self, forKey: .aiRuOnlyStorage) ?? true
+        aiDataConsentAcceptedAt = try container.decodeIfPresent(Date.self, forKey: .aiDataConsentAcceptedAt)
+        if
+            let rawCollectionMode = try container.decodeIfPresent(String.self, forKey: .aiDataCollectionMode),
+            let parsedCollectionMode = AIDataCollectionMode(rawValue: rawCollectionMode)
+        {
+            aiDataCollectionMode = parsedCollectionMode
+        } else {
+            aiDataCollectionMode = .maximal
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(quietStartMinute, forKey: .quietStartMinute)
+        try container.encode(quietEndMinute, forKey: .quietEndMinute)
+        try container.encode(expiryAlertsDays, forKey: .expiryAlertsDays)
+        try container.encode(budgetDay, forKey: .budgetDay)
+        try container.encodeIfPresent(budgetWeek, forKey: .budgetWeek)
+        try container.encode(stores, forKey: .stores)
+        try container.encode(dislikedList, forKey: .dislikedList)
+        try container.encode(avoidBones, forKey: .avoidBones)
+        try container.encode(mealSchedule, forKey: .mealSchedule)
+        try container.encode(strictMacroTracking, forKey: .strictMacroTracking)
+        try container.encode(macroTolerancePercent, forKey: .macroTolerancePercent)
+        try container.encode(bodyMetricsRangeMode.rawValue, forKey: .bodyMetricsRangeMode)
+        try container.encode(bodyMetricsRangeMonths, forKey: .bodyMetricsRangeMonths)
+        try container.encode(bodyMetricsRangeYear, forKey: .bodyMetricsRangeYear)
+        try container.encode(aiPersonalizationEnabled, forKey: .aiPersonalizationEnabled)
+        try container.encode(aiCloudAssistEnabled, forKey: .aiCloudAssistEnabled)
+        try container.encode(aiRuOnlyStorage, forKey: .aiRuOnlyStorage)
+        try container.encodeIfPresent(aiDataConsentAcceptedAt, forKey: .aiDataConsentAcceptedAt)
+        try container.encode(aiDataCollectionMode.rawValue, forKey: .aiDataCollectionMode)
     }
 }
 

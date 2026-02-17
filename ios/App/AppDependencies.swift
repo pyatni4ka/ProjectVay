@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import Nuke
 
 struct AppDependencies {
     let inventoryService: InventoryService
@@ -8,8 +9,11 @@ struct AppDependencies {
     let scannerService: ScannerService
     let barcodeLookupService: BarcodeLookupService
     let recipeServiceClient: RecipeServiceClient?
+    private static var didConfigureImagePipeline = false
 
     static func makeLive() throws -> AppDependencies {
+        configureImagePipelineIfNeeded()
+
         let config = AppConfig.live()
         let dbQueue = try AppDatabase.makeDatabaseQueue()
         let inventoryRepository = InventoryRepository(dbQueue: dbQueue)
@@ -61,5 +65,23 @@ struct AppDependencies {
             barcodeLookupService: barcodeLookupService,
             recipeServiceClient: recipeServiceClient
         )
+    }
+
+    private static func configureImagePipelineIfNeeded() {
+        guard !didConfigureImagePipeline else { return }
+        didConfigureImagePipeline = true
+
+        var configuration = ImagePipeline.Configuration()
+        let sessionConfiguration = URLSessionConfiguration.default
+        sessionConfiguration.requestCachePolicy = .returnCacheDataElseLoad
+        sessionConfiguration.urlCache = URLCache(
+            memoryCapacity: 40 * 1024 * 1024,
+            diskCapacity: 250 * 1024 * 1024,
+            directory: nil
+        )
+        configuration.dataLoader = DataLoader(configuration: sessionConfiguration)
+        configuration.dataCache = try? DataCache(name: "com.projectvay.inventoryai.images")
+        configuration.imageCache = ImageCache.shared
+        ImagePipeline.shared = ImagePipeline(configuration: configuration)
     }
 }

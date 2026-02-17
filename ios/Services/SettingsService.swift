@@ -106,16 +106,11 @@ actor SettingsService: SettingsServiceProtocol {
         let products = try inventoryRepository.listProducts(location: nil, search: nil)
         let batches = try inventoryRepository.listBatches(productId: nil)
         let events = try inventoryRepository.listInventoryEvents(productId: nil)
-
-        var prices: [PriceEntry] = []
-        for product in products {
-            let history = try inventoryRepository.listPriceHistory(productId: product.id)
-            prices.append(contentsOf: history)
-        }
+        let prices = try inventoryRepository.listPriceHistory(productId: nil)
 
         let snapshot = LocalDataExportSnapshot(
             metadata: .init(
-                schemaVersion: 1,
+                schemaVersion: 2,
                 appName: "InventoryAI",
                 generatedAt: Date()
             ),

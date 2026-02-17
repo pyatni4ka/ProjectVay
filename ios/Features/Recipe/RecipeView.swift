@@ -1,5 +1,7 @@
 import SwiftUI
 import UIKit
+import Nuke
+import NukeUI
 
 struct RecipeView: View {
     let recipe: Recipe
@@ -28,15 +30,20 @@ struct RecipeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                AsyncImage(url: recipe.imageURL) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
-                    Rectangle()
-                        .fill(.gray.opacity(0.2))
-                        .overlay(SwiftUI.ProgressView())
+                LazyImage(source: recipe.imageURL) { state in
+                    if let image = state.image {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Rectangle()
+                            .fill(.gray.opacity(0.2))
+                            .overlay(SwiftUI.ProgressView())
+                    }
                 }
+                .processors([ImageProcessors.Resize(width: 900)])
+                .priority(.high)
+                .pipeline(ImagePipeline.shared)
                 .frame(height: 220)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 

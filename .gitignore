@@ -6,6 +6,11 @@
 .swiftpm/
 Package.resolved
 
+# Xcode
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
 # Node
 node_modules/
 backend/node_modules/

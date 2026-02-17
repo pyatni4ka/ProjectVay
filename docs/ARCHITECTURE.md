@@ -6,6 +6,8 @@
 ProjectVay/
 ├── ios/
 │   ├── Package.swift
+│   ├── project.yml
+│   ├── InventoryAI.xcodeproj
 │   ├── App/
 │   │   ├── InventoryAIApp.swift
 │   │   ├── AppCoordinator.swift
@@ -76,6 +78,12 @@ ProjectVay/
 `v2_internal_code_mappings` создаёт:
 - `internal_code_mappings(code PK, product_id FK, parsed_weight_grams NULL, created_at)`
 
+`v3_meal_schedule` добавляет в `app_settings`:
+- `breakfast_minute`, `lunch_minute`, `dinner_minute`
+
+`v4_macro_tracking_preferences` добавляет в `app_settings`:
+- `strict_macro_tracking`, `macro_tolerance_percent`
+
 Индексы:
 - `idx_products_barcode`
 - `idx_batches_expiry_date`
@@ -116,6 +124,7 @@ ProjectVay/
 3. `ScannerView` поддерживает режимы:
    - `Добавление` (lookup + при необходимости создание карточки),
    - `Списание` (только существующий локальный инвентарь, без автосоздания).
+   Из `InventoryView` режим `Списание` можно запускать напрямую через action `Списать по штрихкоду`.
 4. `BarcodeLookupService` применяет pipeline:
    - нормализует GTIN из DataMatrix (`14 -> 13`, если префикс `0`) для совместимости с EAN-13;
    - локальный поиск (`InventoryService.findProduct`)
@@ -142,7 +151,10 @@ ProjectVay/
    - L2: `PersistentRecipeCache` (SQLite через `node:sqlite`, TTL и bootstrap индекса после рестарта).
 3. Успешно распарсенный рецепт индексируется в `RecipeIndex`.
 4. `GET /api/v1/recipes/search` ищет по объединённому индексу (seed + fetched).
-5. `POST /api/v1/recipes/recommend` ранжирует текущий индекс.
+5. `POST /api/v1/recipes/recommend` ранжирует текущий индекс:
+   - приоритет сроков и наличия дома;
+   - nutrition-fit по целевому КБЖУ;
+   - дополнительный штраф за сильное отклонение от целевых макросов.
 6. `POST /api/v1/meal-plan/generate` строит план на 1..7 дней:
    - 3 приёма пищи/день (завтрак/обед/ужин),
    - учитывает цели, бюджет, исключения, expiring/in-stock сигналы,
@@ -160,6 +172,7 @@ ProjectVay/
    - список expiring-ингредиентов,
    - цель по КБЖУ и бюджет.
 5. Дополнительно запрашивает `/api/v1/recipes/recommend` для следующего приёма пищи с таргетом КБЖУ.
+   Если в настройках включён `strict_macro_tracking`, результат дополнительно фильтруется по допуску `macro_tolerance_percent`.
 6. Отображает план по дням, missing ingredients, shopping list, estimated total cost, warnings и рекомендации на следующий приём.
 
 ### Recipe cook flow

@@ -16,13 +16,19 @@ protocol InventoryRepositoryProtocol: Sendable {
     func expiringBatches(until date: Date) throws -> [Batch]
 
     func savePriceEntry(_ entry: PriceEntry) throws
-    func listPriceHistory(productId: UUID) throws -> [PriceEntry]
+    func listPriceHistory(productId: UUID?) throws -> [PriceEntry]
 
     func saveInventoryEvent(_ event: InventoryEvent) throws
     func listInventoryEvents(productId: UUID?) throws -> [InventoryEvent]
     func upsertInternalCodeMapping(_ mapping: InternalCodeMapping) throws
     func fetchInternalCodeMapping(code: String) throws -> InternalCodeMapping?
     func deleteAllInventoryData() throws
+}
+
+extension InventoryRepositoryProtocol {
+    func listPriceHistory(productId: UUID) throws -> [PriceEntry] {
+        try listPriceHistory(productId: Optional(productId))
+    }
 }
 
 final class InventoryRepository: InventoryRepositoryProtocol {
@@ -178,13 +184,21 @@ final class InventoryRepository: InventoryRepositoryProtocol {
         }
     }
 
-    func listPriceHistory(productId: UUID) throws -> [PriceEntry] {
+    func listPriceHistory(productId: UUID?) throws -> [PriceEntry] {
         try dbQueue.read { db in
-            let records = try PriceEntryRecord.fetchAll(
-                db,
-                sql: "SELECT * FROM price_entries WHERE product_id = ? ORDER BY date DESC",
-                arguments: [productId.uuidString]
-            )
+            let records: [PriceEntryRecord]
+            if let productId {
+                records = try PriceEntryRecord.fetchAll(
+                    db,
+                    sql: "SELECT * FROM price_entries WHERE product_id = ? ORDER BY date DESC",
+                    arguments: [productId.uuidString]
+                )
+            } else {
+                records = try PriceEntryRecord.fetchAll(
+                    db,
+                    sql: "SELECT * FROM price_entries ORDER BY date DESC"
+                )
+            }
             return records.map { $0.asDomain() }
         }
     }

@@ -27,6 +27,32 @@ final class ScannerServiceTests: XCTestCase {
         XCTAssertNotNil(expiry)
     }
 
+    func testParseDataMatrixWithFNC1AndGroupSeparator() {
+        let service = ScannerService()
+        let payload = service.parse(code: "]d2010460123456789017260228\u{001D}10LOT123")
+
+        guard case .dataMatrix(_, let gtin, let expiry) = payload else {
+            XCTFail("Expected DataMatrix payload")
+            return
+        }
+
+        XCTAssertEqual(gtin, "04601234567890")
+        XCTAssertNotNil(expiry)
+    }
+
+    func testParseDataMatrixWithQ3PrefixAndSpaces() {
+        let service = ScannerService()
+        let payload = service.parse(code: "  ]Q3010460123456789017261231  ")
+
+        guard case .dataMatrix(_, let gtin, let expiry) = payload else {
+            XCTFail("Expected DataMatrix payload")
+            return
+        }
+
+        XCTAssertEqual(gtin, "04601234567890")
+        XCTAssertNotNil(expiry)
+    }
+
     func testParseInternalCodeWeightBestEffort() {
         let service = ScannerService()
         let payload = service.parse(code: "22-12345")
@@ -37,5 +63,17 @@ final class ScannerServiceTests: XCTestCase {
         }
 
         XCTAssertEqual(grams, 345)
+    }
+
+    func testParseNonGS1CodeStaysInternal() {
+        let service = ScannerService()
+        let payload = service.parse(code: "17ABC123")
+
+        guard case .internalCode(let code, _) = payload else {
+            XCTFail("Expected internal code payload")
+            return
+        }
+
+        XCTAssertEqual(code, "17ABC123")
     }
 }

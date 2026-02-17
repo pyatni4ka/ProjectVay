@@ -16,6 +16,16 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var breakfastMinute: Int
     var lunchMinute: Int
     var dinnerMinute: Int
+    var strictMacroTracking: Bool
+    var macroTolerancePercent: Double
+    var bodyMetricsRangeMode: String
+    var bodyMetricsRangeMonths: Int
+    var bodyMetricsRangeYear: Int
+    var aiPersonalizationEnabled: Bool
+    var aiCloudAssistEnabled: Bool
+    var aiRuOnlyStorage: Bool
+    var aiDataConsentAcceptedAt: Date?
+    var aiDataCollectionMode: String
     var onboardingCompleted: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -31,6 +41,16 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case breakfastMinute = "breakfast_minute"
         case lunchMinute = "lunch_minute"
         case dinnerMinute = "dinner_minute"
+        case strictMacroTracking = "strict_macro_tracking"
+        case macroTolerancePercent = "macro_tolerance_percent"
+        case bodyMetricsRangeMode = "body_metrics_range_mode"
+        case bodyMetricsRangeMonths = "body_metrics_range_months"
+        case bodyMetricsRangeYear = "body_metrics_range_year"
+        case aiPersonalizationEnabled = "ai_personalization_enabled"
+        case aiCloudAssistEnabled = "ai_cloud_assist_enabled"
+        case aiRuOnlyStorage = "ai_ru_only_storage"
+        case aiDataConsentAcceptedAt = "ai_data_consent_accepted_at"
+        case aiDataCollectionMode = "ai_data_collection_mode"
         case onboardingCompleted = "onboarding_completed"
     }
 }
@@ -52,6 +72,16 @@ extension AppSettingsRecord {
         breakfastMinute = normalized.mealSchedule.breakfastMinute
         lunchMinute = normalized.mealSchedule.lunchMinute
         dinnerMinute = normalized.mealSchedule.dinnerMinute
+        strictMacroTracking = normalized.strictMacroTracking
+        macroTolerancePercent = normalized.macroTolerancePercent
+        bodyMetricsRangeMode = normalized.bodyMetricsRangeMode.rawValue
+        bodyMetricsRangeMonths = normalized.bodyMetricsRangeMonths
+        bodyMetricsRangeYear = normalized.bodyMetricsRangeYear
+        aiPersonalizationEnabled = normalized.aiPersonalizationEnabled
+        aiCloudAssistEnabled = normalized.aiCloudAssistEnabled
+        aiRuOnlyStorage = normalized.aiRuOnlyStorage
+        aiDataConsentAcceptedAt = normalized.aiDataConsentAcceptedAt
+        aiDataCollectionMode = normalized.aiDataCollectionMode.rawValue
         self.onboardingCompleted = onboardingCompleted
     }
 
@@ -60,6 +90,8 @@ extension AppSettingsRecord {
         let parsedStoresRaw = (try? Self.decodeJSON([String].self, from: storesJSON)) ?? AppSettings.default.stores.map(\.rawValue)
         let parsedStores = parsedStoresRaw.compactMap(Store.init(rawValue:))
         let parsedDisliked = (try? Self.decodeJSON([String].self, from: dislikedListJSON)) ?? AppSettings.default.dislikedList
+        let parsedRangeMode = AppSettings.BodyMetricsRangeMode(rawValue: bodyMetricsRangeMode) ?? .lastMonths
+        let parsedDataCollectionMode = AppSettings.AIDataCollectionMode(rawValue: aiDataCollectionMode) ?? .maximal
 
         return AppSettings(
             quietStartMinute: quietStartMinute,
@@ -74,7 +106,17 @@ extension AppSettingsRecord {
                 breakfastMinute: breakfastMinute,
                 lunchMinute: lunchMinute,
                 dinnerMinute: dinnerMinute
-            )
+            ),
+            strictMacroTracking: strictMacroTracking,
+            macroTolerancePercent: macroTolerancePercent,
+            bodyMetricsRangeMode: parsedRangeMode,
+            bodyMetricsRangeMonths: bodyMetricsRangeMonths,
+            bodyMetricsRangeYear: bodyMetricsRangeYear,
+            aiPersonalizationEnabled: aiPersonalizationEnabled,
+            aiCloudAssistEnabled: aiCloudAssistEnabled,
+            aiRuOnlyStorage: aiRuOnlyStorage,
+            aiDataConsentAcceptedAt: aiDataConsentAcceptedAt,
+            aiDataCollectionMode: parsedDataCollectionMode
         ).normalized()
     }
 
