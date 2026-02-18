@@ -298,3 +298,208 @@ final class MealPlanSnapshotStore {
         userDefaults.removeObject(forKey: key)
     }
 }
+
+// MARK: - Weekly Autopilot DTOs
+
+struct WeeklyAutopilotRequest: Codable {
+    struct Budget: Codable {
+        let perDay: Double?
+        let perMeal: Double?
+        let perWeek: Double?
+        let perMonth: Double?
+        let strictness: String?
+        let softLimitPct: Double?
+    }
+
+    struct Constraints: Codable {
+        let diets: [String]?
+        let allergies: [String]?
+        let dislikes: [String]?
+        let favorites: [String]?
+    }
+
+    struct IngredientPriceHint: Codable {
+        let ingredient: String
+        let priceRub: Double
+        let confidence: Double?
+        let source: String?
+        let capturedAt: String?
+    }
+
+    let days: Int?
+    let startDate: String?
+    let mealsPerDay: Int?
+    let includeSnacks: Bool?
+    let ingredientKeywords: [String]
+    let expiringSoonKeywords: [String]
+    let targets: Nutrition
+    let beveragesKcal: Double?
+    let budget: Budget?
+    let exclude: [String]?
+    let avoidBones: Bool?
+    let cuisine: [String]?
+    let effortLevel: String?
+    let seed: Int?
+    let inventorySnapshot: [String]?
+    let constraints: Constraints?
+    let objective: String?
+    let optimizerProfile: String?
+    let macroTolerancePercent: Double?
+    let ingredientPriceHints: [IngredientPriceHint]?
+}
+
+struct WeeklyAutopilotResponse: Codable {
+    struct BudgetProjectionItem: Codable {
+        let target: Double
+        let actual: Double
+        let delta: Double
+    }
+
+    struct BudgetProjection: Codable {
+        let day: BudgetProjectionItem
+        let week: BudgetProjectionItem
+        let month: BudgetProjectionItem
+        let strictness: String
+        let softLimitPct: Double
+    }
+
+    struct ShoppingItemQuantity: Codable, Identifiable {
+        var id: String { ingredient }
+        let ingredient: String
+        let amount: Double
+        let unit: String
+        let approximate: Bool
+    }
+
+    struct MealSlotTarget: Codable {
+        let mealSlotKey: String
+        let kcal: Double?
+        let protein: Double?
+        let fat: Double?
+        let carbs: Double?
+    }
+
+    struct DayEntry: Codable, Identifiable {
+        var id: String { "\(mealSlotKey)-\(recipe.id)" }
+        let mealType: String
+        let recipe: Recipe
+        let score: Double
+        let estimatedCost: Double
+        let kcal: Double
+        let protein: Double
+        let fat: Double
+        let carbs: Double
+        let mealSlotKey: String
+        let explanationTags: [String]
+        let nutritionConfidence: String
+    }
+
+    struct DayTotals: Codable {
+        let kcal: Double
+        let protein: Double
+        let fat: Double
+        let carbs: Double
+        let estimatedCost: Double
+    }
+
+    struct AutopilotDay: Codable, Identifiable {
+        var id: String { date }
+        let date: String
+        let dayOfWeek: String?
+        let entries: [DayEntry]
+        let totals: DayTotals
+        let dayTargets: Nutrition
+        let dayBudget: BudgetProjectionItem
+        let missingIngredients: [String]
+    }
+
+    let planId: String
+    let startDate: String
+    let days: [AutopilotDay]
+    let shoppingListWithQuantities: [ShoppingItemQuantity]
+    let shoppingListGrouped: [String: [String]]
+    let budgetProjection: BudgetProjection
+    let estimatedTotalCost: Double
+    let warnings: [String]
+    let nutritionConfidence: String
+    let explanationTags: [String]
+}
+
+// MARK: - Replace Meal DTOs
+
+struct ReplaceMealRequest: Codable {
+    let planId: String?
+    let currentPlan: WeeklyAutopilotResponse
+    let dayIndex: Int
+    let mealSlot: String
+    let sortMode: String?
+    let topN: Int?
+    let inventorySnapshot: [String]?
+}
+
+struct ReplaceMealResponse: Codable {
+    struct Candidate: Codable, Identifiable {
+        var id: String { recipe.id }
+        let recipe: Recipe
+        let mealSlotKey: String
+        let macroDelta: MacroDelta
+        let costDelta: Double
+        let timeDelta: Double
+        let tags: [String]
+        let nutritionConfidence: String
+    }
+
+    struct MacroDelta: Codable {
+        let kcal: Double?
+        let protein: Double?
+        let fat: Double?
+        let carbs: Double?
+    }
+
+    let candidates: [Candidate]
+    let updatedPlanPreview: WeeklyAutopilotResponse
+    let why: [String]
+}
+
+// MARK: - Adapt Plan DTOs
+
+struct AdaptPlanRequest: Codable {
+    let planId: String?
+    let currentPlan: WeeklyAutopilotResponse
+    let eventType: String
+    let impactEstimate: String
+    let customMacros: Nutrition?
+    let timestamp: String?
+    let applyScope: String?
+}
+
+struct AdaptPlanResponse: Codable {
+    let updatedRemainingPlan: WeeklyAutopilotResponse
+    let disruptionScore: Double
+    let newBudgetProjection: WeeklyAutopilotResponse.BudgetProjection
+    let gentleMessage: String
+    let why: [String]
+}
+
+// MARK: - Cook Now DTOs
+
+struct CookNowRequest: Codable {
+    let inventoryKeywords: [String]
+    let expiringSoonKeywords: [String]?
+    let maxPrepTime: Int?
+    let limit: Int?
+    let exclude: [String]?
+}
+
+struct CookNowResponse: Codable {
+    struct CookNowRecipe: Codable, Identifiable {
+        var id: String { recipe.id }
+        let recipe: Recipe
+        let score: Double
+        let availabilityRatio: Int
+        let matchedFilters: [String]
+    }
+
+    let recipes: [CookNowRecipe]
+    let inventoryCount: Int
+}

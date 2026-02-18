@@ -2,6 +2,7 @@ import { Router } from "express";
 import { defaultRecipeSourceWhitelist, recipeSourceWhitelistFromEnv } from "../../config/recipeSources.js";
 import { mockRecipes } from "../../data/mockRecipes.js";
 import { generateMealPlan } from "../../services/mealPlan.js";
+import { generateWeeklyAutopilot, generateReplaceCandidates, adaptPlanAfterDeviation } from "../../services/weeklyAutopilot.js";
 import { rankRecipes, rankRecipesV2 } from "../../services/recommendation.js";
 import { CacheStore } from "../../services/cacheStore.js";
 import { PersistentRecipeCache } from "../../services/persistentRecipeCache.js";
@@ -21,7 +22,10 @@ import type {
   RecommendPayload,
   Recipe,
   SmartMealPlanRequest,
-  UserFeedbackEvent
+  UserFeedbackEvent,
+  WeeklyAutopilotRequest,
+  ReplaceMealRequest,
+  AdaptPlanRequest,
 } from "../../types/contracts.js";
 
 const router = Router();
@@ -483,6 +487,201 @@ router.post("/meal-plan/optimize", (req, res) => {
       maxPrepTime: optimizedPayload.maxPrepTime
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// Weekly Autopilot: generate full 7-day plan with per-meal targets, quantities, budget
+// ---------------------------------------------------------------------------
+router.post("/meal-plan/week", async (req, res) => {
+  const body = req.body;
+  if (!isRecord(body)) {
+    return res.status(400).json({ error: "invalid_request_body" });
+  }
+
+  const targets = isRecord(body.targets) ? body.targets : {};
+  const budget = isRecord(body.budget) ? body.budget : undefined;
+  const constraints = isRecord(body.constraints) ? body.constraints : undefined;
+
+  const payload: WeeklyAutopilotRequest = {
+    days: toOptionalNumber(body.days) ?? 7,
+    startDate: typeof body.startDate === "string" ? body.startDate : undefined,
+    mealsPerDay: toOptionalNumber(body.mealsPerDay) ?? 3,
+    includeSnacks: Boolean(body.includeSnacks),
+    ingredientKeywords: Array.isArray(body.ingredientKeywords)
+      ? body.ingredientKeywords.filter((k: unknown) => typeof k === "string")
+      : [],
+    expiringSoonKeywords: Array.isArray(body.expiringSoonKeywords)
+      ? body.expiringSoonKeywords.filter((k: unknown) => typeof k === "string")
+      : [],
+    targets: {
+      kcal: toOptionalNumber(targets.kcal),
+      protein: toOptionalNumber(targets.protein),
+      fat: toOptionalNumber(targets.fat),
+      carbs: toOptionalNumber(targets.carbs),
+    },
+    beveragesKcal: toOptionalNumber(body.beveragesKcal),
+    budget: budget
+      ? {
+          perDay: toOptionalNumber(budget.perDay),
+          perMeal: toOptionalNumber(budget.perMeal),
+          perWeek: toOptionalNumber(budget.perWeek),
+          perMonth: toOptionalNumber(budget.perMonth),
+          strictness: typeof budget.strictness === "string" ? budget.strictness as "strict" | "soft" : "soft",
+          softLimitPct: toOptionalNumber(budget.softLimitPct) ?? 5,
+        }
+      : undefined,
+    exclude: Array.isArray(body.exclude) ? body.exclude.filter((e: unknown) => typeof e === "string") : [],
+    avoidBones: Boolean(body.avoidBones),
+    cuisine: Array.isArray(body.cuisine) ? body.cuisine.filter((c: unknown) => typeof c === "string") : [],
+    effortLevel: typeof body.effortLevel === "string" ? body.effortLevel as "quick" | "standard" | "complex" : "standard",
+    seed: toOptionalNumber(body.seed),
+    inventorySnapshot: Array.isArray(body.inventorySnapshot) ? body.inventorySnapshot.filter((s: unknown) => typeof s === "string") : [],
+    constraints: constraints
+      ? {
+          diets: Array.isArray(constraints.diets) ? constraints.diets : undefined,
+          allergies: Array.isArray(constraints.allergies) ? constraints.allergies : undefined,
+          dislikes: Array.isArray(constraints.dislikes) ? constraints.dislikes : undefined,
+          favorites: Array.isArray(constraints.favorites) ? constraints.favorites : undefined,
+        }
+      : undefined,
+    objective: typeof body.objective === "string" ? body.objective as "cost_macro" | "balanced" : "cost_macro",
+    optimizerProfile: typeof body.optimizerProfile === "string" ? body.optimizerProfile as "economy_aggressive" | "balanced" | "macro_precision" : "balanced",
+    macroTolerancePercent: toOptionalNumber(body.macroTolerancePercent) ?? 25,
+    healthMetrics: isRecord(body.healthMetrics) ? body.healthMetrics as WeeklyAutopilotRequest["healthMetrics"] : undefined,
+  };
+
+  let pool = recipeIndex.all();
+  const includeExternal = Boolean(body.includeExternal);
+  if (includeExternal) {
+    const external = await searchExternalRecipes({
+      query: payload.ingredientKeywords.join(" "),
+      ingredients: payload.ingredientKeywords,
+      cuisine: payload.cuisine?.[0],
+      maxCalories: payload.targets.kcal,
+      limit: 40,
+    });
+    pool = dedupeRecipes([...pool, ...external.recipes]);
+  }
+
+  const plan = generateWeeklyAutopilot(pool, payload);
+  return res.json(plan);
+});
+
+// ---------------------------------------------------------------------------
+// Replace: get replacement candidates for a single meal slot
+// ---------------------------------------------------------------------------
+router.post("/meal-plan/replace", (req, res) => {
+  const body = req.body;
+  if (!isRecord(body) || !isRecord(body.currentPlan)) {
+    return res.status(400).json({ error: "invalid_replace_request" });
+  }
+
+  const payload: ReplaceMealRequest = {
+    planId: typeof body.planId === "string" ? body.planId : undefined,
+    currentPlan: body.currentPlan as unknown as ReplaceMealRequest["currentPlan"],
+    dayIndex: toOptionalNumber(body.dayIndex) ?? 0,
+    mealSlot: typeof body.mealSlot === "string" ? body.mealSlot : "lunch",
+    sortMode: typeof body.sortMode === "string" ? body.sortMode as "cheap" | "fast" | "protein" | "expiry" : "cheap",
+    topN: toOptionalNumber(body.topN) ?? 5,
+    budget: isRecord(body.budget) ? body.budget as ReplaceMealRequest["budget"] : undefined,
+    inventorySnapshot: Array.isArray(body.inventorySnapshot)
+      ? body.inventorySnapshot.filter((s: unknown) => typeof s === "string")
+      : [],
+    constraints: isRecord(body.constraints) ? body.constraints as ReplaceMealRequest["constraints"] : undefined,
+  };
+
+  const pool = recipeIndex.all();
+  const result = generateReplaceCandidates(pool, payload);
+  return res.json(result);
+});
+
+// ---------------------------------------------------------------------------
+// Adapt: rebuild remaining plan after deviation (ate out / cheat / different meal)
+// ---------------------------------------------------------------------------
+router.post("/meal-plan/adapt", async (req, res) => {
+  const body = req.body;
+  if (!isRecord(body) || !isRecord(body.currentPlan)) {
+    return res.status(400).json({ error: "invalid_adapt_request" });
+  }
+
+  const eventType = typeof body.eventType === "string"
+    ? body.eventType as "ate_out" | "cheat" | "different_meal"
+    : "different_meal";
+  const impactEstimate = typeof body.impactEstimate === "string"
+    ? body.impactEstimate as "small" | "medium" | "large" | "customMacros"
+    : "medium";
+
+  const payload: AdaptPlanRequest = {
+    planId: typeof body.planId === "string" ? body.planId : undefined,
+    currentPlan: body.currentPlan as unknown as AdaptPlanRequest["currentPlan"],
+    planningContext: isRecord(body.planningContext) ? body.planningContext as unknown as AdaptPlanRequest["planningContext"] : undefined,
+    eventType,
+    impactEstimate,
+    customMacros: isRecord(body.customMacros) ? body.customMacros as AdaptPlanRequest["customMacros"] : undefined,
+    timestamp: typeof body.timestamp === "string" ? body.timestamp : new Date().toISOString(),
+    applyScope: body.applyScope === "week" ? "week" : "day",
+  };
+
+  const pool = recipeIndex.all();
+  const result = adaptPlanAfterDeviation(pool, payload);
+  return res.json(result);
+});
+
+// ---------------------------------------------------------------------------
+// Cook Now: suggest recipes from current inventory (no plan needed)
+// ---------------------------------------------------------------------------
+router.post("/recipes/cook-now", (req, res) => {
+  const body = req.body;
+  if (!isRecord(body)) {
+    return res.status(400).json({ error: "invalid_request_body" });
+  }
+
+  const inventoryKeywords: string[] = Array.isArray(body.inventoryKeywords)
+    ? body.inventoryKeywords.filter((k: unknown) => typeof k === "string")
+    : [];
+  const expiringSoonKeywords: string[] = Array.isArray(body.expiringSoonKeywords)
+    ? body.expiringSoonKeywords.filter((k: unknown) => typeof k === "string")
+    : [];
+  const maxPrepTime = toOptionalNumber(body.maxPrepTime) ?? 45;
+  const limit = toOptionalNumber(body.limit) ?? 7;
+  const exclude: string[] = Array.isArray(body.exclude)
+    ? body.exclude.filter((e: unknown) => typeof e === "string")
+    : [];
+
+  const pool = recipeIndex.all();
+  const ranked = rankRecipes(pool, {
+    ingredientKeywords: inventoryKeywords,
+    expiringSoonKeywords,
+    targets: {},
+    exclude,
+    maxPrepTime,
+    limit: limit * 4,
+  });
+
+  // Filter to recipes where most ingredients are available
+  const inventorySet = new Set(inventoryKeywords.map((s) => s.toLowerCase()));
+  const withAvailability = ranked.map((item) => {
+    const total = item.recipe.ingredients.length || 1;
+    const available = item.recipe.ingredients.filter((ing) =>
+      inventorySet.has(ing.toLowerCase().split(" ").slice(0, 2).join(" "))
+    ).length;
+    return { ...item, availabilityRatio: available / total };
+  });
+
+  // Sort: primarily by availability ratio (desc), then score
+  withAvailability.sort((a, b) => {
+    if (b.availabilityRatio !== a.availabilityRatio) return b.availabilityRatio - a.availabilityRatio;
+    return b.score - a.score;
+  });
+
+  const results = withAvailability.slice(0, limit).map((item) => ({
+    recipe: item.recipe,
+    score: item.score,
+    availabilityRatio: Math.round(item.availabilityRatio * 100),
+    matchedFilters: item.matchedFilters,
+  }));
+
+  return res.json({ recipes: results, inventoryCount: inventoryKeywords.length });
 });
 
 router.get("/barcode/lookup", async (req, res) => {
