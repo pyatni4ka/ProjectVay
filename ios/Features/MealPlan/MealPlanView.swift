@@ -97,6 +97,35 @@ struct MealPlanView: View {
         .navigationTitle("План питания")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                // Weekly Autopilot — 7-day plan with Replace / Deviation flow
+                NavigationLink {
+                    WeeklyAutopilotView(
+                        inventoryService: inventoryService,
+                        settingsService: settingsService,
+                        healthKitService: healthKitService,
+                        recipeServiceClient: recipeServiceClient,
+                        onOpenScanner: onOpenScanner
+                    )
+                } label: {
+                    Image(systemName: "calendar.badge.checkmark")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.vayPrimary)
+                }
+                .vayAccessibilityLabel("Автопилот недели — план на 7 дней")
+
+                // Cook Now — quick meal from current inventory
+                NavigationLink {
+                    CookNowView(
+                        inventoryService: inventoryService,
+                        recipeServiceClient: recipeServiceClient
+                    )
+                } label: {
+                    Image(systemName: "refrigerator")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.vayPrimary)
+                }
+                .vayAccessibilityLabel("Что приготовить сейчас из запасов")
+
                 NavigationLink {
                     RecipeImportView(recipeServiceClient: recipeServiceClient)
                 } label: {

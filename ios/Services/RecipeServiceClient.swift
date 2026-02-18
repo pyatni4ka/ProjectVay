@@ -245,6 +245,82 @@ final class RecipeServiceClient: @unchecked Sendable {
         }
     }
     
+    // MARK: - Weekly Autopilot
+
+    func generateWeeklyAutopilot(payload: WeeklyAutopilotRequest) async throws -> WeeklyAutopilotResponse {
+        guard isOnline else {
+            throw RecipeServiceClientError.offlineMode
+        }
+
+        let endpoint = baseURL.appending(path: "/api/v1/meal-plan/week")
+
+        return try await performRequestWithRetry {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(payload)
+            let (data, response) = try await self.session.data(for: request)
+            try self.validate(response: response, data: data)
+            let decoded = try JSONDecoder().decode(WeeklyAutopilotResponse.self, from: data)
+            self.cacheRecipes(decoded.days.flatMap { $0.entries.map(\.recipe) })
+            return decoded
+        }
+    }
+
+    func replaceMeal(payload: ReplaceMealRequest) async throws -> ReplaceMealResponse {
+        guard isOnline else {
+            throw RecipeServiceClientError.offlineMode
+        }
+
+        let endpoint = baseURL.appending(path: "/api/v1/meal-plan/replace")
+
+        return try await performRequestWithRetry {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(payload)
+            let (data, response) = try await self.session.data(for: request)
+            try self.validate(response: response, data: data)
+            return try JSONDecoder().decode(ReplaceMealResponse.self, from: data)
+        }
+    }
+
+    func adaptPlan(payload: AdaptPlanRequest) async throws -> AdaptPlanResponse {
+        guard isOnline else {
+            throw RecipeServiceClientError.offlineMode
+        }
+
+        let endpoint = baseURL.appending(path: "/api/v1/meal-plan/adapt")
+
+        return try await performRequestWithRetry {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(payload)
+            let (data, response) = try await self.session.data(for: request)
+            try self.validate(response: response, data: data)
+            return try JSONDecoder().decode(AdaptPlanResponse.self, from: data)
+        }
+    }
+
+    func cookNow(payload: CookNowRequest) async throws -> CookNowResponse {
+        guard isOnline else {
+            throw RecipeServiceClientError.offlineMode
+        }
+
+        let endpoint = baseURL.appending(path: "/api/v1/recipes/cook-now")
+
+        return try await performRequestWithRetry {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(payload)
+            let (data, response) = try await self.session.data(for: request)
+            try self.validate(response: response, data: data)
+            return try JSONDecoder().decode(CookNowResponse.self, from: data)
+        }
+    }
+
     private func performRequestWithRetry<T>(
         maxAttempts: Int = 4,
         operation: @escaping () async throws -> T

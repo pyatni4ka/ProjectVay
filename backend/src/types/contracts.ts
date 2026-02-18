@@ -112,6 +112,9 @@ export type RecommendPayload = {
 
 export type MealPlanRequest = {
   days?: number;
+  startDate?: string;
+  mealsPerDay?: number;
+  includeSnacks?: boolean;
   ingredientKeywords: string[];
   expiringSoonKeywords: string[];
   targets: Nutrition;
@@ -119,6 +122,10 @@ export type MealPlanRequest = {
   budget?: {
     perDay?: number;
     perMeal?: number;
+    perWeek?: number;
+    perMonth?: number;
+    strictness?: BudgetStrictness;
+    softLimitPct?: number;
   };
   exclude?: string[];
   avoidBones?: boolean;
@@ -139,6 +146,160 @@ export type MealPlanRequest = {
   balanceMacros?: boolean;
   avoidRepetition?: boolean;
   userHistory?: string[];
+};
+
+export type BudgetStrictness = "strict" | "soft";
+
+export type BudgetPreference = {
+  perDay?: number;
+  perMeal?: number;
+  perWeek?: number;
+  perMonth?: number;
+  strictness?: BudgetStrictness;
+  softLimitPct?: number;
+};
+
+export type ExplanationTag =
+  | "cheap"
+  | "quick"
+  | "high_protein"
+  | "uses_inventory"
+  | "expiring_soon"
+  | "low_effort";
+
+export type NutritionConfidence = "high" | "medium" | "low";
+
+export type MealSlotTarget = Nutrition & {
+  mealSlotKey: string;
+};
+
+export type ShoppingItemQuantity = {
+  ingredient: string;
+  amount: number;
+  unit: "g" | "ml" | "piece";
+  approximate: boolean;
+};
+
+export type BudgetProjectionItem = {
+  target: number;
+  actual: number;
+  delta: number;
+};
+
+export type BudgetProjection = {
+  day: BudgetProjectionItem;
+  week: BudgetProjectionItem;
+  month: BudgetProjectionItem;
+  strictness: BudgetStrictness;
+  softLimitPct: number;
+};
+
+export type WeeklyAutopilotDayEntry = MealPlanEntry & {
+  mealSlotKey: string;
+  explanationTags: ExplanationTag[];
+  nutritionConfidence: NutritionConfidence;
+};
+
+export type WeeklyAutopilotDay = {
+  date: string;
+  dayOfWeek?: string;
+  entries: WeeklyAutopilotDayEntry[];
+  totals: MealPlanDay["totals"];
+  dayTargets: Nutrition;
+  mealTargets: Record<string, MealSlotTarget>;
+  dayBudget: BudgetProjectionItem;
+  missingIngredients: string[];
+};
+
+export type WeeklyAutopilotRequest = SmartMealPlanRequest & {
+  startDate?: string;
+  days?: number;
+  mealsPerDay?: number;
+  includeSnacks?: boolean;
+  effortLevel?: "quick" | "standard" | "complex";
+  seed?: number;
+  inventorySnapshot?: string[];
+  healthMetrics?: {
+    weightKg?: number;
+    bodyFatPercent?: number;
+    activeEnergyKcal?: number;
+    consumed?: Nutrition;
+    lastSyncAt?: string;
+  };
+  constraints?: {
+    diets?: DietType[];
+    allergies?: string[];
+    dislikes?: string[];
+    favorites?: string[];
+  };
+  budget?: BudgetPreference;
+};
+
+export type WeeklyAutopilotResponse = {
+  planId: string;
+  startDate: string;
+  days: WeeklyAutopilotDay[];
+  shoppingListWithQuantities: ShoppingItemQuantity[];
+  shoppingListGrouped: Record<string, string[]>;
+  budgetProjection: BudgetProjection;
+  estimatedTotalCost: number;
+  warnings: string[];
+  nutritionConfidence: NutritionConfidence;
+  explanationTags: ExplanationTag[];
+  planningContext: WeeklyAutopilotRequest;
+};
+
+export type ReplaceSortMode = "cheap" | "fast" | "protein" | "expiry";
+
+export type ReplaceMealRequest = {
+  planId?: string;
+  currentPlan: WeeklyAutopilotResponse;
+  dayIndex: number;
+  mealSlot: string;
+  sortMode?: ReplaceSortMode;
+  topN?: number;
+  budget?: BudgetPreference;
+  inventorySnapshot?: string[];
+  constraints?: WeeklyAutopilotRequest["constraints"];
+};
+
+export type ReplaceMealCandidate = {
+  recipe: Recipe;
+  mealSlotKey: string;
+  macroDelta: Nutrition;
+  costDelta: number;
+  timeDelta: number;
+  tags: ExplanationTag[];
+  nutritionConfidence: NutritionConfidence;
+};
+
+export type ReplaceMealResponse = {
+  candidates: ReplaceMealCandidate[];
+  updatedPlanPreview: WeeklyAutopilotResponse;
+  why: string[];
+};
+
+export type PlanDeviationImpact = "small" | "medium" | "large" | "customMacros";
+
+export type PlanDeviationEventType = "ate_out" | "cheat" | "different_meal";
+
+export type AdaptPlanRequest = {
+  planId?: string;
+  currentPlan: WeeklyAutopilotResponse;
+  planningContext?: WeeklyAutopilotRequest;
+  eventType: PlanDeviationEventType;
+  impactEstimate: PlanDeviationImpact;
+  customMacros?: Nutrition;
+  timestamp?: string;
+  applyScope?: "day" | "week";
+};
+
+export type AdaptPlanResponse = {
+  updatedRemainingPlan: WeeklyAutopilotResponse;
+  disruptionScore: number;
+  newBudgetProjection: BudgetProjection;
+  gentleMessage: string;
+  why: string[];
 };
 
 export type MealPlanEntry = {

@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -47,6 +47,10 @@
 		4A26B5BCF17FE0FD4E9B4905 /* BatchRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AA63F9021F1A3BEE015A499 /* BatchRecord.swift */; };
 		4B23718C89F1ACCF2DE4F18E /* PriceEntryRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47484EC74E15DBB59198C26D /* PriceEntryRecord.swift */; };
 		4D9EC234C7998B843C8CCDA7 /* MealPlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF4A687DC38ED5D59D3AC27 /* MealPlanView.swift */; };
+		090D3CE18974420B986273AC /* WeeklyAutopilotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A7E50EBCD8F42F1B8D10963 /* WeeklyAutopilotView.swift */; };
+		FD53028B43A946749E5C9233 /* DeviationSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB7E0956B164098AFC1797D /* DeviationSheetView.swift */; };
+		0CF2F336194D40BCB1CFA7EF /* ShoppingListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BC288C7984E42F48A51448A /* ShoppingListView.swift */; };
+		C584BDE187CA4F8BBF2B0AB0 /* CookNowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2AD105658524D53A2AB439B /* CookNowView.swift */; };
 		51894195FD3901FA3B969FFC /* AppDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = D709D2660AFBC666C3B526EE /* AppDependencies.swift */; };
 		52133A15A976D65BDD8F4040 /* SettingsAchievementsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D471902CB097EF94F879D3C3 /* SettingsAchievementsView.swift */; };
 		5222704CB6FEDEC72A4307D5 /* HealthKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CF886682120A84111FDEFA9 /* HealthKitService.swift */; };
@@ -164,7 +168,7 @@
 		16AE1BEE1F8A75B3093BE8F1 /* SettingsStatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStatisticsView.swift; sourceTree = "<group>"; };
 		16DFEE0A6046D5247EB8284B /* CheckExpiryIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckExpiryIntent.swift; sourceTree = "<group>"; };
 		178B88096BC3708D77C22905 /* BodyMetricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyMetricsView.swift; sourceTree = "<group>"; };
-		1B60092CEB2F7D9415C704ED /* InventoryCoreTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = InventoryCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1B60092CEB2F7D9415C704ED /* InventoryCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InventoryCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1C6CD145BB6F0E0DFE6FFC32 /* AppSettingsRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsRecord.swift; sourceTree = "<group>"; };
 		1D462F1E0A221D80BC66BF4B /* Achievements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Achievements.swift; sourceTree = "<group>"; };
 		1D96BEE34757CD202B837CF3 /* RecipeServiceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipeServiceClient.swift; sourceTree = "<group>"; };
@@ -223,9 +227,13 @@
 		BD0326D790C12B608B526CD0 /* ProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressView.swift; sourceTree = "<group>"; };
 		BF16DC1686787D4B9350B6F1 /* BarcodeLookupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeLookupService.swift; sourceTree = "<group>"; };
 		C21C3C843923CE27EFB85832 /* ProductDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductDetailView.swift; sourceTree = "<group>"; };
-		C3BB0E58BEF9C4C604DC9ABF /* InventoryAI.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = InventoryAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C3BB0E58BEF9C4C604DC9ABF /* InventoryAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InventoryAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C7B3208FA18ADDD2077FC2F6 /* MealPlanSnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealPlanSnapshotStoreTests.swift; sourceTree = "<group>"; };
 		CAF4A687DC38ED5D59D3AC27 /* MealPlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealPlanView.swift; sourceTree = "<group>"; };
+		2A7E50EBCD8F42F1B8D10963 /* WeeklyAutopilotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyAutopilotView.swift; sourceTree = "<group>"; };
+		4CB7E0956B164098AFC1797D /* DeviationSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviationSheetView.swift; sourceTree = "<group>"; };
+		4BC288C7984E42F48A51448A /* ShoppingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShoppingListView.swift; sourceTree = "<group>"; };
+		B2AD105658524D53A2AB439B /* CookNowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CookNowView.swift; sourceTree = "<group>"; };
 		CD35E41E3E6D6ED4CD293EB7 /* BarcodeLookupProviders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeLookupProviders.swift; sourceTree = "<group>"; };
 		CD74CDBA9FE76155C2592A47 /* MacroRecommendationFilterUseCaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroRecommendationFilterUseCaseTests.swift; sourceTree = "<group>"; };
 		D471902CB097EF94F879D3C3 /* SettingsAchievementsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsAchievementsView.swift; sourceTree = "<group>"; };
@@ -548,6 +556,10 @@
 			isa = PBXGroup;
 			children = (
 				CAF4A687DC38ED5D59D3AC27 /* MealPlanView.swift */,
+				2A7E50EBCD8F42F1B8D10963 /* WeeklyAutopilotView.swift */,
+				4CB7E0956B164098AFC1797D /* DeviationSheetView.swift */,
+				4BC288C7984E42F48A51448A /* ShoppingListView.swift */,
+				B2AD105658524D53A2AB439B /* CookNowView.swift */,
 			);
 			path = MealPlan;
 			sourceTree = "<group>";
@@ -650,7 +662,6 @@
 				6DFAB34ACC8E8BAADCF85531 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				BA9511127D3CD6524E3ABF57 /* XCRemoteSwiftPackageReference "Nuke" */,
 			);
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -714,6 +725,10 @@
 				60C7BEBA7BE258D1D74E8B4C /* LocalRecipeCatalog.swift in Sources */,
 				618C54D2D55CC4B18E9CB64A /* MacroRecommendationFilterUseCase.swift in Sources */,
 				4D9EC234C7998B843C8CCDA7 /* MealPlanView.swift in Sources */,
+				090D3CE18974420B986273AC /* WeeklyAutopilotView.swift in Sources */,
+				FD53028B43A946749E5C9233 /* DeviationSheetView.swift in Sources */,
+				0CF2F336194D40BCB1CFA7EF /* ShoppingListView.swift in Sources */,
+				C584BDE187CA4F8BBF2B0AB0 /* CookNowView.swift in Sources */,
 				62E32EC40E27DC10B98C3314 /* Migrations.swift in Sources */,
 				430C7B456CB2F48E45D96ECF /* NotificationScheduler.swift in Sources */,
 				A917F42908081DFD09D1949B /* NutritionRing.swift in Sources */,
@@ -884,10 +899,11 @@
 		2CFF07A40442FD18A6D03E99 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
@@ -915,6 +931,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/InventoryAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_AllowInsecureLookupEndpoints = YES;
 				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;
@@ -955,6 +972,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/InventoryAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_AllowInsecureLookupEndpoints = YES;
 				INFOPLIST_KEY_AllowInsecureRecipeServiceURL = YES;
@@ -992,6 +1010,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1011,6 +1030,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1094,10 +1114,11 @@
 		FEDB9F4C922CD3F74F662C94 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
+				DEVELOPMENT_TEAM = MXAK77CZGU;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = 1;
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
