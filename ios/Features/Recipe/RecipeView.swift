@@ -6,6 +6,7 @@ import NukeUI
 struct RecipeView: View {
     let recipe: Recipe
     let availableIngredients: Set<String>
+    let recipeServiceClient: RecipeServiceClient?
     let inventoryService: any InventoryServiceProtocol
     let onInventoryChanged: () async -> Void
 
@@ -17,15 +18,27 @@ struct RecipeView: View {
     @State private var isPreparingWriteOff = false
     @State private var isApplyingWriteOff = false
     @State private var checkedIngredients: Set<String> = []
+    
+    // Cooking Mode
+    @State private var showCookingMode = false
+    
+    // Substitutions
+    @State private var showSubstitutions = false
+    @State private var selectedIngredientForSub: String? = nil
+    @State private var substitutionsResult: [SubstituteResponse.Substitution] = []
+    @State private var isLoadingSubstitutions = false
+    @State private var substitutionError: String? = nil
 
     init(
         recipe: Recipe,
         availableIngredients: Set<String>,
+        recipeServiceClient: RecipeServiceClient?,
         inventoryService: any InventoryServiceProtocol,
         onInventoryChanged: @escaping () async -> Void = {}
     ) {
         self.recipe = recipe
         self.availableIngredients = availableIngredients
+        self.recipeServiceClient = recipeServiceClient
         self.inventoryService = inventoryService
         self.onInventoryChanged = onInventoryChanged
     }
@@ -77,6 +90,12 @@ struct RecipeView: View {
         } message: { plan in
             Text(plan.summaryText)
         }
+        .sheet(isPresented: $showSubstitutions) {
+            substitutionSheet
+        }
+        .fullScreenCover(isPresented: $showCookingMode) {
+            CookingModeView(recipe: recipe)
+        }
     }
 
     private var heroCard: some View {
@@ -86,6 +105,14 @@ struct RecipeView: View {
                     image
                         .resizable()
                         .scaledToFill()
+                } else if state.error != nil {
+                    Rectangle()
+                        .fill(Color.vayCardBackground)
+                        .overlay(
+                            Image(systemName: "photo")
+                                .font(.largeTitle)
+                                .foregroundStyle(.tertiary)
+                        )
                 } else {
                     Rectangle()
                         .fill(Color.vayCardBackground)
@@ -180,7 +207,7 @@ struct RecipeView: View {
             HStack(alignment: .center, spacing: VaySpacing.sm) {
                 Image(systemName: checked ? "checkmark.circle.fill" : (inStock ? "circle.fill" : "circle"))
                     .foregroundStyle(checked ? Color.vaySuccess : (inStock ? Color.vayPrimary : Color.secondary))
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(VayFont.body(18))
 
                 Text(ingredient)
                     .font(VayFont.body(14))
@@ -188,6 +215,22 @@ struct RecipeView: View {
                     .strikethrough(checked)
 
                 Spacer()
+                
+                if !inStock && !checked {
+                    Button {
+                        selectedIngredientForSub = ingredient
+                        showSubstitutions = true
+                    } label: {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color.vayWarning)
+                            .padding(6)
+                            .background(Color.vayWarning.opacity(0.15))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .vayAccessibilityLabel("Подобрать замену для \(ingredient)")
+                }
 
                 if inStock {
                     Text("Есть дома")
@@ -241,22 +284,128 @@ struct RecipeView: View {
 
     private var actionsCard: some View {
         VStack(spacing: VaySpacing.sm) {
-            Button("Добавить недостающее в список покупок") {
-                copyMissingIngredients()
+            if !recipe.instructions.isEmpty {
+                Button(action: { showCookingMode = true }) {
+                    Label("Начать готовить", systemImage: "play.fill")
+                        .font(VayFont.label(16))
+                        .frame(maxWidth: .infinity)
+                        .vayPillButton(color: .vaySuccess)
+                }
+                .buttonStyle(.plain)
+                .vayAccessibilityLabel("Начать готовить", hint: "Открыть пошаговые инструкции на полный экран")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.vayPrimary)
+
+            Button(action: copyMissingIngredients) {
+                Text("Добавить недостающее в список покупок")
+                    .frame(maxWidth: .infinity)
+                    .vayPillButton(color: .vayPrimary)
+            }
+            .buttonStyle(.plain)
             .vayAccessibilityLabel("Добавить недостающее в список покупок")
 
-            Button(isPreparingWriteOff ? "Подготовка..." : (isApplyingWriteOff ? "Списание..." : "Готовлю")) {
-                Task { await prepareWriteOffPlan() }
+            Button(action: { Task { await prepareWriteOffPlan() } }) {
+                Text(isPreparingWriteOff ? "Подготовка..." : (isApplyingWriteOff ? "Списание..." : "Готовлю"))
+                    .frame(maxWidth: .infinity)
+                    .vayPillButton(color: .secondary)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
             .disabled(isPreparingWriteOff || isApplyingWriteOff)
             .vayAccessibilityLabel("Готовлю", hint: "Подготовить списание ингредиентов")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .vayCard()
+    }
+    
+    private var substitutionSheet: some View {
+        NavigationStack {
+            Group {
+                if let error = substitutionError {
+                    EmptyStateView(
+                        icon: "exclamationmark.triangle",
+                        title: "Ошибка",
+                        subtitle: error,
+                        actionTitle: "Повторить",
+                        action: {
+                            Task { await fetchSubstitutions() }
+                        }
+                    )
+                } else if isLoadingSubstitutions {
+                    VStack(spacing: VaySpacing.md) {
+                        SwiftUI.ProgressView()
+                        Text("ИИ ищет замены...")
+                            .font(VayFont.body(14))
+                            .foregroundStyle(.secondary)
+                    }
+                } else if substitutionsResult.isEmpty {
+                    EmptyStateView(
+                        icon: "wand.and.stars",
+                        title: "Нет вариантов",
+                        subtitle: "Не удалось найти подходящих замен для «\(selectedIngredientForSub ?? "")».",
+                        actionTitle: "Закрыть",
+                        action: { showSubstitutions = false }
+                    )
+                } else {
+                    List {
+                        ForEach(substitutionsResult, id: \.self) { sub in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(sub.substitute)
+                                    .font(VayFont.heading(16))
+                                
+                                HStack(spacing: VaySpacing.xs) {
+                                    if sub.reason == "price" {
+                                        Image(systemName: "arrow.down.circle.fill")
+                                            .foregroundStyle(Color.vaySuccess)
+                                        Text("Дешевле")
+                                    } else {
+                                        Image(systemName: "cart.fill")
+                                            .foregroundStyle(Color.vayInfo)
+                                        Text("Доступнее")
+                                    }
+                                }
+                                .font(VayFont.caption(12))
+                                
+                                if let savings = sub.estimatedSavingsRub, savings > 0 {
+                                    Text("Экономия ~\(Int(savings)) ₽")
+                                        .font(VayFont.caption(12))
+                                        .foregroundStyle(Color.vaySuccess)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Замены")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Закрыть") {
+                        showSubstitutions = false
+                    }
+                }
+            }
+            .task {
+                await fetchSubstitutions()
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+    
+    private func fetchSubstitutions() async {
+        guard let ingredient = selectedIngredientForSub, let client = recipeServiceClient else { return }
+        
+        isLoadingSubstitutions = true
+        substitutionError = nil
+        substitutionsResult = []
+        
+        do {
+            let response = try await client.getSubstitute(ingredients: [ingredient])
+            substitutionsResult = response.substitutions
+        } catch {
+            substitutionError = error.localizedDescription
+        }
+        
+        isLoadingSubstitutions = false
     }
 
     private func statusBanner(_ text: String) -> some View {

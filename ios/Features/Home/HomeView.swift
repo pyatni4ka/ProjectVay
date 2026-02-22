@@ -5,11 +5,27 @@ struct HomeView: View {
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
-    @ObservedObject private var gamification = GamificationService.shared
-    @EnvironmentObject private var appSettingsStore: AppSettingsStore
+    private var gamification = GamificationService.shared
+    @Environment(AppSettingsStore.self) private var appSettingsStore
     var onOpenScanner: () -> Void = {}
     var onOpenMealPlan: () -> Void = {}
     var onOpenInventory: () -> Void = {}
+
+    init(
+        inventoryService: any InventoryServiceProtocol,
+        settingsService: any SettingsServiceProtocol,
+        healthKitService: HealthKitService,
+        onOpenScanner: @escaping () -> Void = {},
+        onOpenMealPlan: @escaping () -> Void = {},
+        onOpenInventory: @escaping () -> Void = {}
+    ) {
+        self.inventoryService = inventoryService
+        self.settingsService = settingsService
+        self.healthKitService = healthKitService
+        self.onOpenScanner = onOpenScanner
+        self.onOpenMealPlan = onOpenMealPlan
+        self.onOpenInventory = onOpenInventory
+    }
 
     @State private var products: [Product] = []
     @State private var batches: [Batch] = []
@@ -20,6 +36,8 @@ struct HomeView: View {
     @State private var dashboardAppeared = false
     @State private var isLoading = true
     @State private var predictions: [ProductPrediction] = []
+    @State private var todayConsumed: Nutrition = .empty
+    @State private var showLogFoodSheet = false
     @State private var adaptiveNutritionTarget: Nutrition = .empty
     @State private var healthWeightHistory: [HealthKitService.SamplePoint] = []
     @State private var selectedHealthWeightDate: Date?
@@ -86,14 +104,6 @@ struct HomeView: View {
             .padding(.horizontal, VaySpacing.lg)
         }
         .background(Color.vayBackground)
-        .overlay(alignment: .top) {
-            if let toast = gamification.lastXPToast {
-                XPToastView(text: toast.text, icon: toast.icon)
-                    .padding(.top, VaySpacing.sm)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .zIndex(10)
-            }
-        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -159,6 +169,16 @@ struct HomeView: View {
         }
         .onDisappear {
             xpToastTask?.cancel()
+        }
+        .sheet(isPresented: $showLogFoodSheet) {
+            LogFoodSheet(healthKitService: healthKitService) { logged in
+                todayConsumed = Nutrition(
+                    kcal: (todayConsumed.kcal ?? 0) + (logged.kcal ?? 0),
+                    protein: (todayConsumed.protein ?? 0) + (logged.protein ?? 0),
+                    fat: (todayConsumed.fat ?? 0) + (logged.fat ?? 0),
+                    carbs: (todayConsumed.carbs ?? 0) + (logged.carbs ?? 0)
+                )
+            }
         }
     }
 
@@ -246,7 +266,7 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: VaySpacing.md) {
                 HStack(spacing: VaySpacing.sm) {
                     Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(VayFont.label(14))
                         .foregroundStyle(Color.vayInfo)
                     Text("План на сегодня")
                         .font(VayFont.heading(16))
@@ -374,7 +394,7 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: VaySpacing.md) {
                 HStack(spacing: VaySpacing.sm) {
                     Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(VayFont.label(14))
                         .foregroundStyle(Color.vayInfo)
                     Text("Прогресс")
                         .font(VayFont.heading(16))
@@ -416,7 +436,7 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: VaySpacing.md) {
                 HStack(spacing: VaySpacing.sm) {
                     Image(systemName: "heart.text.square.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(VayFont.label(14))
                         .foregroundStyle(Color.vayDanger)
                     Text("Моё тело: динамика")
                         .font(VayFont.heading(16))
@@ -451,39 +471,44 @@ struct HomeView: View {
                         }
                     }
 
-                    if healthWeightDisplayPoints.count >= 2 {
+                    if sanitizedHealthWeightHistory.count >= 2 {
                         let scale = healthWeightScale
                         let displayedPoints = healthWeightDisplayPoints
                         let selectedPoint = selectedHealthWeightPoint
-                        let baseChart = Chart(displayedPoints) { point in
-                            LineMark(
-                                x: .value("Дата", point.date),
-                                y: .value("Вес", point.plottedValue)
-                            )
-                            .interpolationMethod(.catmullRom)
-                            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.vayPrimary, .vayInfo],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
+                        
+                        let baseChart = Chart {
+                            // 1. Line and Area (including clamped outliers)
+                            ForEach(displayedPoints) { point in
+                                LineMark(
+                                    x: .value("Дата", point.date),
+                                    y: .value("Вес", point.plottedValue)
                                 )
-                            )
-
-                            AreaMark(
-                                x: .value("Дата", point.date),
-                                y: .value("Вес", point.plottedValue)
-                            )
-                            .interpolationMethod(.catmullRom)
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.vayPrimary.opacity(0.22), .clear],
-                                    startPoint: .top,
-                                    endPoint: .bottom
+                                .interpolationMethod(.monotone)
+                                .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [.vayPrimary, .vayInfo],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
                                 )
-                            )
 
-                            if point.hasOutlier {
+                                AreaMark(
+                                    x: .value("Дата", point.date),
+                                    y: .value("Вес", point.plottedValue)
+                                )
+                                .interpolationMethod(.monotone)
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [.vayPrimary.opacity(0.22), .clear],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                            }
+                            
+                            // 2. Outliers as distinct PointMarks
+                            ForEach(displayedPoints.filter { $0.hasOutlier }) { point in
                                 PointMark(
                                     x: .value("Дата", point.date),
                                     y: .value("Вес", point.plottedValue)
@@ -496,22 +521,23 @@ struct HomeView: View {
                                         .foregroundStyle(Color.vayPrimary)
                                 }
                             }
-
-                            if let selectedPoint, selectedPoint.date == point.date {
-                                RuleMark(x: .value("Выбор", point.date))
+                            
+                            // 3. Selection highlights (on top of everything)
+                            if let selectedPoint {
+                                RuleMark(x: .value("Выбор", selectedPoint.date))
                                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                                     .foregroundStyle(Color.vayPrimary.opacity(0.6))
 
                                 PointMark(
-                                    x: .value("Дата", point.date),
-                                    y: .value("Вес", point.plottedValue)
+                                    x: .value("Дата", selectedPoint.date),
+                                    y: .value("Вес", selectedPoint.plottedValue)
                                 )
                                 .foregroundStyle(.white)
                                 .symbolSize(74)
 
                                 PointMark(
-                                    x: .value("Дата", point.date),
-                                    y: .value("Вес", point.plottedValue)
+                                    x: .value("Дата", selectedPoint.date),
+                                    y: .value("Вес", selectedPoint.plottedValue)
                                 )
                                 .foregroundStyle(Color.vayPrimary)
                                 .symbolSize(32)
@@ -626,7 +652,7 @@ struct HomeView: View {
     private func expiryRow(product: Product, batch: Batch) -> some View {
         HStack(spacing: VaySpacing.md) {
             Image(systemName: batch.location.icon)
-                .font(.system(size: 14, weight: .semibold))
+                .font(VayFont.label(14))
                 .foregroundStyle(batch.location.color)
                 .frame(width: 32, height: 32)
                 .background(batch.location.color.opacity(0.12))
@@ -669,10 +695,10 @@ struct HomeView: View {
                 }
 
                 NutritionRingGroup(
-                    kcal: 0,
-                    protein: 0,
-                    fat: 0,
-                    carbs: 0,
+                    kcal: todayConsumed.kcal ?? 0,
+                    protein: todayConsumed.protein ?? 0,
+                    fat: todayConsumed.fat ?? 0,
+                    carbs: todayConsumed.carbs ?? 0,
                     kcalGoal: dayTarget.kcal ?? 2000,
                     proteinGoal: dayTarget.protein ?? 80,
                     fatGoal: dayTarget.fat ?? 65,
@@ -680,6 +706,18 @@ struct HomeView: View {
                 )
                 .frame(maxWidth: .infinity)
                 .vayAccessibilityLabel("Кольца КБЖУ на сегодня")
+
+                if settings.healthKitWriteEnabled {
+                    Button {
+                        showLogFoodSheet = true
+                    } label: {
+                        Label("Съел другое", systemImage: "plus.circle")
+                            .font(VayFont.label(13))
+                            .foregroundStyle(Color.vayPrimary)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
             }
             .vayCard()
         }
@@ -787,7 +825,7 @@ struct HomeView: View {
         HStack(spacing: VaySpacing.sm) {
             Image(systemName: icon)
                 .foregroundStyle(color)
-                .font(.system(size: 14, weight: .semibold))
+                .font(VayFont.label(14))
             Text(title)
                 .font(VayFont.heading(16))
         }
@@ -862,20 +900,43 @@ struct HomeView: View {
         healthWeightRange.filter(points: healthWeightHistory)
     }
 
+    /// Physiologically impossible weights removed; one point per day (last measurement wins).
+    private var sanitizedHealthWeightHistory: [HealthKitService.SamplePoint] {
+        let cal = Calendar.current
+        let validRange: ClosedRange<Double> = 30...300
+        let filtered = filteredHealthWeightHistory
+            .filter { validRange.contains($0.value) }
+            .sorted { $0.date < $1.date }
+
+        // Group by calendar day and keep the last sample
+        var byDay: [Date: HealthKitService.SamplePoint] = [:]
+        for point in filtered {
+            let day = cal.startOfDay(for: point.date)
+            if let existing = byDay[day] {
+                if point.date > existing.date {
+                    byDay[day] = point
+                }
+            } else {
+                byDay[day] = point
+            }
+        }
+        return byDay.values.sorted { $0.date < $1.date }
+    }
+
     private var hasWeightDataOutsideSelectedPeriod: Bool {
-        !healthWeightHistory.isEmpty && filteredHealthWeightHistory.isEmpty
+        !healthWeightHistory.isEmpty && sanitizedHealthWeightHistory.isEmpty
     }
 
     private var healthWeightScale: DynamicChartScaleDomain? {
         DynamicChartScaleDomain.resolve(
-            values: filteredHealthWeightHistory.map(\.value),
+            values: sanitizedHealthWeightHistory.map(\.value),
             metric: .weightKg
         )
     }
 
     private var healthWeightDisplayPoints: [HealthWeightDisplayPoint] {
         let scale = healthWeightScale
-        return filteredHealthWeightHistory.map { point in
+        return sanitizedHealthWeightHistory.map { point in
             HealthWeightDisplayPoint(
                 date: point.date,
                 originalValue: point.value,
@@ -894,13 +955,12 @@ struct HomeView: View {
     }
 
     private var latestWeightValue: Double? {
-        filteredHealthWeightHistory.last?.value
+        sanitizedHealthWeightHistory.last?.value
     }
 
     private var weightDeltaValue: Double? {
-        guard let first = filteredHealthWeightHistory.first?.value, let last = filteredHealthWeightHistory.last?.value else {
-            return nil
-        }
+        guard let first = sanitizedHealthWeightHistory.first?.value,
+              let last = sanitizedHealthWeightHistory.last?.value else { return nil }
         return last - first
     }
 
@@ -923,10 +983,7 @@ struct HomeView: View {
 
     private var weeklyBudgetLimitMinor: Int64? {
         guard let settings else { return nil }
-        let weeklyBudget =
-            settings.budgetWeek
-            ?? settings.budgetMonth.map(AppSettings.weeklyBudget(fromMonthly:))
-            ?? (settings.budgetDay * Decimal(7))
+        let weeklyBudget = settings.budgetWeek
         let value = NSDecimalNumber(decimal: weeklyBudget).doubleValue
         guard value > 0 else { return nil }
         return Int64((value * 100).rounded())
@@ -1029,9 +1086,13 @@ struct HomeView: View {
         scale: DynamicChartScaleDomain?
     ) -> some View {
         if let scale {
-            chart.chartYScale(domain: scale.domain)
+            chart
+                .chartYScale(domain: scale.domain, range: .plotDimension(padding: 15))
+                .chartXScale(range: .plotDimension(padding: 15))
         } else {
             chart
+                .chartYScale(range: .plotDimension(padding: 15))
+                .chartXScale(range: .plotDimension(padding: 15))
         }
     }
 
@@ -1137,7 +1198,11 @@ struct HomeView: View {
                 ifNeeded: loadedSettings.showHealthCardOnHome,
                 healthReadEnabled: loadedSettings.healthKitReadEnabled
             )
-            
+
+            if loadedSettings.healthKitReadEnabled {
+                todayConsumed = (try? await healthKitService.fetchTodayConsumedNutrition()) ?? .empty
+            }
+
             let inventoryItems = products.map { product in
                 let quantity = batches.filter { $0.productId == product.id }.reduce(0.0) { $0 + $1.quantity }
                 return (name: product.name, quantity: quantity, expiryDate: batches.first { $0.productId == product.id }?.expiryDate)
@@ -1184,42 +1249,27 @@ struct HomeView: View {
             return adaptiveNutritionTarget
         }
 
-        return Nutrition(
-            kcal: settings.kcalGoal ?? 2000,
-            protein: settings.proteinGoalGrams ?? 80,
-            fat: settings.fatGoalGrams ?? 65,
-            carbs: settings.carbsGoalGrams ?? 250
-        )
+        return NutritionTargetsService.resolveTargetNutrition(settings: settings, healthMetrics: nil)
     }
 
     private func recalculateAdaptiveNutritionTarget(using settings: AppSettings) async {
-        var automaticDailyCalories: Double?
-        var weightKG: Double?
-
-        if settings.macroGoalSource == .automatic {
-            automaticDailyCalories = healthKitService.fallbackAutomaticDailyCalories(
-                targetLossPerWeek: settings.targetWeightDeltaPerWeek
-            )
-        }
-
+        let healthMetrics: HealthKitService.UserMetrics?
         if settings.macroGoalSource == .automatic, settings.healthKitReadEnabled {
-            if let metrics = try? await healthKitService.fetchLatestMetrics() {
-                automaticDailyCalories = Double(
-                    healthKitService.calculateDailyCalories(
-                        metrics: metrics,
-                        targetLossPerWeek: settings.targetWeightDeltaPerWeek
-                    )
-                )
-                weightKG = metrics.weightKG
-            }
+            healthMetrics = try? await healthKitService.fetchLatestMetrics()
+        } else {
+            healthMetrics = nil
         }
+        
+        let baselineTarget = NutritionTargetsService.resolveTargetNutrition(
+            settings: settings,
+            healthMetrics: healthMetrics
+        )
 
         let output = AdaptiveNutritionUseCase().execute(
             .init(
                 settings: settings,
                 range: .day,
-                automaticDailyCalories: automaticDailyCalories,
-                weightKG: weightKG,
+                baselineTarget: baselineTarget,
                 consumedNutrition: nil,
                 consumedFetchFailed: false,
                 healthIntegrationEnabled: settings.healthKitReadEnabled
