@@ -83,7 +83,7 @@ final class HealthKitService {
     }
 
     @MainActor
-    func requestReadAccess() async throws -> Bool {
+    func requestAccess() async throws -> Bool {
         #if canImport(HealthKit)
         guard HKHealthStore.isHealthDataAvailable() else {
             return false
@@ -94,7 +94,7 @@ final class HealthKitService {
         }
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
-            store.requestAuthorization(toShare: nil, read: readTypes) { granted, error in
+            store.requestAuthorization(toShare: makeWriteTypes(), read: readTypes) { granted, error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
@@ -104,6 +104,45 @@ final class HealthKitService {
         }
         #else
         return false
+        #endif
+    }
+
+    func logNutrition(_ nutrition: Nutrition, date: Date) async throws {
+        #if canImport(HealthKit)
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+
+        let end = date
+        let start = Calendar.current.date(byAdding: .second, value: -1, to: end) ?? end
+        var samples: [HKQuantitySample] = []
+
+        if let kcal = nutrition.kcal, kcal > 0,
+           let type = HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed) {
+            samples.append(HKQuantitySample(type: type, quantity: HKQuantity(unit: .kilocalorie(), doubleValue: kcal), start: start, end: end))
+        }
+        if let protein = nutrition.protein, protein > 0,
+           let type = HKObjectType.quantityType(forIdentifier: .dietaryProtein) {
+            samples.append(HKQuantitySample(type: type, quantity: HKQuantity(unit: .gram(), doubleValue: protein), start: start, end: end))
+        }
+        if let fat = nutrition.fat, fat > 0,
+           let type = HKObjectType.quantityType(forIdentifier: .dietaryFatTotal) {
+            samples.append(HKQuantitySample(type: type, quantity: HKQuantity(unit: .gram(), doubleValue: fat), start: start, end: end))
+        }
+        if let carbs = nutrition.carbs, carbs > 0,
+           let type = HKObjectType.quantityType(forIdentifier: .dietaryCarbohydrates) {
+            samples.append(HKQuantitySample(type: type, quantity: HKQuantity(unit: .gram(), doubleValue: carbs), start: start, end: end))
+        }
+
+        guard !samples.isEmpty else { return }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            store.save(samples) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
         #endif
     }
 
@@ -118,7 +157,7 @@ final class HealthKitService {
         }
 
         return await withCheckedContinuation { continuation in
-            store.getRequestStatusForAuthorization(toShare: Set<HKSampleType>(), read: readTypes) { status, _ in
+            store.getRequestStatusForAuthorization(toShare: makeWriteTypes() ?? [], read: readTypes) { status, _ in
                 switch status {
                 case .shouldRequest:
                     continuation.resume(returning: .shouldRequest)
@@ -251,33 +290,6 @@ final class HealthKitService {
         #endif
     }
 
-    func calculateDailyCalories(metrics: UserMetrics, targetLossPerWeek: Double = 0.5) -> Int {
-        guard
-            let weight = metrics.weightKG,
-            let height = metrics.heightCM,
-            let age = metrics.age
-        else { return 2100 }
-
-        let base: Double
-        if metrics.sex == "male" {
-            base = 10 * weight + 6.25 * height - 5 * Double(age) + 5
-        } else {
-            base = 10 * weight + 6.25 * height - 5 * Double(age) - 161
-        }
-
-        let active = metrics.activeEnergyKcal ?? 300
-        let tdee = base + active
-        let deficit = targetLossPerWeek * 7700.0 / 7.0
-        let adjusted = max(1500, min(3200, tdee - deficit))
-        return Int(adjusted.rounded())
-    }
-
-    func fallbackAutomaticDailyCalories(targetLossPerWeek: Double) -> Double {
-        let mediumDeficit = 0.5 * 7700.0 / 7.0
-        let profileDeficit = targetLossPerWeek * 7700.0 / 7.0
-        let baselineForMediumProfile = 2100.0
-        return max(900, baselineForMediumProfile + (mediumDeficit - profileDeficit))
-    }
 
     func fetchWeightHistory(days: Int = 30) async throws -> [SamplePoint] {
         #if canImport(HealthKit)
@@ -412,6 +424,18 @@ final class HealthKitService {
     }
 
     #if canImport(HealthKit)
+    private func makeWriteTypes() -> Set<HKSampleType>? {
+        guard
+            let dietaryEnergy = HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed),
+            let dietaryProtein = HKObjectType.quantityType(forIdentifier: .dietaryProtein),
+            let dietaryFatTotal = HKObjectType.quantityType(forIdentifier: .dietaryFatTotal),
+            let dietaryCarbohydrates = HKObjectType.quantityType(forIdentifier: .dietaryCarbohydrates)
+        else {
+            return nil
+        }
+        return [dietaryEnergy, dietaryProtein, dietaryFatTotal, dietaryCarbohydrates]
+    }
+
     private func makeReadTypes() -> Set<HKObjectType>? {
         guard
             let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass),

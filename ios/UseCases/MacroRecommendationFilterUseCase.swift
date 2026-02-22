@@ -152,8 +152,7 @@ struct AdaptiveNutritionUseCase {
         var settings: AppSettings
         var range: PlanRange
         var now: Date = Date()
-        var automaticDailyCalories: Double?
-        var weightKG: Double?
+        var baselineTarget: Nutrition
         var consumedNutrition: Nutrition?
         var consumedFetchFailed: Bool
         var healthIntegrationEnabled: Bool = true
@@ -174,15 +173,12 @@ struct AdaptiveNutritionUseCase {
         let nextMealSlot = MealSlot.next(for: input.now, schedule: input.settings.mealSchedule)
         let remainingMealsCount = max(1, nextMealSlot.remainingMealsCount)
 
-        let baselineTarget: Nutrition
+        let baselineTarget = input.baselineTarget
         let sourceMessage: String
         switch input.settings.macroGoalSource {
         case .automatic:
-            let baselineKcal = max(900, input.automaticDailyCalories ?? 2100)
-            baselineTarget = nutritionForTargetKcal(baselineKcal, weightKG: input.weightKG)
             sourceMessage = "Используется автоматический расчёт КБЖУ."
         case .manual:
-            baselineTarget = manualGoal(from: input.settings)
             sourceMessage = "Используется ручная цель КБЖУ."
         }
 
@@ -217,48 +213,7 @@ struct AdaptiveNutritionUseCase {
         )
     }
 
-    private func manualGoal(from settings: AppSettings) -> Nutrition {
-        var kcal = max(900, settings.kcalGoal ?? 2000)
-        let protein = max(0, settings.proteinGoalGrams ?? 110)
-        let fat = max(0, settings.fatGoalGrams ?? 65)
 
-        let carbs: Double
-        if let manualCarbs = settings.carbsGoalGrams {
-            carbs = max(0, manualCarbs)
-        } else {
-            carbs = max(80, (kcal - protein * 4 - fat * 9) / 4)
-        }
-
-        let requiredKcal = protein * 4 + fat * 9 + carbs * 4
-        kcal = max(kcal, requiredKcal)
-
-        return Nutrition(kcal: kcal, protein: protein, fat: fat, carbs: carbs)
-    }
-
-    private func nutritionForTargetKcal(_ kcal: Double, weightKG: Double?) -> Nutrition {
-        let baseKcal = max(900, kcal)
-
-        let protein: Double
-        if let weightKG {
-            protein = min(max(weightKG * 1.8, 90), 220)
-        } else {
-            protein = max(90, baseKcal * 0.28 / 4)
-        }
-
-        let fat: Double
-        if let weightKG {
-            fat = min(max(weightKG * 0.8, 45), 120)
-        } else {
-            fat = max(45, baseKcal * 0.28 / 9)
-        }
-
-        let minCarbs = 80.0
-        let minRequiredKcal = protein * 4 + fat * 9 + minCarbs * 4
-        let adjustedKcal = max(baseKcal, minRequiredKcal)
-        let carbs = max(minCarbs, (adjustedKcal - protein * 4 - fat * 9) / 4)
-
-        return Nutrition(kcal: adjustedKcal, protein: protein, fat: fat, carbs: carbs)
-    }
 
     private func normalizeNutrition(_ value: Nutrition) -> Nutrition {
         Nutrition(

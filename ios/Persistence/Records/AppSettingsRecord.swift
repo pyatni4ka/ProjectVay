@@ -11,9 +11,14 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var budgetDayMinor: Int64
     var budgetWeekMinor: Int64?
     var budgetMonthMinor: Int64?
+    var budgetPrimaryValueMinor: Int64
     var budgetInputPeriod: String
     var storesJSON: String
     var dislikedListJSON: String
+    var preferredCuisinesJSON: String
+    var dietsJSON: String
+    var maxPrepTime: Int?
+    var difficultyTargetsJSON: String
     var avoidBones: Bool
     var breakfastMinute: Int
     var lunchMinute: Int
@@ -44,6 +49,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var dietProfile: String
     var dietGoalMode: String
     var smartOptimizerProfile: String
+    var activityLevel: String
     var recipeServiceBaseURL: String?
     var onboardingCompleted: Bool
 
@@ -55,9 +61,14 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case budgetDayMinor = "budget_day_minor"
         case budgetWeekMinor = "budget_week_minor"
         case budgetMonthMinor = "budget_month_minor"
+        case budgetPrimaryValueMinor = "budget_primary_value_minor"
         case budgetInputPeriod = "budget_input_period"
         case storesJSON = "stores_json"
         case dislikedListJSON = "disliked_list_json"
+        case preferredCuisinesJSON = "preferred_cuisines_json"
+        case dietsJSON = "diets_json"
+        case maxPrepTime = "max_prep_time"
+        case difficultyTargetsJSON = "difficulty_targets_json"
         case avoidBones = "avoid_bones"
         case breakfastMinute = "breakfast_minute"
         case lunchMinute = "lunch_minute"
@@ -88,6 +99,7 @@ struct AppSettingsRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case dietProfile = "diet_profile"
         case dietGoalMode = "diet_goal_mode"
         case smartOptimizerProfile = "smart_optimizer_profile"
+        case activityLevel = "activity_level"
         case recipeServiceBaseURL = "recipe_service_base_url"
         case onboardingCompleted = "onboarding_completed"
     }
@@ -103,11 +115,16 @@ extension AppSettingsRecord {
         quietEndMinute = normalized.quietEndMinute
         expiryAlertsDaysJSON = try Self.encodeJSON(normalized.expiryAlertsDays)
         budgetDayMinor = normalized.budgetDay.asMinorUnits
-        budgetWeekMinor = normalized.budgetWeek?.asMinorUnits
-        budgetMonthMinor = normalized.budgetMonth?.asMinorUnits
+        budgetWeekMinor = normalized.budgetWeek.asMinorUnits
+        budgetMonthMinor = normalized.budgetMonth.asMinorUnits
+        budgetPrimaryValueMinor = normalized.budgetPrimaryValue.asHighPrecisionMinorUnits
         budgetInputPeriod = normalized.budgetInputPeriod.rawValue
         storesJSON = try Self.encodeJSON(normalized.stores.map(\.rawValue))
         dislikedListJSON = try Self.encodeJSON(normalized.dislikedList)
+        preferredCuisinesJSON = try Self.encodeJSON(normalized.preferredCuisines)
+        dietsJSON = try Self.encodeJSON(normalized.diets)
+        maxPrepTime = normalized.maxPrepTime
+        difficultyTargetsJSON = try Self.encodeJSON(normalized.difficultyTargets)
         avoidBones = normalized.avoidBones
         breakfastMinute = normalized.mealSchedule.breakfastMinute
         lunchMinute = normalized.mealSchedule.lunchMinute
@@ -138,6 +155,7 @@ extension AppSettingsRecord {
         dietProfile = normalized.dietProfile.rawValue
         dietGoalMode = normalized.dietGoalMode.rawValue
         smartOptimizerProfile = normalized.smartOptimizerProfile.rawValue
+        activityLevel = normalized.activityLevel.rawValue
         recipeServiceBaseURL = normalized.recipeServiceBaseURLOverride
         self.onboardingCompleted = onboardingCompleted
     }
@@ -147,25 +165,31 @@ extension AppSettingsRecord {
         let parsedStoresRaw = (try? Self.decodeJSON([String].self, from: storesJSON)) ?? AppSettings.default.stores.map(\.rawValue)
         let parsedStores = parsedStoresRaw.compactMap(Store.init(rawValue:))
         let parsedDisliked = (try? Self.decodeJSON([String].self, from: dislikedListJSON)) ?? AppSettings.default.dislikedList
+        let parsedCuisines = (try? Self.decodeJSON([String].self, from: preferredCuisinesJSON)) ?? AppSettings.default.preferredCuisines
+        let parsedDiets = (try? Self.decodeJSON([String].self, from: dietsJSON)) ?? AppSettings.default.diets
+        let parsedDifficulty = (try? Self.decodeJSON([String].self, from: difficultyTargetsJSON)) ?? AppSettings.default.difficultyTargets
         let parsedMacroGoalSource = AppSettings.MacroGoalSource(rawValue: macroGoalSource) ?? .automatic
         let parsedBudgetInputPeriod = AppSettings.BudgetInputPeriod(rawValue: budgetInputPeriod) ?? .week
         let parsedDietProfile = AppSettings.DietProfile(rawValue: dietProfile) ?? .medium
         let parsedMotionLevel = AppSettings.MotionLevel(rawValue: motionLevel) ?? .full
-        let parsedBodyMetricsRangeMode = AppSettings.BodyMetricsRangeMode(rawValue: bodyMetricsRangeMode) ?? .lastMonths
+        let parsedBodyMetricsRangeMode = AppSettings.BodyMetricsRangeMode(rawValue: bodyMetricsRangeMode) ?? .year
         let parsedDietGoalMode = AppSettings.DietGoalMode(rawValue: dietGoalMode) ?? .lose
         let parsedSmartOptimizerProfile = AppSettings.SmartOptimizerProfile(rawValue: smartOptimizerProfile) ?? .balanced
+        let parsedActivityLevel = NutritionCalculator.ActivityLevel(rawValue: activityLevel) ?? .moderatelyActive
         let parsedAIDataCollectionMode = AppSettings.AIDataCollectionMode(rawValue: aiDataCollectionMode) ?? .maximal
 
         return AppSettings(
             quietStartMinute: quietStartMinute,
             quietEndMinute: quietEndMinute,
             expiryAlertsDays: parsedDays,
-            budgetDay: Decimal.fromMinorUnits(budgetDayMinor),
-            budgetWeek: budgetWeekMinor.map(Decimal.fromMinorUnits),
-            budgetMonth: budgetMonthMinor.map(Decimal.fromMinorUnits),
+            budgetPrimaryValue: Decimal.fromHighPrecisionMinorUnits(budgetPrimaryValueMinor),
             budgetInputPeriod: parsedBudgetInputPeriod,
             stores: parsedStores,
             dislikedList: parsedDisliked,
+            preferredCuisines: parsedCuisines,
+            diets: parsedDiets,
+            maxPrepTime: maxPrepTime,
+            difficultyTargets: parsedDifficulty,
             avoidBones: avoidBones,
             mealSchedule: .init(
                 breakfastMinute: breakfastMinute,
@@ -198,6 +222,7 @@ extension AppSettingsRecord {
             dietProfile: parsedDietProfile,
             dietGoalMode: parsedDietGoalMode,
             smartOptimizerProfile: parsedSmartOptimizerProfile,
+            activityLevel: parsedActivityLevel,
             recipeServiceBaseURLOverride: recipeServiceBaseURL
         ).normalized()
     }

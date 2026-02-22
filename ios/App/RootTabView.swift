@@ -1,4 +1,5 @@
 import SwiftUI
+import PopupView
 
 struct RootTabView: View {
     let inventoryService: any InventoryServiceProtocol
@@ -6,7 +7,9 @@ struct RootTabView: View {
     let healthKitService: HealthKitService
     let barcodeLookupService: BarcodeLookupService
     let recipeServiceClient: RecipeServiceClient?
-    @StateObject private var appSettingsStore: AppSettingsStore
+    let shoppingListService: ShoppingListServiceProtocol
+    @State private var appSettingsStore: AppSettingsStore
+    private var gamification = GamificationService.shared
 
     enum Tab: Int, CaseIterable {
         case home
@@ -48,14 +51,16 @@ struct RootTabView: View {
         settingsService: any SettingsServiceProtocol,
         healthKitService: HealthKitService,
         barcodeLookupService: BarcodeLookupService,
-        recipeServiceClient: RecipeServiceClient?
+        recipeServiceClient: RecipeServiceClient?,
+        shoppingListService: ShoppingListServiceProtocol
     ) {
         self.inventoryService = inventoryService
         self.settingsService = settingsService
         self.healthKitService = healthKitService
         self.barcodeLookupService = barcodeLookupService
         self.recipeServiceClient = recipeServiceClient
-        _appSettingsStore = StateObject(wrappedValue: AppSettingsStore())
+        self.shoppingListService = shoppingListService
+        _appSettingsStore = State(initialValue: AppSettingsStore())
     }
 
     var body: some View {
@@ -84,7 +89,7 @@ struct RootTabView: View {
             NavigationStack {
                 ReceiptScanView(
                     inventoryService: inventoryService,
-                    onItemsAdded: {}
+                    onItemsAdded: { _ in }
                 )
             }
         }
@@ -102,8 +107,52 @@ struct RootTabView: View {
             guard let updated = notification.object as? AppSettings else { return }
             appSettingsStore.update(updated)
         }
-        .environmentObject(appSettingsStore)
+        .environment(appSettingsStore)
         .vayDynamicType()
+        .popup(item: Binding(
+            get: { gamification.lastXPToast },
+            set: { if $0 == nil { gamification.clearToast() } }
+        )) { toast in
+            HStack(spacing: 12) {
+                Image(systemName: toast.icon)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                Text(toast.text)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(Color.vayPrimary)
+            .clipShape(Capsule())
+            .vayShadow(.card)
+            .padding(.bottom, 100) // Render safely above the custom tab bar
+        } customize: {
+            $0
+                .type(.floater(verticalPadding: 0, horizontalPadding: 20, useSafeAreaInset: false))
+                .position(.bottom)
+                .animation(.spring(response: 0.4, dampingFraction: 0.7))
+                .autohideIn(3.0)
+                .closeOnTap(true)
+        }
+        .fullScreenCover(item: Binding(
+            get: {
+                if let pendingLevel = gamification.pendingLevelUp {
+                    return IdentifiableLevel(level: pendingLevel)
+                }
+                return nil
+            },
+            set: { _ in gamification.clearLevelUp() }
+        )) { (levelData: IdentifiableLevel) in
+            LevelUpSplashView(level: levelData.level) {
+                gamification.clearLevelUp()
+            }
+        }
+    }
+
+    struct IdentifiableLevel: Identifiable {
+        let id = UUID()
+        let level: Int
     }
 
     @ViewBuilder
@@ -139,7 +188,9 @@ struct RootTabView: View {
                             inventoryService: inventoryService,
                             settingsService: settingsService,
                             healthKitService: healthKitService,
+                            barcodeLookupService: barcodeLookupService,
                             recipeServiceClient: recipeServiceClient,
+                            shoppingListService: shoppingListService,
                             onOpenScanner: { showScannerSheet = true }
                         )
                     }
@@ -149,6 +200,7 @@ struct RootTabView: View {
                         SettingsView(
                             settingsService: settingsService,
                             inventoryService: inventoryService,
+                            shoppingListService: shoppingListService,
                             healthKitService: healthKitService
                         )
                     }

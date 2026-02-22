@@ -12,6 +12,12 @@ struct AppConfig {
     let enableOpenProductsFacts: Bool
     let enableBarcodeListRu: Bool
     let enableGoUPC: Bool
+    let enableEdamam: Bool
+    let edamamAppId: String?
+    let edamamAppKey: String?
+    let enableGoogleImageSearch: Bool
+    let googleSearchApiKey: String?
+    let googleSearchEngineId: String?
     let allowInsecureLookupEndpoints: Bool
     let recipeServiceBaseURL: URL?
     let localRecipeDatasetPath: String?
@@ -77,6 +83,32 @@ struct AppConfig {
             fallback: true
         )
 
+        let enableEdamam = boolValue(
+            env["ENABLE_EDAMAM_LOOKUP"] ?? stringValue(info["EnableEdamamLookup"]),
+            fallback: false
+        )
+
+        let edamamAppId = nonEmpty(
+            env["EDAMAM_APP_ID"] ?? stringValue(info["EdamamAppId"])
+        )
+
+        let edamamAppKey = nonEmpty(
+            env["EDAMAM_APP_KEY"] ?? stringValue(info["EdamamAppKey"])
+        )
+
+        let enableGoogleImageSearch = boolValue(
+            env["ENABLE_GOOGLE_IMAGE_SEARCH"] ?? stringValue(info["EnableGoogleImageSearch"]),
+            fallback: false
+        )
+
+        let googleSearchApiKey = nonEmpty(
+            env["GOOGLE_SEARCH_API_KEY"] ?? stringValue(info["GoogleSearchApiKey"])
+        )
+
+        let googleSearchEngineId = nonEmpty(
+            env["GOOGLE_SEARCH_ENGINE_ID"] ?? stringValue(info["GoogleSearchEngineId"])
+        )
+
         let allowInsecureLookupEndpoints = boolValue(
             env["ALLOW_INSECURE_LOOKUP_ENDPOINTS"] ?? stringValue(info["AllowInsecureLookupEndpoints"]),
             fallback: false
@@ -95,8 +127,15 @@ struct AppConfig {
             env["RF_LOOKUP_BASE_URL"] ?? stringValue(info["BarcodeProxyBaseURL"])
         , allowInsecure: allowInsecureLookupEndpoints)
 
+        // On simulator, fall back to localhost for local development.
+        // On real devices, require explicit RECIPE_SERVICE_BASE_URL env var or RecipeServiceBaseURL in Info.plist.
+        #if targetEnvironment(simulator)
+        let defaultRecipeServerURL: String? = "http://127.0.0.1:8080"
+        #else
+        let defaultRecipeServerURL: String? = nil
+        #endif
         let recipeServiceBaseURL = sanitizeLookupBaseURL(
-            env["RECIPE_SERVICE_BASE_URL"] ?? stringValue(info["RecipeServiceBaseURL"]) ?? "http://127.0.0.1:8080",
+            env["RECIPE_SERVICE_BASE_URL"] ?? stringValue(info["RecipeServiceBaseURL"]) ?? defaultRecipeServerURL,
             allowInsecure: allowInsecureRecipeServiceURL
         )
 
@@ -151,6 +190,12 @@ struct AppConfig {
             enableOpenProductsFacts: enableOpenProductsFacts,
             enableBarcodeListRu: enableBarcodeListRu,
             enableGoUPC: enableGoUPC,
+            enableEdamam: enableEdamam,
+            edamamAppId: edamamAppId,
+            edamamAppKey: edamamAppKey,
+            enableGoogleImageSearch: enableGoogleImageSearch,
+            googleSearchApiKey: googleSearchApiKey,
+            googleSearchEngineId: googleSearchEngineId,
             allowInsecureLookupEndpoints: allowInsecureLookupEndpoints,
             recipeServiceBaseURL: recipeServiceBaseURL,
             localRecipeDatasetPath: localRecipeDatasetPath,

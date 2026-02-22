@@ -181,6 +181,9 @@ struct LocalRecipeCatalog {
                     exclude: dislikedKeywords,
                     avoidBones: payload.avoidBones,
                     cuisine: payload.cuisine,
+                    diets: payload.diets,
+                    maxPrepTime: payload.maxPrepTime,
+                    difficulty: payload.difficulty,
                     limit: min(max(recipes.count, 12), 120),
                     strictNutrition: true,
                     macroTolerancePercent: 35
@@ -212,7 +215,7 @@ struct LocalRecipeCatalog {
                 dayCost += cost
 
                 let missing = recipe.ingredients
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .map { $0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) }
                     .filter { !$0.isEmpty }
                     .filter { ingredient in
                         !Self.ingredientCovered(ingredient, keywords: ingredientKeywords)
@@ -265,7 +268,10 @@ struct LocalRecipeCatalog {
             budget: .init(perDay: payload.budget?.perDay, perMeal: payload.budget?.perMeal),
             exclude: payload.exclude,
             avoidBones: payload.avoidBones,
-            cuisine: payload.cuisine
+            cuisine: payload.cuisine,
+            diets: payload.diets,
+            maxPrepTime: payload.maxPrepTime,
+            difficulty: payload.difficulty
         )
 
         let basePlan = generateMealPlan(payload: basePayload, startDate: startDate)
@@ -316,7 +322,7 @@ private extension LocalRecipeCatalog {
         var urls: [URL] = []
 
         if let datasetPathOverride {
-            let trimmed = datasetPathOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = datasetPathOverride.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 urls.append(URL(fileURLWithPath: trimmed))
             }
@@ -556,7 +562,7 @@ private extension LocalRecipeCatalog {
     }
 
     static func normalizeToken(_ value: String) -> String {
-        let lowered = value.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowered = value.lowercased().trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         guard !lowered.isEmpty else {
             return ""
         }

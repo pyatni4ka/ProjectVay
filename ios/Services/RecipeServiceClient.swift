@@ -321,6 +321,24 @@ final class RecipeServiceClient: @unchecked Sendable {
         }
     }
 
+    func getSubstitute(ingredients: [String], limit: Int? = 8) async throws -> SubstituteResponse {
+        guard isOnline else {
+            throw RecipeServiceClientError.offlineMode // No local substitution logic yet
+        }
+
+        let endpoint = baseURL.appending(path: "/api/v1/recipes/substitute")
+
+        return try await performRequestWithRetry {
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(SubstituteRequest(ingredients: ingredients, limit: limit))
+            let (data, response) = try await self.session.data(for: request)
+            try self.validate(response: response, data: data)
+            return try JSONDecoder().decode(SubstituteResponse.self, from: data)
+        }
+    }
+
     private func performRequestWithRetry<T>(
         maxAttempts: Int = 4,
         operation: @escaping () async throws -> T

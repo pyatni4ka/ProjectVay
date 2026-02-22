@@ -6,8 +6,9 @@ import UIKit
 struct SettingsView: View {
     let settingsService: any SettingsServiceProtocol
     let inventoryService: any InventoryServiceProtocol
+    let shoppingListService: any ShoppingListServiceProtocol
     let healthKitService: HealthKitService
-    @EnvironmentObject private var appSettingsStore: AppSettingsStore
+    @Environment(AppSettingsStore.self) private var appSettingsStore
 
     @State private var settings: AppSettings = .default
     @State private var lastPersistedSettings: AppSettings = .default
@@ -15,6 +16,10 @@ struct SettingsView: View {
     @State private var errorMessage: String?
     @State private var isHydratingSettings = false
     @State private var autoSaveTask: Task<Void, Never>?
+
+    @State private var showResetInventoryAlert = false
+    @State private var showResetShoppingListAlert = false
+    @State private var showResetAllAlert = false
 
     @State private var quietStartDate = Date()
     @State private var quietEndDate = Date()
@@ -32,6 +37,8 @@ struct SettingsView: View {
     @State private var budgetInputPeriod: AppSettings.BudgetInputPeriod = .week
     @State private var budgetPrimaryText = ""
     @FocusState private var isBudgetFieldFocused: Bool
+    /// True while applyLoadedSettings is populating state — prevents spurious period conversion.
+    @State private var isBudgetHydrating = false
 
     private let themeOptions = ["Системный", "Светлый", "Тёмный"]
 
@@ -65,7 +72,7 @@ struct SettingsView: View {
             }
 
             Section {
-                settingRow(icon: "paintpalette.fill", color: .vayAccent, label: "Тема") {
+                SettingsRowView(icon: "paintpalette.fill", color: .vayAccent, title: "Тема") {
                     Picker("Тема", selection: $selectedTheme) {
                         ForEach(0..<themeOptions.count, id: \.self) { index in
                             Text(themeOptions[index]).tag(index)
@@ -79,7 +86,7 @@ struct SettingsView: View {
             }
 
             Section {
-                settingRow(icon: "sparkles", color: .vaySecondary, label: "Движение интерфейса") {
+                SettingsRowView(icon: "sparkles", color: .vaySecondary, title: "Движение интерфейса") {
                     Picker("Движение интерфейса", selection: $motionLevel) {
                         ForEach(AppSettings.MotionLevel.allCases, id: \.rawValue) { level in
                             Text(level.title).tag(level)
@@ -89,13 +96,13 @@ struct SettingsView: View {
                         .tint(Color.vayPrimary)
                 }
 
-                settingRow(icon: "iphone.radiowaves.left.and.right", color: .vayInfo, label: "Тактильная отдача") {
+                SettingsRowView(icon: "iphone.radiowaves.left.and.right", color: .vayInfo, title: "Тактильная отдача") {
                     Toggle("", isOn: $hapticsEnabled)
                         .labelsHidden()
                         .tint(Color.vayPrimary)
                 }
 
-                settingRow(icon: "heart.text.square.fill", color: .vaySuccess, label: "Здоровье на главной") {
+                SettingsRowView(icon: "heart.text.square.fill", color: .vaySuccess, title: "Здоровье на главной") {
                     Toggle("", isOn: $showHealthCardOnHome)
                         .labelsHidden()
                         .tint(Color.vayPrimary)
@@ -109,13 +116,13 @@ struct SettingsView: View {
             }
 
             Section {
-                settingRow(icon: "heart.fill", color: .vayDanger, label: "Читать данные") {
+                SettingsRowView(icon: "heart.fill", color: .vayDanger, title: "Читать данные") {
                     Toggle("", isOn: $healthKitReadEnabled)
                         .labelsHidden()
                         .tint(Color.vayPrimary)
                 }
 
-                settingRow(icon: "heart.text.square.fill", color: .vaySuccess, label: "Записывать калории") {
+                SettingsRowView(icon: "heart.text.square.fill", color: .vaySuccess, title: "Записывать калории") {
                     Toggle("", isOn: $healthKitWriteEnabled)
                         .labelsHidden()
                         .tint(Color.vayPrimary)
@@ -129,17 +136,25 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker("Период бюджета", selection: $budgetInputPeriod) {
+                Picker("Период бюджета", selection: Binding(
+                    get: { budgetInputPeriod },
+                    set: { newPeriod in
+                        guard newPeriod != budgetInputPeriod, !isBudgetHydrating else {
+                            budgetInputPeriod = newPeriod
+                            return
+                        }
+                        let old = budgetInputPeriod
+                        budgetInputPeriod = newPeriod
+                        convertBudgetPrimaryInput(from: old, to: newPeriod)
+                    }
+                )) {
                     ForEach(AppSettings.BudgetInputPeriod.allCases, id: \.rawValue) { period in
                         Text(period.title).tag(period)
                     }
                 }
                 .pickerStyle(.segmented)
-                .onChange(of: budgetInputPeriod) { previous, current in
-                    convertBudgetPrimaryInput(from: previous, to: current)
-                }
 
-                settingRow(icon: "rublesign.circle.fill", color: .vaySuccess, label: budgetPrimaryLabel) {
+                SettingsRowView(icon: "rublesign.circle.fill", color: .vaySuccess, title: budgetPrimaryLabel) {
                     TextField(budgetPrimaryPlaceholder, text: $budgetPrimaryText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
@@ -147,7 +162,7 @@ struct SettingsView: View {
                 }
 
                 ForEach(readOnlyBudgetRows, id: \.period.rawValue) { rowData in
-                    settingRow(icon: rowData.icon, color: rowData.color, label: rowData.label) {
+                    SettingsRowView(icon: rowData.icon, color: rowData.color, title: rowData.label) {
                         Text(rowData.value)
                             .font(VayFont.label(14))
                             .foregroundStyle(.secondary)
@@ -162,17 +177,17 @@ struct SettingsView: View {
             }
 
             Section {
-                settingRow(icon: "sunrise.fill", color: .vayAccent, label: "Завтрак") {
+                SettingsRowView(icon: "sunrise.fill", color: .vayAccent, title: "Завтрак") {
                     DatePicker("", selection: $breakfastDate, displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
 
-                settingRow(icon: "sun.max.fill", color: .vayWarning, label: "Обед") {
+                SettingsRowView(icon: "sun.max.fill", color: .vayWarning, title: "Обед") {
                     DatePicker("", selection: $lunchDate, displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
 
-                settingRow(icon: "moon.stars.fill", color: .vaySecondary, label: "Ужин") {
+                SettingsRowView(icon: "moon.stars.fill", color: .vaySecondary, title: "Ужин") {
                     DatePicker("", selection: $dinnerDate, displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
@@ -181,12 +196,12 @@ struct SettingsView: View {
             }
 
             Section {
-                settingRow(icon: "moon.zzz.fill", color: .vaySecondary, label: "Начало") {
+                SettingsRowView(icon: "moon.zzz.fill", color: .vaySecondary, title: "Начало") {
                     DatePicker("", selection: $quietStartDate, displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
 
-                settingRow(icon: "alarm.fill", color: .vayAccent, label: "Конец") {
+                SettingsRowView(icon: "alarm.fill", color: .vayAccent, title: "Конец") {
                     DatePicker("", selection: $quietEndDate, displayedComponents: .hourAndMinute)
                         .labelsHidden()
                 }
@@ -241,6 +256,31 @@ struct SettingsView: View {
             } header: {
                 sectionHeader(icon: "info.circle", title: "О приложении")
             }
+            Section {
+                Button(role: .destructive) {
+                    showResetInventoryAlert = true
+                } label: {
+                    Text("Очистить инвентарь")
+                }
+
+                Button(role: .destructive) {
+                    showResetShoppingListAlert = true
+                } label: {
+                    Text("Очистить список покупок")
+                }
+
+                Button(role: .destructive) {
+                    showResetAllAlert = true
+                } label: {
+                    Text("Обнулить всё (Сброс приложения)")
+                }
+            } header: {
+                sectionHeader(icon: "trash.fill", title: "Управление данными")
+            } footer: {
+                Text("Эти действия необратимы. Будьте осторожны.")
+                    .font(VayFont.caption(11))
+                    .foregroundStyle(.secondary)
+            }
         }
         .listStyle(.insetGrouped)
         .scrollDismissesKeyboard(.interactively)
@@ -249,6 +289,49 @@ struct SettingsView: View {
             Color.clear.frame(height: VayLayout.tabBarOverlayInset)
         }
         .navigationTitle("Настройки")
+        .alert("Очистить инвентарь?", isPresented: $showResetInventoryAlert) {
+            Button("Отмена", role: .cancel) {}
+            Button("Очистить", role: .destructive) {
+                Task {
+                    do {
+                        try await inventoryService.deleteAllInventoryData()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                }
+            }
+        } message: {
+            Text("Вы уверены? Все ваши продукты будут удалены.")
+        }
+        .alert("Очистить список покупок?", isPresented: $showResetShoppingListAlert) {
+            Button("Отмена", role: .cancel) {}
+            Button("Очистить", role: .destructive) {
+                Task {
+                    do {
+                        try await shoppingListService.deleteAllItems()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                }
+            }
+        } message: {
+            Text("Вы уверены? Все элементы в списке покупок будут удалены.")
+        }
+        .alert("Обнулить настройки и данные?", isPresented: $showResetAllAlert) {
+            Button("Отмена", role: .cancel) {}
+            Button("Сброс", role: .destructive) {
+                Task {
+                    do {
+                        try await shoppingListService.deleteAllItems()
+                        try await settingsService.deleteAllLocalData(resetOnboarding: true)
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                }
+            }
+        } message: {
+            Text("Приложение вернётся к начальным настройкам.")
+        }
         .alert("Ошибка", isPresented: Binding(get: { errorMessage != nil }, set: { _ in errorMessage = nil })) {
             Button("Ок", role: .cancel) {}
         } message: {
@@ -282,6 +365,7 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .appSettingsDidChange)) { notification in
             guard let updated = notification.object as? AppSettings else { return }
             guard updated != settings else { return }
+            guard !isBudgetFieldFocused else { return }
             applyLoadedSettings(updated)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
@@ -371,33 +455,10 @@ struct SettingsView: View {
             .map { (period: $0.0, icon: $0.1, color: $0.2, label: $0.3, value: $0.4) }
     }
 
-    private func settingRow<Content: View>(
-        icon: String,
-        color: Color,
-        label: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(spacing: VaySpacing.md) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(color)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-
-            Text(label)
-                .font(VayFont.body(15))
-
-            Spacer()
-
-            content()
-        }
-    }
-
     private func navigationRow(icon: String, color: Color, title: String) -> some View {
         HStack(spacing: VaySpacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(VayFont.label(13))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
                 .background(color)
@@ -414,7 +475,7 @@ struct SettingsView: View {
     private func sectionHeader(icon: String, title: String) -> some View {
         HStack(spacing: VaySpacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(VayFont.caption(11))
             Text(title)
         }
         .font(VayFont.caption(12))
@@ -436,7 +497,7 @@ struct SettingsView: View {
     private func applyLoadedSettings(_ loaded: AppSettings) {
         let normalized = loaded.normalized()
         isHydratingSettings = true
-        defer { isHydratingSettings = false }
+        isBudgetHydrating = true
 
         settings = normalized
         lastPersistedSettings = normalized
@@ -454,12 +515,19 @@ struct SettingsView: View {
         hapticsEnabled = normalized.hapticsEnabled
         showHealthCardOnHome = normalized.showHealthCardOnHome
 
-        budgetInputPeriod = normalized.budgetInputPeriod
+        // Set text BEFORE period so the Binding setter sees isBudgetHydrating=true.
         budgetPrimaryText = formatBudgetValue(
             budgetPrimaryValue(from: normalized, period: normalized.budgetInputPeriod)
         )
+        budgetInputPeriod = normalized.budgetInputPeriod
 
         appSettingsStore.update(normalized)
+
+        // Reset flags after SwiftUI has processed state changes (next run-loop turn).
+        Task { @MainActor in
+            isHydratingSettings = false
+            isBudgetHydrating = false
+        }
     }
 
     private func scheduleAutoSave() {
@@ -514,11 +582,15 @@ struct SettingsView: View {
         updated.mealSchedule.lunchMinute = Calendar.current.minuteOfDay(from: lunchDate)
         updated.mealSchedule.dinnerMinute = Calendar.current.minuteOfDay(from: dinnerDate)
 
-        if let budgetBreakdown = parsedBudgetBreakdown {
+        if let primaryBudget = parseBudgetValue(budgetPrimaryText) {
             updated.budgetInputPeriod = budgetInputPeriod
-            updated.budgetDay = budgetBreakdown.day
-            updated.budgetWeek = budgetBreakdown.week
-            updated.budgetMonth = budgetBreakdown.month
+            
+            // If the text matches the current high-precision value (formatted), keep the high-precision value.
+            // Otherwise, the user likely edited the text, so use the parsed (lower precision) value.
+            let currentFormatted = formatBudgetValue(updated.budgetPrimaryValue)
+            if currentFormatted != budgetPrimaryText {
+                updated.budgetPrimaryValue = primaryBudget
+            }
         }
 
         return updated.normalized()
@@ -537,7 +609,11 @@ struct SettingsView: View {
         guard previous != current else { return }
 
         let sourceValue: Decimal
-        if let parsed = parseBudgetValue(budgetPrimaryText) {
+        // Check if the text matches the stored value (formatted). If so, use high precision.
+        let storedFormatted = formatBudgetValue(budgetPrimaryValue(from: settings, period: previous))
+        if storedFormatted == budgetPrimaryText {
+            sourceValue = budgetPrimaryValue(from: settings, period: previous)
+        } else if let parsed = parseBudgetValue(budgetPrimaryText) {
             sourceValue = parsed
         } else {
             sourceValue = budgetPrimaryValue(from: settings, period: previous)
@@ -559,6 +635,10 @@ struct SettingsView: View {
         }
 
         budgetPrimaryText = formatBudgetValue(converted)
+        
+        // Update local state to preserve high precision immediately
+        settings.budgetPrimaryValue = converted
+        settings.budgetInputPeriod = current
     }
 
     private func budgetPrimaryValue(
@@ -567,33 +647,11 @@ struct SettingsView: View {
     ) -> Decimal {
         switch period {
         case .day:
-            if settings.budgetDay > 0 {
-                return settings.budgetDay.rounded(scale: 2)
-            }
-            if let budgetWeek = settings.budgetWeek {
-                return AppSettings.dailyBudget(fromWeekly: budgetWeek)
-            }
-            if let budgetMonth = settings.budgetMonth {
-                return AppSettings.dailyBudget(fromMonthly: budgetMonth)
-            }
-            return 0
+            return settings.budgetDay
         case .week:
-            if let budgetWeek = settings.budgetWeek {
-                return budgetWeek.rounded(scale: 2)
-            }
-            if let budgetMonth = settings.budgetMonth {
-                return AppSettings.weeklyBudget(fromMonthly: budgetMonth)
-            }
-            return (max(0, settings.budgetDay) * 7).rounded(scale: 2)
+            return settings.budgetWeek
         case .month:
-            if let budgetMonth = settings.budgetMonth {
-                return budgetMonth.rounded(scale: 2)
-            }
-            if let budgetWeek = settings.budgetWeek {
-                return AppSettings.monthlyBudget(fromWeekly: budgetWeek)
-            }
-            let fallbackWeek = (max(0, settings.budgetDay) * 7).rounded(scale: 2)
-            return AppSettings.monthlyBudget(fromWeekly: fallbackWeek)
+            return settings.budgetMonth
         }
     }
 

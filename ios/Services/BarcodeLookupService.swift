@@ -29,6 +29,7 @@ final class BarcodeLookupService: @unchecked Sendable {
     private let inventoryService: any InventoryServiceProtocol
     private let scannerService: ScannerService
     private let providers: [any BarcodeLookupProvider]
+    private let imageSearchProvider: (any ImageSearchProvider)?
     private let policy: BarcodeLookupPolicy
     private let runtimeGuard = LookupRuntimeGuard()
 #if DEBUG
@@ -39,11 +40,13 @@ final class BarcodeLookupService: @unchecked Sendable {
         inventoryService: any InventoryServiceProtocol,
         scannerService: ScannerService,
         providers: [any BarcodeLookupProvider],
+        imageSearchProvider: (any ImageSearchProvider)? = nil,
         policy: BarcodeLookupPolicy = .default
     ) {
         self.inventoryService = inventoryService
         self.scannerService = scannerService
         self.providers = providers
+        self.imageSearchProvider = imageSearchProvider
         self.policy = policy
     }
 
@@ -87,13 +90,17 @@ final class BarcodeLookupService: @unchecked Sendable {
             if let product = try await inventoryService.findProduct(by: barcode) {
                 if
                     shouldEnrichLocalProduct(product: product, barcode: barcode),
-                    case .hit(let payload, _) = await lookupProvidersParallelFirstHit(barcode: barcode)
+                    case .hit(let payload, _) = await lookupProvidersParallelMerge(barcode: barcode)
                 {
                     var updated = product
                     updated.name = payload.name
                     updated.brand = payload.brand
-                    updated.category = payload.category
+                    let classification = ProductClassifier.classify(rawCategory: payload.category, productName: payload.name)
+                    updated.category = classification.category
                     updated.nutrition = payload.nutrition
+                    if updated.imageURL == nil {
+                        updated.imageURL = await fetchImageIfNeeded(existingImageURL: payload.imageURL, name: payload.name, brand: payload.brand)
+                    }
                     let saved = try await inventoryService.updateProduct(updated)
                     await runtimeGuard.clearNegativeCache(barcode: barcode)
                     debugLog("enriched existing product barcode=\(barcode) newName=\"\(payload.name)\"")
@@ -110,7 +117,7 @@ final class BarcodeLookupService: @unchecked Sendable {
                 return .notFound(barcode: barcode, internalCode: nil, parsedWeightGrams: parsedWeightGrams, suggestedExpiry: suggestedExpiry)
             }
 
-            let providerResolution = await lookupProvidersParallelFirstHit(barcode: barcode)
+            let providerResolution = await lookupProvidersParallelMerge(barcode: barcode)
             if case .hit(let payload, let providerID) = providerResolution {
                 debugLog("provider hit provider=\(providerID) barcode=\(barcode) name=\"\(payload.name)\"")
                 guard allowCreate else {
@@ -124,18 +131,22 @@ final class BarcodeLookupService: @unchecked Sendable {
                     )
                 }
 
-                let creationResult = try await createOrLoadProduct(
-                    Product(
-                        barcode: payload.barcode,
-                        name: payload.name,
-                        brand: payload.brand,
-                        category: payload.category,
-                        defaultUnit: .pcs,
-                        nutrition: payload.nutrition,
-                        disliked: false,
-                        mayContainBones: false
-                    )
+                let classification = ProductClassifier.classify(rawCategory: payload.category, productName: payload.name)
+                let resolvedCategory = classification.category
+                let finalImageURL = await fetchImageIfNeeded(existingImageURL: payload.imageURL, name: payload.name, brand: payload.brand)
+                
+                let newProduct = Product(
+                    barcode: payload.barcode,
+                    name: payload.name,
+                    brand: payload.brand,
+                    category: resolvedCategory,
+                    imageURL: finalImageURL,
+                    defaultUnit: .pcs,
+                    nutrition: payload.nutrition,
+                    disliked: false,
+                    mayContainBones: false
                 )
+                let creationResult = try await createOrLoadProduct(newProduct)
 
                 await runtimeGuard.clearNegativeCache(barcode: barcode)
                 switch creationResult {
@@ -227,6 +238,27 @@ final class BarcodeLookupService: @unchecked Sendable {
         }
     }
 
+    private func fetchImageIfNeeded(existingImageURL: URL?, name: String, brand: String?) async -> URL? {
+        if let existingImageURL { return existingImageURL }
+        guard let imageSearchProvider else { return nil }
+        
+        // Remove common unnecessary words from the query that might confuse the search
+        let queryBase = "\(name) \(brand ?? "")".trimmingCharacters(in: .whitespaces)
+        let query = queryBase.replacingOccurrences(of: "Товар ", with: "")
+        
+        guard !query.isEmpty else { return nil }
+        do {
+            let url = try await imageSearchProvider.searchImage(query: query)
+            if url != nil {
+                debugLog("fetched image from Image Search Provider for query=\"\(query)\"")
+            }
+            return url
+        } catch {
+            debugLog("Image search failed for query=\"\(query)\" error=\(error)")
+            return nil
+        }
+    }
+
     private func resolveInternalCode(_ code: String, parsedWeightGrams: Double?) async -> ScanResolution {
         do {
             let mapping = try await inventoryService.internalCodeMapping(for: code)
@@ -240,7 +272,7 @@ final class BarcodeLookupService: @unchecked Sendable {
         }
     }
 
-    private func lookupProvidersParallelFirstHit(barcode: String) async -> ProviderLookupAggregateResult {
+    private func lookupProvidersParallelMerge(barcode: String) async -> ProviderLookupAggregateResult {
         var eligibleProviders: [any BarcodeLookupProvider] = []
         for provider in providers {
             guard await runtimeGuard.canQueryProvider(
@@ -285,22 +317,52 @@ final class BarcodeLookupService: @unchecked Sendable {
             }
 
             var hasFailure = false
+            var hits: [(payload: BarcodeLookupPayload, providerID: String)] = []
+
             while let taskResult = await group.next() {
                 switch taskResult {
                 case .hit(let payload, let providerID):
                     debugLog("provider completed hit provider=\(providerID) barcode=\(barcode) name=\"\(payload.name)\"")
+                    hits.append((payload, providerID))
                     group.cancelAll()
-                    return .hit(payload: payload, providerID: providerID)
+                    break // We got a hit, stop waiting for other providers to improve speed
                 case .failed(let providerID):
                     debugLog("provider completed failed provider=\(providerID) barcode=\(barcode)")
                     hasFailure = true
                 case .miss(let providerID):
                     debugLog("provider completed miss provider=\(providerID) barcode=\(barcode)")
-                    continue
                 case .cancelled(let providerID):
                     debugLog("provider completed cancelled provider=\(providerID) barcode=\(barcode)")
-                    continue
                 }
+            }
+
+            if !hits.isEmpty {
+                let payloads = hits.map { $0.payload }
+                let providerNames = hits.map { $0.providerID }.joined(separator: "+")
+                
+                let bestName = payloads.max(by: { $0.name.count < $1.name.count })?.name ?? payloads[0].name
+                let bestBrand = payloads.compactMap { $0.brand }.first(where: { !$0.isEmpty })
+                let bestCategory = payloads.map { $0.category }.first(where: { $0.lowercased() != "продукты" }) ?? payloads[0].category
+                
+                let bestNutrition = payloads.map { $0.nutrition }.max(by: { a, b in
+                    let scoreA = (a.kcal != nil ? 1 : 0) + (a.protein != nil ? 1 : 0) + (a.fat != nil ? 1 : 0) + (a.carbs != nil ? 1 : 0)
+                    let scoreB = (b.kcal != nil ? 1 : 0) + (b.protein != nil ? 1 : 0) + (b.fat != nil ? 1 : 0) + (b.carbs != nil ? 1 : 0)
+                    return scoreA < scoreB
+                }) ?? .empty
+                
+                let bestImageURL = payloads.compactMap { $0.imageURL }.first
+                
+                let mergedPayload = BarcodeLookupPayload(
+                    barcode: barcode,
+                    name: bestName,
+                    brand: bestBrand,
+                    category: bestCategory,
+                    nutrition: bestNutrition,
+                    imageURL: bestImageURL
+                )
+                
+                debugLog("providers completed barcode=\(barcode) merged hits from: \(providerNames)")
+                return .hit(payload: mergedPayload, providerID: "merged(\(providerNames))")
             }
 
             debugLog("providers completed barcode=\(barcode) aggregate=\(hasFailure ? "failed" : "miss")")
@@ -397,12 +459,29 @@ final class BarcodeLookupService: @unchecked Sendable {
                 throw BarcodeLookupServiceError.timeout
             }
 
-            guard let first = try await group.next() else {
-                throw BarcodeLookupServiceError.timeout
-            }
+            do {
+                guard let first = try await group.next() else {
+                    throw BarcodeLookupServiceError.timeout
+                }
 
-            group.cancelAll()
-            return first
+                group.cancelAll()
+                return first
+            } catch is CancellationError {
+                // External cancellation may mask a real operation error.
+                // Try to retrieve the operation's actual result before giving up.
+                group.cancelAll()
+                do {
+                    if let result = try await group.next() {
+                        return result
+                    }
+                } catch is CancellationError {
+                    // Both tasks cancelled — propagate cancellation.
+                } catch {
+                    // Operation threw a real error — propagate it instead of CancellationError.
+                    throw error
+                }
+                throw CancellationError()
+            }
         }
     }
 

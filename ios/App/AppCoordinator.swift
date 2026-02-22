@@ -1,11 +1,12 @@
 import Foundation
 import UserNotifications
+import Observation
 
 @MainActor
-final class AppCoordinator: ObservableObject {
-    @Published var isInitialized: Bool = false
-    @Published var isOnboardingCompleted: Bool = false
-    @Published var selectedTab: RootTab = .home
+@Observable final class AppCoordinator {
+    var isInitialized: Bool = false
+    var isOnboardingCompleted: Bool = false
+    var selectedTab: RootTab = .home
 
     private let settingsService: any SettingsServiceProtocol
 

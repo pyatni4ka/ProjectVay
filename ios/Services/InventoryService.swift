@@ -10,6 +10,7 @@ protocol InventoryServiceProtocol {
     func createProduct(_ product: Product) async throws -> Product
     func updateProduct(_ product: Product) async throws -> Product
     func deleteProduct(id: UUID) async throws
+    func deleteAllInventoryData() async throws
 
     func addBatch(_ batch: Batch) async throws -> Batch
     func updateBatch(_ batch: Batch) async throws -> Batch
@@ -55,6 +56,12 @@ final class InventoryService: InventoryServiceProtocol {
 
     func findProduct(byInternalCode code: String) async throws -> Product? {
         try repository.findProduct(byInternalCode: code)
+    }
+
+    func deleteAllInventoryData() async throws {
+        try await notificationScheduler.cancelAllExpiryNotifications()
+        try repository.deleteAllInventoryData()
+        notifyInventoryChanged()
     }
 
     func createProduct(_ product: Product) async throws -> Product {

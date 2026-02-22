@@ -1,0 +1,1 @@
+- **ALWAYS communicate in Russian. No exceptions.** In the final response of a task, or when waiting for user verification, DO NOT revert to English. Start and end every response in Russian.

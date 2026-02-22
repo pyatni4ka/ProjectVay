@@ -12,6 +12,7 @@ struct ProductRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var imageURL: String?
     var localImagePath: String?
     var defaultUnit: String
+    var store: String?
     var nutritionJSON: String
     var disliked: Bool
     var mayContainBones: Bool
@@ -27,6 +28,7 @@ struct ProductRecord: Codable, FetchableRecord, MutablePersistableRecord {
         static let imageURL = Column(CodingKeys.imageURL)
         static let localImagePath = Column(CodingKeys.localImagePath)
         static let defaultUnit = Column(CodingKeys.defaultUnit)
+        static let store = Column(CodingKeys.store)
         static let nutritionJSON = Column(CodingKeys.nutritionJSON)
         static let disliked = Column(CodingKeys.disliked)
         static let mayContainBones = Column(CodingKeys.mayContainBones)
@@ -43,6 +45,7 @@ struct ProductRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case imageURL = "image_url"
         case localImagePath = "local_image_path"
         case defaultUnit = "default_unit"
+        case store
         case nutritionJSON = "nutrition_json"
         case disliked
         case mayContainBones = "may_contain_bones"
@@ -61,7 +64,15 @@ extension ProductRecord {
         imageURL = product.imageURL?.absoluteString
         localImagePath = product.localImagePath
         defaultUnit = product.defaultUnit.rawValue
-        nutritionJSON = try JSONEncoder().encode(product.nutrition).utf8String
+        store = product.store?.rawValue
+        nutritionJSON = {
+            let encoder = JSONEncoder()
+            if let data = try? encoder.encode(product.nutrition) {
+                return data.utf8String
+            } else {
+                return "{}"
+            }
+        }()
         disliked = product.disliked
         mayContainBones = product.mayContainBones
         createdAt = product.createdAt
@@ -70,8 +81,12 @@ extension ProductRecord {
 
     func asDomain() throws -> Product {
         let nutritionData = Data(nutritionJSON.utf8)
-        let nutrition = (try? JSONDecoder().decode(Nutrition.self, from: nutritionData)) ?? .empty
+        let decoder = JSONDecoder()
+        let nutrition = (try? decoder.decode(Nutrition.self, from: nutritionData)) ?? .empty
 
+        let unit = UnitType(rawValue: defaultUnit) ?? .pcs
+        let storeEnum = store.flatMap { Store(rawValue: $0) }
+        
         return Product(
             id: UUID(uuidString: id) ?? UUID(),
             barcode: barcode,
@@ -80,7 +95,8 @@ extension ProductRecord {
             category: category,
             imageURL: imageURL.flatMap(URL.init(string:)),
             localImagePath: localImagePath,
-            defaultUnit: UnitType(rawValue: defaultUnit) ?? .pcs,
+            defaultUnit: unit,
+            store: storeEnum,
             nutrition: nutrition,
             disliked: disliked,
             mayContainBones: mayContainBones,

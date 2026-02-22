@@ -8,6 +8,7 @@ struct EditBatchView: View {
     let initialExpiryDate: Date?
     let initialQuantity: Double?
     let initialUnit: UnitType?
+    let initialLocation: InventoryLocation?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -28,7 +29,8 @@ struct EditBatchView: View {
         onSaved: @escaping () -> Void,
         initialExpiryDate: Date? = nil,
         initialQuantity: Double? = nil,
-        initialUnit: UnitType? = nil
+        initialUnit: UnitType? = nil,
+        initialLocation: InventoryLocation? = nil
     ) {
         self.productID = productID
         self.batch = batch
@@ -37,6 +39,7 @@ struct EditBatchView: View {
         self.initialExpiryDate = initialExpiryDate
         self.initialQuantity = initialQuantity
         self.initialUnit = initialUnit
+        self.initialLocation = initialLocation
     }
 
     var body: some View {
@@ -138,7 +141,7 @@ struct EditBatchView: View {
     private func iconRow<C: View>(_ icon: String, _ color: Color, @ViewBuilder content: () -> C) -> some View {
         HStack(spacing: VaySpacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(VayFont.label(13))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
                 .background(color)
@@ -149,7 +152,7 @@ struct EditBatchView: View {
 
     private func secHead(_ icon: String, _ title: String) -> some View {
         HStack(spacing: VaySpacing.sm) {
-            Image(systemName: icon).font(.system(size: 11))
+            Image(systemName: icon).font(VayFont.caption(11))
             Text(title)
         }
         .font(VayFont.caption(12))
@@ -159,6 +162,7 @@ struct EditBatchView: View {
 
     private func loadFromInput() {
         guard let batch else {
+            if let initialLocation { location = initialLocation }
             if let initialQuantity { quantity = initialQuantity.formatted() }
             if let initialUnit { unit = initialUnit }
             if let initialExpiryDate { hasExpiryDate = true; expiryDate = initialExpiryDate }

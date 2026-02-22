@@ -12,13 +12,13 @@ export type RecipeDifficulty = "easy" | "medium" | "hard";
 
 export type Season = "spring" | "summer" | "autumn" | "winter" | "all";
 
-export type DietType = 
-  | "vegetarian" 
-  | "vegan" 
-  | "gluten_free" 
-  | "dairy_free" 
-  | "keto" 
-  | "low_carb" 
+export type DietType =
+  | "vegetarian"
+  | "vegan"
+  | "gluten_free"
+  | "dairy_free"
+  | "keto"
+  | "low_carb"
   | "diabetic"
   | "halal"
   | "kosher";
@@ -95,7 +95,7 @@ export type RecommendPayload = {
   limit?: number;
   strictNutrition?: boolean;
   macroTolerancePercent?: number;
-  
+
   // New filters
   maxPrepTime?: number;
   difficulty?: RecipeDifficulty[];
@@ -104,7 +104,7 @@ export type RecommendPayload = {
   mealTypes?: MealType[];
   maxCalories?: number;
   minProtein?: number;
-  
+
   // Diversity
   excludeRecentRecipes?: string[];
   diversityWeight?: number;
@@ -130,7 +130,7 @@ export type MealPlanRequest = {
   exclude?: string[];
   avoidBones?: boolean;
   cuisine?: string[];
-  
+
   // New
   mealSchedule?: {
     breakfastStart?: number;
@@ -353,7 +353,7 @@ export type MealPlanResponse = {
   varietyScore?: number;
   optimization?: {
     objective: "cost_macro" | "balanced";
-    profile: "economy_aggressive" | "balanced" | "macro_precision";
+    profile: "economy_aggressive" | "balanced" | "macro_precision" | "inventory_first";
     averageMacroDeviation: number;
     averageMealCost: number;
     strictMacroMeals: number;
@@ -395,14 +395,14 @@ export type PriceEstimateResponse = {
 
 export type SmartMealPlanRequest = MealPlanRequest & {
   objective?: "cost_macro" | "balanced";
-  optimizerProfile?: "economy_aggressive" | "balanced" | "macro_precision";
+  optimizerProfile?: "economy_aggressive" | "balanced" | "macro_precision" | "inventory_first";
   macroTolerancePercent?: number;
   ingredientPriceHints?: IngredientPriceHint[];
 };
 
 export type SmartMealPlanResponse = MealPlanResponse & {
   objective: "cost_macro" | "balanced";
-  optimizerProfile: "economy_aggressive" | "balanced" | "macro_precision";
+  optimizerProfile: "economy_aggressive" | "balanced" | "macro_precision" | "inventory_first";
   costConfidence: number;
   priceExplanation: string[];
 };

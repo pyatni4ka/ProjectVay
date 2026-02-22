@@ -12,9 +12,18 @@ import type {
 } from "../types/contracts.js";
 import { rankRecipes, calculateDiversityScore } from "./recommendation.js";
 
-const MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner"];
+const BASE_MEAL_TYPES: MealType[] = ["breakfast", "lunch", "dinner"];
+const MEAL_TYPES_WITH_SNACK: MealType[] = ["breakfast", "lunch", "dinner", "snack"];
 const DAY_NAMES = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
-type OptimizerProfile = "economy_aggressive" | "balanced" | "macro_precision";
+type OptimizerProfile = "economy_aggressive" | "balanced" | "macro_precision" | "inventory_first";
+
+/** Распределение калорий по типам приёмов пищи (25/35/30/10) */
+const MEAL_CALORIE_SHARE: Record<MealType, number> = {
+  breakfast: 0.25,
+  lunch: 0.35,
+  dinner: 0.30,
+  snack: 0.10
+};
 
 export function generateMealPlan(
   candidates: Recipe[],
@@ -33,9 +42,13 @@ export function generateMealPlan(
   const shoppingListSet = new Set<string>();
   const warnings: string[] = [];
 
+  // Динамический набор приёмов пищи
+  const activeMealTypes: MealType[] = request.includeSnacks
+    ? MEAL_TYPES_WITH_SNACK
+    : BASE_MEAL_TYPES;
+
   const effectiveDayKcal = request.targets.kcal ? Math.max(0, request.targets.kcal - beveragesKcal) : undefined;
-  const perMealKcal = effectiveDayKcal ? effectiveDayKcal / 3 : undefined;
-  const perMealBudget = resolvePerMealBudget(request);
+  const perMealBudget = resolvePerMealBudget(request, activeMealTypes.length);
 
   const recipeHistory = new Set(request.userHistory ?? []);
   const objective = options.objective ?? "balanced";
@@ -44,25 +57,28 @@ export function generateMealPlan(
   const hintPriceByIngredient = buildHintPriceMap(options.ingredientPriceHints ?? []);
   const defaultIngredientCost = resolveDefaultIngredientCost(hintPriceByIngredient);
 
-  const macroTargets = {
-    protein: request.targets.protein ? request.targets.protein / 3 : undefined,
-    fat: request.targets.fat ? request.targets.fat / 3 : undefined,
-    carbs: request.targets.carbs ? request.targets.carbs / 3 : undefined
+  // Средний per-meal таргет для recommend (используется для начального ранжирования)
+  const avgMealShare = 1 / activeMealTypes.length;
+  const avgPerMealKcal = effectiveDayKcal ? effectiveDayKcal * avgMealShare : undefined;
+  const avgMacroTargets = {
+    protein: request.targets.protein ? request.targets.protein * avgMealShare : undefined,
+    fat: request.targets.fat ? request.targets.fat * avgMealShare : undefined,
+    carbs: request.targets.carbs ? request.targets.carbs * avgMealShare : undefined
   };
 
   const recommendPayload: RecommendPayload = {
     ingredientKeywords: request.ingredientKeywords,
     expiringSoonKeywords: request.expiringSoonKeywords,
     targets: {
-      kcal: perMealKcal,
-      ...macroTargets
+      kcal: avgPerMealKcal,
+      ...avgMacroTargets
     },
     budget: perMealBudget ? { perMeal: perMealBudget } : undefined,
     exclude: request.exclude,
     avoidBones: request.avoidBones,
     cuisine: request.cuisine,
-    limit: Math.max(50, daysCount * MEAL_TYPES.length * 5),
-    
+    limit: Math.max(50, daysCount * activeMealTypes.length * 5),
+
     // Enhanced filters
     maxPrepTime: request.maxPrepTime,
     difficulty: request.difficulty,
@@ -79,7 +95,7 @@ export function generateMealPlan(
     ? ranked
     : candidates.map((recipe) => ({ recipe, score: 0.3 }));
 
-  if (ranked.length < MEAL_TYPES.length) {
+  if (ranked.length < activeMealTypes.length) {
     warnings.push("Недостаточно рецептов для разнообразного плана.");
   }
 
@@ -112,29 +128,46 @@ export function generateMealPlan(
     const dayRecipeIds = new Set<string>();
     let previousCuisine: string | undefined;
 
-    for (let mealIndex = 0; mealIndex < MEAL_TYPES.length; mealIndex += 1) {
-      const mealType = MEAL_TYPES[mealIndex]!;
-      const remainingMealsInDay = Math.max(1, MEAL_TYPES.length - mealIndex);
+    for (let mealIndex = 0; mealIndex < activeMealTypes.length; mealIndex += 1) {
+      const mealType = activeMealTypes[mealIndex]!;
+
+      // Пропорциональные таргеты на основе MEAL_CALORIE_SHARE
+      const currentShare = MEAL_CALORIE_SHARE[mealType];
+      const remainingShares = activeMealTypes
+        .slice(mealIndex)
+        .reduce((s, mt) => s + MEAL_CALORIE_SHARE[mt], 0);
+
       const slotTargets: Nutrition = {
         kcal: effectiveDayKcal
-          ? Math.max(0, effectiveDayKcal - dayKcalTotal) / remainingMealsInDay
-          : perMealKcal,
+          ? Math.max(0, (effectiveDayKcal - dayKcalTotal) * (currentShare / Math.max(remainingShares, 0.01)))
+          : (effectiveDayKcal ? effectiveDayKcal * currentShare : undefined),
         protein: request.targets.protein
-          ? Math.max(0, request.targets.protein - dayProteinTotal) / remainingMealsInDay
-          : macroTargets.protein,
+          ? Math.max(0, (request.targets.protein - dayProteinTotal) * (currentShare / Math.max(remainingShares, 0.01)))
+          : undefined,
         fat: request.targets.fat
-          ? Math.max(0, request.targets.fat - dayFatTotal) / remainingMealsInDay
-          : macroTargets.fat,
+          ? Math.max(0, (request.targets.fat - dayFatTotal) * (currentShare / Math.max(remainingShares, 0.01)))
+          : undefined,
         carbs: request.targets.carbs
-          ? Math.max(0, request.targets.carbs - dayCarbsTotal) / remainingMealsInDay
-          : macroTargets.carbs
+          ? Math.max(0, (request.targets.carbs - dayCarbsTotal) * (currentShare / Math.max(remainingShares, 0.01)))
+          : undefined
       };
 
+      // Фильтрация: предпочитать рецепты, подходящие по mealType
       let candidatePool = baseCandidates.filter((item) => !dayRecipeIds.has(item.recipe.id));
       if (candidatePool.length === 0) {
         candidatePool = baseCandidates;
       }
 
+      // Предпочитать рецепты с подходящим mealType
+      const mealTypeMatched = candidatePool.filter((item) => {
+        const recipeMealTypes = item.recipe.mealTypes;
+        return recipeMealTypes && recipeMealTypes.includes(mealType);
+      });
+      if (mealTypeMatched.length >= 3) {
+        candidatePool = mealTypeMatched;
+      }
+
+      // Без повторов в течение недели
       if (request.avoidRepetition) {
         const noGlobalRepetition = candidatePool.filter((item) => !usedRecipeIds.has(item.recipe.id));
         if (noGlobalRepetition.length > 0) {
@@ -319,10 +352,10 @@ export function generateMealPlan(
       },
       targets: {
         kcal: effectiveDayKcal ? round2(effectiveDayKcal) : undefined,
-        perMealKcal: perMealKcal ? round2(perMealKcal) : undefined,
-        protein: macroTargets.protein ? round2(macroTargets.protein) : undefined,
-        fat: macroTargets.fat ? round2(macroTargets.fat) : undefined,
-        carbs: macroTargets.carbs ? round2(macroTargets.carbs) : undefined
+        perMealKcal: effectiveDayKcal ? round2(effectiveDayKcal / activeMealTypes.length) : undefined,
+        protein: request.targets.protein ? round2(request.targets.protein / activeMealTypes.length) : undefined,
+        fat: request.targets.fat ? round2(request.targets.fat / activeMealTypes.length) : undefined,
+        carbs: request.targets.carbs ? round2(request.targets.carbs / activeMealTypes.length) : undefined
       },
       missingIngredients: Array.from(dayMissingSet).slice(0, 10),
       mealSchedule
@@ -468,12 +501,12 @@ function calculateVarietyScore(recipes: Recipe[]): number {
   return 1 - (sameCount / (recipes.length - 1));
 }
 
-function resolvePerMealBudget(request: MealPlanRequest): number | undefined {
+function resolvePerMealBudget(request: MealPlanRequest, mealsPerDay: number = 3): number | undefined {
   const direct = request.budget?.perMeal;
   if (direct && direct > 0) return direct;
 
   const perDay = request.budget?.perDay;
-  if (perDay && perDay > 0) return perDay / 3;
+  if (perDay && perDay > 0) return perDay / Math.max(mealsPerDay, 1);
 
   return undefined;
 }
@@ -691,6 +724,32 @@ function resolveScoringWeights(
       };
   }
 
+  if (optimizerProfile === "inventory_first") {
+    return objective === "balanced"
+      ? {
+        macro: 0.25,
+        cost: 0.15,
+        repetition: 0.10,
+        convenience: 0.05,
+        availability: 0.85,
+        history: 0.05,
+        confidence: 0.05,
+        expiringBonus: 0.25,
+        rankBonus: 0.05
+      }
+      : {
+        macro: 0.20,
+        cost: 0.20,
+        repetition: 0.10,
+        convenience: 0.05,
+        availability: 0.90,
+        history: 0.05,
+        confidence: 0.05,
+        expiringBonus: 0.30,
+        rankBonus: 0.05
+      };
+  }
+
   return objective === "cost_macro"
     ? {
       macro: 0.42,
@@ -776,21 +835,23 @@ function recipeDifficultyPenalty(difficulty: RecipeDifficulty | undefined): numb
 function availabilityPenaltyScore(recipe: Recipe, availableIngredients: Set<string>): number {
   if (!recipe.ingredients.length) return 0.8;
   const total = recipe.ingredients.length;
+  const availArr = Array.from(availableIngredients);
   const missing = recipe.ingredients
     .map((ingredient) => normalize(ingredient))
     .filter((ingredient) => ingredient.length > 0)
-    .filter((ingredient) => !availableIngredients.has(ingredient))
+    .filter((ingredient) => !availArr.some(avail => ingredient.includes(avail)))
     .length;
   return missing / total;
 }
 
 function expiringIngredientBonus(recipe: Recipe, expiringSoonKeywords: string[]): number {
   if (!recipe.ingredients.length || !expiringSoonKeywords.length) return 0;
-  const expiringSet = new Set(expiringSoonKeywords.map(normalize));
-  if (!expiringSet.size) return 0;
+  const lowerKeywords = expiringSoonKeywords.map(normalize);
+  if (!lowerKeywords.length) return 0;
   let matched = 0;
   for (const ingredient of recipe.ingredients) {
-    if (expiringSet.has(normalize(ingredient))) {
+    const lower = normalize(ingredient);
+    if (lowerKeywords.some(kw => lower.includes(kw))) {
       matched += 1;
     }
   }

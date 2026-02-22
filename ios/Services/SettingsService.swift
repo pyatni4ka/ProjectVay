@@ -1,6 +1,7 @@
 import Foundation
 import UserNotifications
 import Combine
+import Observation
 
 extension Notification.Name {
     static let appSettingsDidChange = Notification.Name("appSettingsDidChange")
@@ -292,8 +293,8 @@ actor SettingsService: SettingsServiceProtocol {
 }
 
 @MainActor
-final class AppSettingsStore: ObservableObject {
-    @Published private(set) var settings: AppSettings = .default
+@Observable final class AppSettingsStore {
+    private(set) var settings: AppSettings = .default
     private(set) var lastPersistedSettings: AppSettings = .default
     private let defaults: UserDefaults
 

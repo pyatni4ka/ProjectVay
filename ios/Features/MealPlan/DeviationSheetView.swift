@@ -115,7 +115,7 @@ struct DeviationSheetView: View {
         } label: {
             HStack(spacing: VaySpacing.md) {
                 Image(systemName: icon)
-                    .font(.system(size: 18))
+                    .font(VayFont.body(18))
                     .foregroundStyle(selectedEventType == id ? Color.vayPrimary : .secondary)
                     .frame(width: 28)
 

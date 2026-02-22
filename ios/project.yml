@@ -19,6 +19,15 @@ packages:
   Nuke:
     url: https://github.com/kean/Nuke.git
     from: 12.8.0
+  PopupView:
+    url: https://github.com/exyte/PopupView.git
+    from: 3.0.0
+  ConfettiSwiftUI:
+    url: https://github.com/simibac/ConfettiSwiftUI.git
+    from: 1.1.0
+  Lottie:
+    url: https://github.com/airbnb/lottie-ios.git
+    from: 4.5.0
 
 targets:
   InventoryCore:
@@ -35,6 +44,8 @@ targets:
     dependencies:
       - package: GRDB
         product: GRDB
+      - package: Lottie
+        product: Lottie
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.projectvay.inventorycore
@@ -79,6 +90,12 @@ targets:
         product: Nuke
       - package: Nuke
         product: NukeUI
+      - package: PopupView
+        product: PopupView
+      - package: ConfettiSwiftUI
+        product: ConfettiSwiftUI
+      - package: Lottie
+        product: Lottie
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.projectvay.inventoryai

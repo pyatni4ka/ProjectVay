@@ -18,7 +18,7 @@ struct CookNowView: View {
                 VStack(alignment: .leading, spacing: VaySpacing.sm) {
                     HStack {
                         Image(systemName: "refrigerator")
-                            .font(.system(size: 20))
+                            .font(VayFont.heading(20))
                             .foregroundStyle(Color.vayPrimary)
                         Text("Из того, что есть")
                             .font(VayFont.heading(18))
@@ -57,7 +57,7 @@ struct CookNowView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: { Task { await loadRecipes() } }) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(VayFont.label(16))
                         .foregroundStyle(Color.vayPrimary)
                 }
                 .disabled(isLoading)
@@ -97,7 +97,7 @@ struct CookNowView: View {
                         // Availability ratio
                         HStack(spacing: 3) {
                             Image(systemName: "checkmark.circle")
-                                .font(.system(size: 11))
+                                .font(VayFont.caption(11))
                                 .foregroundStyle(Color.vaySuccess)
                             Text("\(item.availabilityRatio)% из холодильника")
                                 .font(VayFont.caption(11))
@@ -196,7 +196,7 @@ struct CookNowView: View {
                         ForEach(item.recipe.ingredients.prefix(15), id: \.self) { ingredient in
                             HStack(spacing: VaySpacing.sm) {
                                 Image(systemName: "circle.fill")
-                                    .font(.system(size: 5))
+                                    .font(VayFont.caption(5))
                                     .foregroundStyle(Color.vayPrimary)
                                 Text(ingredient)
                                     .font(VayFont.body(14))
@@ -240,7 +240,7 @@ struct CookNowView: View {
     private var emptyState: some View {
         VStack(spacing: VaySpacing.md) {
             Image(systemName: "refrigerator")
-                .font(.system(size: 40))
+                .font(VayFont.hero(40))
                 .foregroundStyle(Color.vayPrimaryLight)
 
             Text("Нет подходящих рецептов")

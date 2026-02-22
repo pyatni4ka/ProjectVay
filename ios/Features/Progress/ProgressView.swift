@@ -93,7 +93,7 @@ struct ProgressTrackingView: View {
                     .frame(width: 48, height: 48)
 
                 Image(systemName: "chart.line.uptrend.xyaxis.circle.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(VayFont.heading(22))
                     .foregroundStyle(Color.vayInfo)
             }
 
@@ -151,7 +151,7 @@ struct ProgressTrackingView: View {
         return VStack(alignment: .leading, spacing: VaySpacing.md) {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "sparkles.rectangle.stack.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(VayFont.label(14))
                     .foregroundStyle(Color.vayPrimary)
                 Text("Итоги периода")
                     .font(VayFont.heading(16))
@@ -207,7 +207,7 @@ struct ProgressTrackingView: View {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "flame.fill")
                     .foregroundStyle(Color.vayCalories)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(VayFont.label(14))
                 Text("Цели питания")
                     .font(VayFont.heading(16))
             }
@@ -235,7 +235,7 @@ struct ProgressTrackingView: View {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .foregroundStyle(Color.vayInfo)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(VayFont.label(14))
                 Text("Инвентарь")
                     .font(VayFont.heading(16))
                 Spacer()
@@ -341,7 +341,7 @@ struct ProgressTrackingView: View {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "arrow.down.circle.fill")
                     .foregroundStyle(Color.vayDanger)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(VayFont.label(14))
                 Text("Расход")
                     .font(VayFont.heading(16))
             }
@@ -448,7 +448,7 @@ struct ProgressTrackingView: View {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "trash.slash.fill")
                     .foregroundStyle(Color.vayDanger)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(VayFont.label(14))
                 Text("Потери")
                     .font(VayFont.heading(16))
                 Spacer()
@@ -557,7 +557,7 @@ struct ProgressTrackingView: View {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "rublesign.circle.fill")
                     .foregroundStyle(Color.vayWarning)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(VayFont.label(14))
                 Text("Расходы")
                     .font(VayFont.heading(16))
             }
@@ -589,7 +589,7 @@ struct ProgressTrackingView: View {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "chart.pie.fill")
                     .foregroundStyle(Color.vaySecondary)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(VayFont.label(14))
                 Text("По категориям")
                     .font(VayFont.heading(16))
             }
@@ -625,7 +625,7 @@ struct ProgressTrackingView: View {
                             .fill(style.color.opacity(0.14))
                             .frame(width: 24, height: 24)
                         Image(systemName: style.icon)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(VayFont.caption(12))
                             .foregroundStyle(style.color)
                     }
 
@@ -644,7 +644,7 @@ struct ProgressTrackingView: View {
     private func summaryMetric(title: String, value: String, caption: String, color: Color, icon: String) -> some View {
         VStack(alignment: .leading, spacing: VaySpacing.xs) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
+                .font(VayFont.label(14))
                 .foregroundStyle(color)
 
             Text(value)
@@ -671,7 +671,7 @@ struct ProgressTrackingView: View {
     private func wasteMiniCard(icon: String, title: String, count: Int, amountMinor: Int64, color: Color) -> some View {
         VStack(alignment: .leading, spacing: VaySpacing.xs) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
+                .font(VayFont.label(14))
                 .foregroundStyle(color)
 
             Text("\(count)")
@@ -695,7 +695,7 @@ struct ProgressTrackingView: View {
     private func miniStatCard(icon: String, label: String, value: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: VaySpacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .font(VayFont.body(16))
                 .foregroundStyle(color)
 
             Text(value)

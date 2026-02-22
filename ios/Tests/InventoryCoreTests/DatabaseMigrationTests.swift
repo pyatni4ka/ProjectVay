@@ -99,7 +99,7 @@ final class DatabaseMigrationTests: XCTestCase {
         XCTAssertEqual(settings.motionLevel, .full)
         XCTAssertEqual(settings.dietGoalMode, .lose)
         XCTAssertEqual(settings.smartOptimizerProfile, .balanced)
-        XCTAssertEqual(settings.bodyMetricsRangeMode, .lastMonths)
+        XCTAssertEqual(settings.bodyMetricsRangeMode, .year)
         XCTAssertEqual(settings.bodyMetricsRangeMonths, 12)
         XCTAssertEqual(settings.bodyMetricsRangeYear, Calendar.current.component(.year, from: Date()))
         XCTAssertTrue(settings.aiPersonalizationEnabled)

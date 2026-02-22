@@ -13,7 +13,18 @@ enum BarcodeLookupProviderError: Error {
 enum BarcodeLookupPayloadValidator {
     static func normalizeName(_ rawName: String) -> String {
         let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        let singleSpaced = trimmed.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        
+        guard !singleSpaced.isEmpty else { return "" }
+        
+        let isAllCaps = singleSpaced == singleSpaced.uppercased()
+        let isAllLower = singleSpaced == singleSpaced.lowercased()
+        
+        if isAllCaps || isAllLower {
+            return singleSpaced.prefix(1).uppercased() + singleSpaced.dropFirst().lowercased()
+        }
+        
+        return singleSpaced
     }
 
     static func isMeaningfulName(_ rawName: String, barcode: String) -> Bool {
@@ -280,7 +291,7 @@ class OpenFactsBarcodeProvider: BarcodeLookupProvider, @unchecked Sendable {
         }
         components.queryItems = [
             URLQueryItem(name: "lc", value: "ru"),
-            URLQueryItem(name: "fields", value: "code,product_name,product_name_ru,generic_name,generic_name_ru,brands,categories,categories_tags_ru,nutriments")
+            URLQueryItem(name: "fields", value: "code,product_name,product_name_ru,generic_name,generic_name_ru,brands,categories,categories_tags_ru,nutriments,image_front_url")
         ]
         guard let url = components.url else {
             throw BarcodeLookupProviderError.invalidEndpoint
@@ -294,7 +305,7 @@ class OpenFactsBarcodeProvider: BarcodeLookupProvider, @unchecked Sendable {
         let decoded = try JSONDecoder().decode(OpenFactsResponse.self, from: data)
         guard decoded.status == 1, let product = decoded.product else { return nil }
 
-        let name = [
+        let rawName = [
             product.productNameRU,
             product.productName,
             product.genericNameRU,
@@ -302,13 +313,14 @@ class OpenFactsBarcodeProvider: BarcodeLookupProvider, @unchecked Sendable {
         ]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
-        guard let name else { return nil }
-        guard BarcodeLookupPayloadValidator.isMeaningfulName(name, barcode: barcode) else { return nil }
-
+        guard let rawName else { return nil }
         let brand = product.brands?
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
+
+        let name = ProductNameFormatter.format(rawName, brand: brand)
+        guard BarcodeLookupPayloadValidator.isMeaningfulName(name, barcode: barcode) else { return nil }
 
         let categoryFromTags = product.categoriesTagsRU?
             .compactMap { tag -> String? in
@@ -338,12 +350,15 @@ class OpenFactsBarcodeProvider: BarcodeLookupProvider, @unchecked Sendable {
             carbs: product.nutriments?.carbs
         )
 
+        let imageURL = product.imageFrontURL.flatMap { URL(string: $0) }
+
         return BarcodeLookupPayload(
             barcode: barcode,
             name: name,
             brand: brand,
             category: category,
-            nutrition: nutrition
+            nutrition: nutrition,
+            imageURL: imageURL
         )
     }
 }
@@ -416,6 +431,7 @@ private struct OpenFactsResponse: Decodable {
         let categories: String?
         let categoriesTagsRU: [String]?
         let nutriments: Nutriments?
+        let imageFrontURL: String?
 
         enum CodingKeys: String, CodingKey {
             case productNameRU = "product_name_ru"
@@ -426,6 +442,7 @@ private struct OpenFactsResponse: Decodable {
             case categories
             case categoriesTagsRU = "categories_tags_ru"
             case nutriments
+            case imageFrontURL = "image_front_url"
         }
     }
 
@@ -885,6 +902,84 @@ enum BarcodeListRuParser {
         return text
     }
 
+}
+
+/// Edamam Provider
+final class EdamamBarcodeProvider: BarcodeLookupProvider {
+    let providerID = "edamam"
+    let name = "Edamam Food DB"
+    let isRemote = true
+    private let session: URLSession
+    private let appId: String
+    private let appKey: String
+
+    init(session: URLSession = .shared, appId: String, appKey: String) {
+        self.session = session
+        self.appId = appId
+        self.appKey = appKey
+    }
+
+    func lookup(barcode: String) async throws -> BarcodeLookupPayload? {
+        guard !appId.isEmpty, !appKey.isEmpty else { return nil }
+        
+        guard let endpoint = URL(string: "https://api.edamam.com/api/food-database/v2/parser") else { return nil }
+
+        let url = endpoint.appending(queryItems: [
+            URLQueryItem(name: "app_id", value: appId),
+            URLQueryItem(name: "app_key", value: appKey),
+            URLQueryItem(name: "upc", value: barcode)
+        ])
+
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            return nil
+        }
+
+        guard
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let hints = json["hints"] as? [[String: Any]],
+            let firstHint = hints.first,
+            let food = firstHint["food"] as? [String: Any],
+            let label = (food["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !label.isEmpty,
+            BarcodeLookupPayloadValidator.isMeaningfulName(label, barcode: barcode)
+        else {
+            return nil
+        }
+
+        let brand = (food["brand"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let categoryLabel = (food["categoryLabel"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let category = (food["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let finalCategory = categoryLabel ?? category ?? "Продукты"
+
+        var nutrition = Nutrition.empty
+        if let nutrients = food["nutrients"] as? [String: Any] {
+            if let enercKcal = nutrients["ENERC_KCAL"] as? Double {
+                nutrition.kcal = enercKcal
+            }
+            if let chocdf = nutrients["CHOCDF"] as? Double {
+                nutrition.carbs = chocdf
+            }
+            if let procnt = nutrients["PROCNT"] as? Double {
+                nutrition.protein = procnt
+            }
+            if let fat = nutrients["FAT"] as? Double {
+                nutrition.fat = fat
+            }
+        }
+
+        return BarcodeLookupPayload(
+            barcode: barcode,
+            name: label,
+            brand: brand?.isEmpty == true ? nil : brand,
+            category: finalCategory,
+            nutrition: nutrition
+        )
+    }
 }
 
 private extension URL {

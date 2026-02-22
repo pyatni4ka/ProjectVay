@@ -6,6 +6,7 @@ struct BarcodeLookupPayload: Codable, Equatable {
     var brand: String?
     var category: String
     var nutrition: Nutrition
+    var imageURL: URL?
 }
 
 enum ScanResolution: Equatable {
@@ -26,6 +27,9 @@ struct RecommendRequest: Codable {
     let exclude: [String]
     let avoidBones: Bool
     let cuisine: [String]
+    let diets: [String]
+    let maxPrepTime: Int?
+    let difficulty: [String]
     let limit: Int
     let strictNutrition: Bool?
     let macroTolerancePercent: Double?
@@ -39,6 +43,22 @@ struct RecommendResponse: Codable {
     }
 
     let items: [RankedRecipe]
+}
+
+struct SubstituteRequest: Codable {
+    let ingredients: [String]
+    let limit: Int?
+}
+
+struct SubstituteResponse: Codable {
+    struct Substitution: Codable, Hashable {
+        let ingredient: String
+        let substitute: String
+        let reason: String
+        let estimatedSavingsRub: Double?
+    }
+    
+    let substitutions: [Substitution]
 }
 
 struct MealPlanGenerateRequest: Codable {
@@ -56,6 +76,9 @@ struct MealPlanGenerateRequest: Codable {
     let exclude: [String]
     let avoidBones: Bool
     let cuisine: [String]
+    let diets: [String]
+    let maxPrepTime: Int?
+    let difficulty: [String]
 }
 
 struct SmartMealPlanGenerateRequest: Codable {
@@ -81,6 +104,9 @@ struct SmartMealPlanGenerateRequest: Codable {
     let exclude: [String]
     let avoidBones: Bool
     let cuisine: [String]
+    let diets: [String]
+    let maxPrepTime: Int?
+    let difficulty: [String]
     let objective: String?
     let optimizerProfile: String?
     let macroTolerancePercent: Double?

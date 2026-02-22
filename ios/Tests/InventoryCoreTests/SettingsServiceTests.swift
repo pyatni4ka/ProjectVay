@@ -47,8 +47,8 @@ final class SettingsServiceTests: XCTestCase {
                 quietStartMinute: 90,
                 quietEndMinute: 360,
                 expiryAlertsDays: [7, 3, 1, 3],
-                budgetDay: 900,
-                budgetWeek: 5_000,
+                budgetPrimaryValue: 5000,
+                budgetInputPeriod: .week,
                 stores: [.pyaterochka, .auchan],
                 dislikedList: ["Кускус", " кускус "],
                 avoidBones: true
@@ -229,7 +229,7 @@ final class SettingsServiceTests: XCTestCase {
           "expiryAlertsDays": [5,3,1],
           "budgetDay": 800,
           "budgetWeek": null,
-          "stores": ["pyaterochka","yandexLavka"],
+          "stores": ["pyaterochka","yandex_lavka"],
           "dislikedList": ["кускус"],
           "avoidBones": true,
           "mealSchedule": {
@@ -245,15 +245,17 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(settings.macroTolerancePercent, 25)
         XCTAssertEqual(settings.macroGoalSource, .automatic)
         XCTAssertNil(settings.recipeServiceBaseURLOverride)
-        XCTAssertNil(settings.budgetMonth)
+        // budgetMonth is now a computed property derived from budgetPrimaryValue
+        // Legacy: budgetDay=800, budgetWeek=null → primaryValue=800*7=5600, period=.week
         XCTAssertEqual(settings.budgetInputPeriod, .week)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetPrimaryValue).doubleValue, 5600, accuracy: 0.01)
         XCTAssertTrue(settings.hapticsEnabled)
         XCTAssertTrue(settings.showHealthCardOnHome)
         XCTAssertEqual(settings.dietProfile, .medium)
         XCTAssertEqual(settings.motionLevel, .full)
         XCTAssertEqual(settings.dietGoalMode, .lose)
         XCTAssertEqual(settings.smartOptimizerProfile, .balanced)
-        XCTAssertEqual(settings.bodyMetricsRangeMode, .lastMonths)
+        XCTAssertEqual(settings.bodyMetricsRangeMode, .year)
         XCTAssertEqual(settings.bodyMetricsRangeMonths, 12)
         XCTAssertEqual(settings.bodyMetricsRangeYear, Calendar.current.component(.year, from: Date()))
         XCTAssertTrue(settings.aiPersonalizationEnabled)
@@ -263,14 +265,12 @@ final class SettingsServiceTests: XCTestCase {
         XCTAssertEqual(settings.aiDataCollectionMode, .maximal)
     }
 
-    func testBudgetNormalizationConvertsDayToWeekAndMonth() {
+    func testBudgetCalculationsDayToOthers() {
         let settings = AppSettings(
             quietStartMinute: 60,
             quietEndMinute: 360,
             expiryAlertsDays: [5, 3, 1],
-            budgetDay: 800,
-            budgetWeek: nil,
-            budgetMonth: nil,
+            budgetPrimaryValue: 800,
             budgetInputPeriod: .day,
             stores: [.pyaterochka],
             dislikedList: [],
@@ -279,18 +279,16 @@ final class SettingsServiceTests: XCTestCase {
 
         XCTAssertEqual(settings.budgetInputPeriod, .day)
         XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetDay).doubleValue, 800, accuracy: 0.001)
-        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetWeek ?? 0).doubleValue, 5_600, accuracy: 0.001)
-        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetMonth ?? 0).doubleValue, 24_333.33, accuracy: 0.01)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetWeek).doubleValue, 5_600, accuracy: 0.001)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetMonth).doubleValue, 24_333.33, accuracy: 0.01)
     }
 
-    func testBudgetNormalizationConvertsWeekToMonthAndDay() {
+    func testBudgetCalculationsWeekToOthers() {
         let settings = AppSettings(
             quietStartMinute: 60,
             quietEndMinute: 360,
             expiryAlertsDays: [5, 3, 1],
-            budgetDay: 0,
-            budgetWeek: 5_600,
-            budgetMonth: nil,
+            budgetPrimaryValue: 5_600,
             budgetInputPeriod: .week,
             stores: [.pyaterochka],
             dislikedList: [],
@@ -299,18 +297,16 @@ final class SettingsServiceTests: XCTestCase {
 
         XCTAssertEqual(settings.budgetInputPeriod, .week)
         XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetDay).doubleValue, 800, accuracy: 0.001)
-        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetWeek ?? 0).doubleValue, 5_600, accuracy: 0.001)
-        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetMonth ?? 0).doubleValue, 24_333.33, accuracy: 0.01)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetWeek).doubleValue, 5_600, accuracy: 0.001)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetMonth).doubleValue, 24_333.33, accuracy: 0.01)
     }
 
-    func testBudgetNormalizationConvertsMonthToWeekAndDay() {
+    func testBudgetCalculationsMonthToOthers() {
         let settings = AppSettings(
             quietStartMinute: 60,
             quietEndMinute: 360,
             expiryAlertsDays: [5, 3, 1],
-            budgetDay: 0,
-            budgetWeek: nil,
-            budgetMonth: 24_333.33,
+            budgetPrimaryValue: 24_333.33,
             budgetInputPeriod: .month,
             stores: [.pyaterochka],
             dislikedList: [],
@@ -319,8 +315,28 @@ final class SettingsServiceTests: XCTestCase {
 
         XCTAssertEqual(settings.budgetInputPeriod, .month)
         XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetDay).doubleValue, 800, accuracy: 0.01)
-        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetWeek ?? 0).doubleValue, 5_600, accuracy: 0.01)
-        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetMonth ?? 0).doubleValue, 24_333.33, accuracy: 0.01)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetWeek).doubleValue, 5_600, accuracy: 0.01)
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetMonth).doubleValue, 24_333.33, accuracy: 0.01)
+    }
+
+    func testBudgetCalculationsStayCanonicalAfterMultipleNormalizations() {
+        var settings = AppSettings(
+            quietStartMinute: 60,
+            quietEndMinute: 360,
+            expiryAlertsDays: [5, 3, 1],
+            budgetPrimaryValue: 24_333.33,
+            budgetInputPeriod: .month,
+            stores: [.pyaterochka],
+            dislikedList: [],
+            avoidBones: true
+        )
+
+        for _ in 1...10 {
+            settings = settings.normalized()
+        }
+
+        XCTAssertEqual(NSDecimalNumber(decimal: settings.budgetPrimaryValue).doubleValue, 24_333.33, accuracy: 0.0001)
+        XCTAssertEqual(settings.budgetInputPeriod, .month)
     }
 
     func testSettingsNormalizationClampsMacroTolerance() {
@@ -328,8 +344,8 @@ final class SettingsServiceTests: XCTestCase {
             quietStartMinute: 60,
             quietEndMinute: 360,
             expiryAlertsDays: [5, 3, 1],
-            budgetDay: 800,
-            budgetWeek: nil,
+            budgetPrimaryValue: 5600,
+            budgetInputPeriod: .week,
             stores: [.pyaterochka],
             dislikedList: ["кускус"],
             avoidBones: true,
@@ -348,8 +364,8 @@ final class SettingsServiceTests: XCTestCase {
             quietStartMinute: 60,
             quietEndMinute: 360,
             expiryAlertsDays: [5, 3, 1],
-            budgetDay: 800,
-            budgetWeek: nil,
+            budgetPrimaryValue: 800,
+            budgetInputPeriod: .day,
             stores: [.pyaterochka],
             dislikedList: [],
             avoidBones: true,
@@ -366,8 +382,8 @@ final class SettingsServiceTests: XCTestCase {
             quietStartMinute: 60,
             quietEndMinute: 360,
             expiryAlertsDays: [5, 3, 1],
-            budgetDay: 800,
-            budgetWeek: nil,
+            budgetPrimaryValue: 800,
+            budgetInputPeriod: .day,
             stores: [.pyaterochka],
             dislikedList: [],
             avoidBones: true,
@@ -422,7 +438,7 @@ final class SettingsServiceTests: XCTestCase {
         }
 
         let loaded = try await service.loadSettings()
-        XCTAssertEqual(loaded.bodyMetricsRangeMode, .lastMonths)
+        XCTAssertEqual(loaded.bodyMetricsRangeMode, .year)
         XCTAssertEqual(loaded.bodyMetricsRangeMonths, 60)
         XCTAssertEqual(loaded.bodyMetricsRangeYear, 1970)
     }
@@ -458,8 +474,8 @@ final class SettingsServiceTests: XCTestCase {
             quietStartMinute: 120,
             quietEndMinute: 420,
             expiryAlertsDays: [7, 3, 1],
-            budgetDay: 950,
-            budgetWeek: 5_500,
+            budgetPrimaryValue: 5500,
+            budgetInputPeriod: .week,
             stores: [.auchan, .pyaterochka],
             dislikedList: ["корица"],
             avoidBones: false,

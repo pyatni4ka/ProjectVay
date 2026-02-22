@@ -8,6 +8,7 @@ struct AddProductView: View {
     let initialUnit: UnitType?
     let initialQuantity: Double?
     let initialExpiryDate: Date?
+    let initialLocation: InventoryLocation?
     let onSaved: (Product) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +22,7 @@ struct AddProductView: View {
     @State private var hasExpiryDate = false
     @State private var expiryDate = Date()
     @State private var location: InventoryLocation = .fridge
+    @State private var store: Store?
     @State private var errorMessage: String?
     @State private var isSaving = false
 
@@ -61,8 +63,18 @@ struct AddProductView: View {
                     }
                     .pickerStyle(.menu)
                 }
+
+                settingRow(icon: "storefront.fill", color: .vayInfo) {
+                    Picker("Магазин", selection: $store) {
+                        Text("Не указан").tag(Store?.none)
+                        ForEach(Store.allCases) { store in
+                            Text(store.title).tag(Store?.some(store))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
             } header: {
-                sectionHeader(icon: "square.grid.2x2", title: "Категория")
+                sectionHeader(icon: "square.grid.2x2", title: "Категория и магазин")
             }
 
             // Batch Info
@@ -158,6 +170,7 @@ struct AddProductView: View {
             name = initialName ?? ""
             barcode = initialBarcode ?? ""
             category = initialCategory ?? ""
+            if let initialLocation { location = initialLocation }
             if let initialUnit { unit = initialUnit }
             if let initialQuantity { quantity = initialQuantity.formatted() }
             if let initialExpiryDate {
@@ -176,7 +189,7 @@ struct AddProductView: View {
     ) -> some View {
         HStack(spacing: VaySpacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(VayFont.label(13))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
                 .background(color)
@@ -189,7 +202,7 @@ struct AddProductView: View {
     private func sectionHeader(icon: String, title: String) -> some View {
         HStack(spacing: VaySpacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(VayFont.caption(11))
             Text(title)
         }
         .font(VayFont.caption(12))
@@ -219,7 +232,8 @@ struct AddProductView: View {
                 barcode: barcode.isEmpty ? nil : barcode,
                 name: trimmedName,
                 brand: brand.isEmpty ? nil : brand,
-                category: category
+                category: category,
+                store: store
             )
 
             let saved = try await inventoryService.createProduct(product)

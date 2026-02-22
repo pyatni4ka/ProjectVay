@@ -60,17 +60,17 @@ final class BarcodeLookupServiceTests: XCTestCase {
         XCTAssertEqual(inventory.createdProducts.count, 1)
     }
 
-    func testResolveUsesParallelFirstHitAndPrefersFastProvider() async {
+    func testResolveUsesParallelMergeAndCombinesBestData() async {
         let inventory = MockInventoryService(productsByBarcode: [:])
         let slowProvider = DelayedSuccessProvider(
             providerID: "slow_provider",
             delayNanoseconds: 700_000_000,
             payload: BarcodeLookupPayload(
                 barcode: "4601234567890",
-                name: "Медленный",
+                name: "ЛУЧШЕЕ ПОЛНОЕ ИМЯ ПРОДУКТА",
                 brand: nil,
                 category: "Продукты",
-                nutrition: .empty
+                nutrition: Nutrition(kcal: nil, protein: nil, fat: nil, carbs: nil)
             )
         )
         let fastProvider = DelayedSuccessProvider(
@@ -79,9 +79,9 @@ final class BarcodeLookupServiceTests: XCTestCase {
             payload: BarcodeLookupPayload(
                 barcode: "4601234567890",
                 name: "Быстрый",
-                brand: nil,
-                category: "Продукты",
-                nutrition: .empty
+                brand: "СуперБренд",
+                category: "Молочные продукты",
+                nutrition: Nutrition(kcal: 100, protein: 10, fat: 5, carbs: 2)
             )
         )
 
@@ -107,8 +107,11 @@ final class BarcodeLookupServiceTests: XCTestCase {
             return
         }
 
-        XCTAssertEqual(providerID, "fast_provider")
-        XCTAssertEqual(product.name, "Быстрый")
+        XCTAssertTrue(providerID.contains("merged("))
+        XCTAssertEqual(product.name, "ЛУЧШЕЕ ПОЛНОЕ ИМЯ ПРОДУКТА") // from slow provider
+        XCTAssertEqual(product.brand, "СуперБренд") // from fast provider
+        XCTAssertEqual(product.category, "Молочные продукты") // from fast provider
+        XCTAssertEqual(product.nutrition.kcal, 100) // from fast provider
     }
 
     func testResolveInternalCodeByMapping() async {

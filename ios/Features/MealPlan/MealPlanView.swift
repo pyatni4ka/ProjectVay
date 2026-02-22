@@ -25,9 +25,11 @@ struct MealPlanView: View {
     let inventoryService: any InventoryServiceProtocol
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
+    let barcodeLookupService: BarcodeLookupService
     let recipeServiceClient: RecipeServiceClient?
+    let shoppingListService: ShoppingListServiceProtocol
     var onOpenScanner: () -> Void = {}
-    @EnvironmentObject private var appSettingsStore: AppSettingsStore
+    @Environment(AppSettingsStore.self) private var appSettingsStore
 
     @State private var selectedRange: PlanRange = .day
     @State private var mealPlan: MealPlanGenerateResponse?
@@ -50,6 +52,10 @@ struct MealPlanView: View {
     @State private var hasRequestedHealthAccess = false
     @State private var hasInventoryProducts = true
     @State private var availableIngredients: Set<String> = []
+    @State private var showRecipeSearch = false
+    @State private var showShoppingList = false
+    /// Tracks in-flight generation task so we can cancel + debounce.
+    @State private var generateTask: Task<Void, Never>?
     private let todayMenuSnapshotStore = TodayMenuSnapshotStore()
     private let mealPlanSnapshotStore = MealPlanSnapshotStore()
 
@@ -68,10 +74,11 @@ struct MealPlanView: View {
 
                 if !hasInventoryProducts, !isLoading {
                     EmptyStateView(
-                        icon: "fork.knife",
-                        title: "Нет продуктов для генерации плана",
-                        subtitle: "Добавьте хотя бы один продукт в инвентарь, чтобы построить персональный план.",
-                        actionTitle: "Сканировать товар",
+                        icon: "refrigerator",
+                        lottieName: "empty_box",
+                        title: "Недостаточно ингредиентов",
+                        subtitle: "Добавьте больше продуктов в инвентарь или сканируйте чеки для составления индивидуального плана питания.",
+                        actionTitle: "Перейти к сканированию",
                         action: onOpenScanner
                     )
                 } else {
@@ -97,6 +104,16 @@ struct MealPlanView: View {
         .navigationTitle("План питания")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                // Shopping List
+                Button {
+                    showShoppingList = true
+                } label: {
+                    Image(systemName: "cart")
+                        .font(VayFont.label(17))
+                        .foregroundStyle(Color.vayPrimary)
+                }
+                .vayAccessibilityLabel("Список покупок")
+                
                 // Weekly Autopilot — 7-day plan with Replace / Deviation flow
                 NavigationLink {
                     WeeklyAutopilotView(
@@ -104,11 +121,13 @@ struct MealPlanView: View {
                         settingsService: settingsService,
                         healthKitService: healthKitService,
                         recipeServiceClient: recipeServiceClient,
+                        shoppingListService: shoppingListService,
+                        barcodeLookupService: barcodeLookupService,
                         onOpenScanner: onOpenScanner
                     )
                 } label: {
                     Image(systemName: "calendar.badge.checkmark")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(VayFont.label(17))
                         .foregroundStyle(Color.vayPrimary)
                 }
                 .vayAccessibilityLabel("Автопилот недели — план на 7 дней")
@@ -121,23 +140,23 @@ struct MealPlanView: View {
                     )
                 } label: {
                     Image(systemName: "refrigerator")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(VayFont.label(17))
                         .foregroundStyle(Color.vayPrimary)
                 }
                 .vayAccessibilityLabel("Что приготовить сейчас из запасов")
 
-                NavigationLink {
-                    RecipeImportView(recipeServiceClient: recipeServiceClient)
+                Button {
+                    showRecipeSearch = true
                 } label: {
-                    Image(systemName: "link.badge.plus")
-                        .font(.system(size: 17, weight: .semibold))
+                    Image(systemName: "magnifyingglass")
+                        .font(VayFont.label(17))
                         .foregroundStyle(Color.vayPrimary)
                 }
-                .vayAccessibilityLabel("Импортировать рецепт по ссылке")
+                .vayAccessibilityLabel("Найти рецепт для добавления в план")
 
                 Button(action: onOpenScanner) {
                     Image(systemName: "barcode.viewfinder")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(VayFont.body(18))
                         .foregroundStyle(Color.vayPrimary)
                 }
                 .vayAccessibilityLabel("Открыть сканер", hint: "Добавить продукты для плана")
@@ -148,31 +167,57 @@ struct MealPlanView: View {
                 .disabled(isLoading)
             }
         }
+        .sheet(isPresented: $showRecipeSearch) {
+            RecipeSearchSheet(recipeServiceClient: recipeServiceClient)
+        }
+        .sheet(isPresented: $showShoppingList) {
+            ShoppingListView(
+                shoppingListService: shoppingListService,
+                barcodeLookupService: barcodeLookupService,
+                inventoryService: inventoryService
+            )
+        }
         .task {
             refreshLastSavedPlan()
             await generatePlan()
         }
         .onChange(of: selectedRange) { _, _ in
-            if suppressAutoGenerate { return }
-            Task { await generatePlan() }
+            guard !suppressAutoGenerate else { return }
+            scheduleGenerate(debounce: 0)
         }
         .onChange(of: appSettingsStore.settings) { _, _ in
-            if suppressAutoGenerate { return }
-            Task { await generatePlan() }
+            guard !suppressAutoGenerate else { return }
+            scheduleGenerate(debounce: 500)
+        }
+        .onDisappear {
+            generateTask?.cancel()
         }
     }
 
     private var periodCard: some View {
         VStack(alignment: .leading, spacing: VaySpacing.md) {
-            Text("Период")
-                .font(VayFont.heading(16))
-
-            Picker("Период", selection: $selectedRange) {
+            HStack(spacing: 0) {
                 ForEach(PlanRange.allCases) { range in
-                    Text(range.title).tag(range)
+                    Button {
+                        withAnimation(VayAnimation.springSnappy) {
+                            selectedRange = range
+                        }
+                        VayHaptic.selection()
+                    } label: {
+                        Text(range.title)
+                            .font(VayFont.label(14))
+                            .foregroundStyle(selectedRange == range ? .white : Color.vayPrimary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, VaySpacing.sm)
+                            .background(selectedRange == range ? Color.vayPrimary : Color.clear)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .pickerStyle(.segmented)
+            .padding(VaySpacing.xs)
+            .background(Color.vayPrimary.opacity(0.1))
+            .clipShape(Capsule())
             .vayAccessibilityLabel("Выбор периода плана", hint: "День или неделя")
 
             if let lastSavedMealPlan {
@@ -294,6 +339,7 @@ struct MealPlanView: View {
                     RecipeView(
                         recipe: item.recipe,
                         availableIngredients: availableIngredients,
+                        recipeServiceClient: recipeServiceClient,
                         inventoryService: inventoryService,
                         onInventoryChanged: {}
                     )
@@ -323,11 +369,12 @@ struct MealPlanView: View {
                     .background(VayGradient.cool.opacity(0.35))
                     .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
 
-                    ForEach(day.entries) { entry in
+                    ForEach(Array(day.entries.enumerated()), id: \.element.id) { entryIndex, entry in
                         NavigationLink {
                             RecipeView(
                                 recipe: entry.recipe,
                                 availableIngredients: availableIngredients,
+                                recipeServiceClient: recipeServiceClient,
                                 inventoryService: inventoryService,
                                 onInventoryChanged: {}
                             )
@@ -335,6 +382,27 @@ struct MealPlanView: View {
                             mealEntryCard(entry)
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                let dayIndex = mealPlan.days.firstIndex(where: { $0.id == day.id })!
+                                Task {
+                                    await replaceMeal(dayIndex: dayIndex, entryIndex: entryIndex, entry: entry, ignoreInventory: false)
+                                }
+                            } label: {
+                                Label("Заменить (из запасов)", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            .tint(.orange)
+                            
+                            Button {
+                                let dayIndex = mealPlan.days.firstIndex(where: { $0.id == day.id })!
+                                Task {
+                                    await replaceMeal(dayIndex: dayIndex, entryIndex: entryIndex, entry: entry, ignoreInventory: true)
+                                }
+                            } label: {
+                                Label("Лучше под КБЖУ\n(докупить)", systemImage: "star.fill")
+                            }
+                            .tint(.vayPrimary)
+                        }
                     }
 
                     if !day.missingIngredients.isEmpty {
@@ -367,7 +435,7 @@ struct MealPlanView: View {
             VStack(alignment: .leading, spacing: VaySpacing.xs) {
                 HStack(spacing: VaySpacing.xs) {
                     Image(systemName: mealPlanDataSourceIcon(mealPlanDataSource))
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(VayFont.caption(11))
                         .foregroundStyle(Color.vayPrimary)
                     Text("Источник: \(mealPlanDataSourceTitle(mealPlanDataSource))")
                         .font(VayFont.caption(11))
@@ -399,12 +467,21 @@ struct MealPlanView: View {
     }
 
     private func errorCard(_ text: String) -> some View {
-        HStack(spacing: VaySpacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color.vayDanger)
-            Text(text)
-                .font(VayFont.body(14))
-                .foregroundStyle(Color.vayDanger)
+        VStack(alignment: .leading, spacing: VaySpacing.sm) {
+            HStack(spacing: VaySpacing.sm) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Color.vayDanger)
+                Text(text)
+                    .font(VayFont.body(14))
+                    .foregroundStyle(Color.vayDanger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Button("Попробовать снова") {
+                scheduleGenerate(debounce: 0)
+            }
+            .font(VayFont.label(13))
+            .buttonStyle(.borderedProminent)
+            .tint(Color.vayPrimary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(VaySpacing.md)
@@ -482,8 +559,47 @@ struct MealPlanView: View {
         .vayAccessibilityLabel("\(mealTypeTitle(entry.mealType)): \(entry.recipe.title), \(entry.kcal.formatted(.number.precision(.fractionLength(0)))) ккал")
     }
 
+    /// Cancel any pending generation and schedule a new one after `debounce` ms.
+    private func scheduleGenerate(debounce: Int) {
+        generateTask?.cancel()
+        generateTask = Task {
+            if debounce > 0 {
+                try? await Task.sleep(for: .milliseconds(debounce))
+                guard !Task.isCancelled else { return }
+            }
+            await generatePlan()
+        }
+    }
+
+    /// Normalise ingredient keywords: lowercase, trim, deduplicate, remove short/noisy tokens.
+    private func normalizeIngredients(_ names: [String]) -> [String] {
+        var seen = Set<String>()
+        return names.compactMap { name -> String? in
+            // Remove parentheticals (e.g. "Milk (soy)") -> "Milk"
+            let noParens = name.replacingOccurrences(of: "\\s*\\([^)]*\\)", with: "", options: .regularExpression)
+            
+            let token = noParens
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                // Remove trailing digits/weight suffixes like "200г" or "1л"
+                .replacingOccurrences(of: #"\s*\d+\s*(г|кг|мл|л|шт)\.?"#,
+                                       with: "",
+                                       options: .regularExpression)
+                // Remove punctuation
+                .components(separatedBy: CharacterSet.punctuationCharacters).joined()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            guard token.count >= 2, !seen.contains(token) else { return nil }
+            seen.insert(token)
+            return token
+        }
+    }
+
     private func generatePlan() async {
-        guard !isLoading else { return }
+        // Allow re-entrancy (previous task is cancelled by scheduleGenerate)
+        // But check cancellation immediately
+        guard !Task.isCancelled else { return }
+        
         isLoading = true
         defer { isLoading = false }
 
@@ -506,15 +622,11 @@ struct MealPlanView: View {
             healthStatusMessage = nutritionSnapshot.statusMessage
 
             let productsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
-            let ingredientKeywords = Array(Set(products.map { $0.name.lowercased() })).sorted()
+            let ingredientKeywords = normalizeIngredients(products.map(\.name))
             availableIngredients = Set(ingredientKeywords)
-            let expiringSoonKeywords = Array(
-                Set(
-                    expiringBatches.compactMap { batch in
-                        productsByID[batch.productId]?.name.lowercased()
-                    }
-                )
-            ).sorted()
+            let expiringSoonKeywords = normalizeIngredients(
+                expiringBatches.compactMap { batch in productsByID[batch.productId]?.name }
+            )
 
             guard !ingredientKeywords.isEmpty else {
                 hasInventoryProducts = false
@@ -561,6 +673,9 @@ struct MealPlanView: View {
                 exclude: settings.dislikedList,
                 avoidBones: settings.avoidBones,
                 cuisine: [],
+                diets: settings.diets,
+                maxPrepTime: settings.maxPrepTime,
+                difficulty: settings.difficultyTargets,
                 objective: "cost_macro",
                 optimizerProfile: settings.smartOptimizerProfile.rawValue,
                 macroTolerancePercent: settings.macroTolerancePercent,
@@ -592,7 +707,10 @@ struct MealPlanView: View {
                     budget: .init(perDay: budgetPerDay > 0 ? budgetPerDay : nil, perMeal: nil),
                     exclude: settings.dislikedList,
                     avoidBones: settings.avoidBones,
-                    cuisine: []
+                    cuisine: [],
+                    diets: settings.diets,
+                    maxPrepTime: settings.maxPrepTime,
+                    difficulty: settings.difficultyTargets
                 )
                 generated = try await recipeServiceClient.generateMealPlan(payload: payload)
             }
@@ -635,6 +753,9 @@ struct MealPlanView: View {
                     exclude: settings.dislikedList,
                     avoidBones: settings.avoidBones,
                     cuisine: [],
+                    diets: settings.diets,
+                    maxPrepTime: settings.maxPrepTime,
+                    difficulty: settings.difficultyTargets,
                     limit: 25,
                     strictNutrition: settings.strictMacroTracking,
                     macroTolerancePercent: settings.macroTolerancePercent
@@ -733,6 +854,113 @@ struct MealPlanView: View {
         lastSavedMealPlan = mealPlanSnapshotStore.load()
     }
 
+    private func replaceMeal(dayIndex: Int, entryIndex: Int, entry: MealPlanGenerateResponse.Day.Entry, ignoreInventory: Bool = false) async {
+        guard let recipeServiceClient else {
+            errorMessage = "Невозможно заменить рецепт: сервис недоступен."
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let products = try await inventoryService.listProducts(location: nil, search: nil)
+            let expiringBatches = try await inventoryService.expiringBatches(horizonDays: 5)
+            let settings = appSettingsStore.settings
+
+            let productsByID = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
+            let ingredientKeywords = ignoreInventory ? [] : normalizeIngredients(products.map(\.name))
+            let expiringSoonKeywords = ignoreInventory ? [] : normalizeIngredients(
+                expiringBatches.compactMap { batch in productsByID[batch.productId]?.name }
+            )
+
+            // Calculate target for this specific entry based on its stated calories/macros
+            let targetNutrition = Nutrition(
+                kcal: entry.kcal,
+                protein: entry.recipe.nutrition?.protein ?? 0,
+                fat: entry.recipe.nutrition?.fat ?? 0,
+                carbs: entry.recipe.nutrition?.carbs ?? 0
+            )
+
+            let budgetPerDay = NSDecimalNumber(decimal: settings.budgetDay).doubleValue
+            let mealBudget = budgetPerDay > 0 ? budgetPerDay / 3.0 : nil
+
+            let recommendPayload = RecommendRequest(
+                ingredientKeywords: ingredientKeywords,
+                expiringSoonKeywords: expiringSoonKeywords,
+                targets: targetNutrition,
+                budget: .init(perMeal: mealBudget),
+                exclude: settings.dislikedList + [entry.recipe.id], // Exclude current
+                avoidBones: settings.avoidBones,
+                cuisine: [],
+                diets: settings.diets,
+                maxPrepTime: settings.maxPrepTime,
+                difficulty: settings.difficultyTargets,
+                limit: 5, // We just need one good alternative
+                strictNutrition: ignoreInventory ? true : settings.strictMacroTracking,
+                macroTolerancePercent: settings.macroTolerancePercent
+            )
+
+            let recommended = try await recipeServiceClient.recommend(payload: recommendPayload)
+
+            guard let alternative = recommended.items.first else {
+                errorMessage = "Не удалось найти подходящую замену под ваши параметры."
+                return
+            }
+
+            // Update the plan in memory
+            var mutablePlan = mealPlan
+            var existingDays = mutablePlan?.days ?? []
+            if dayIndex < existingDays.count {
+                var existingEntries = existingDays[dayIndex].entries
+                let newEntry = MealPlanGenerateResponse.Day.Entry(
+                    mealType: entry.mealType,
+                    recipe: alternative.recipe,
+                    score: alternative.score,
+                    estimatedCost: alternative.score, // Estimate cost using score or basic logic for now
+                    kcal: targetNutrition.kcal ?? alternative.recipe.nutrition?.kcal ?? 0 // Fallback to recipe kcal
+                )
+                
+                existingEntries[entryIndex] = newEntry
+                
+                // Re-calculate daily totals
+                var newEstimatedCost = 0.0
+                for item in existingEntries {
+                   newEstimatedCost += item.estimatedCost
+                }
+                
+                let existingTot = existingDays[dayIndex].totals
+                let newTotals = MealPlanGenerateResponse.Day.Totals(
+                    kcal: existingTot.kcal,
+                    estimatedCost: newEstimatedCost
+                )
+                
+                let newDay = MealPlanGenerateResponse.Day(
+                    date: existingDays[dayIndex].date,
+                    entries: existingEntries,
+                    totals: newTotals,
+                    targets: existingDays[dayIndex].targets,
+                    missingIngredients: existingDays[dayIndex].missingIngredients
+                )
+                
+                existingDays[dayIndex] = newDay
+                
+                mutablePlan = MealPlanGenerateResponse(
+                    days: existingDays,
+                    shoppingList: mutablePlan?.shoppingList ?? [],
+                    estimatedTotalCost: mutablePlan?.estimatedTotalCost ?? 0,
+                    warnings: mutablePlan?.warnings ?? []
+                )
+            }
+
+            mealPlan = mutablePlan
+            errorMessage = nil
+
+        } catch {
+            errorMessage = "Не удалось заменить рецепт: \(userFacingErrorMessage(error))"
+        }
+    }
+
     private func applySavedMealPlan(_ snapshot: MealPlanSnapshot) {
         suppressAutoGenerate = true
         if let range = PlanRange(rawValue: snapshot.rangeRawValue) {
@@ -813,28 +1041,20 @@ struct MealPlanView: View {
     private func computeAdaptiveNutritionSnapshot(settings: AppSettings) async -> AdaptiveNutritionUseCase.Output {
         if settings.healthKitReadEnabled, !hasRequestedHealthAccess {
             hasRequestedHealthAccess = true
-            _ = try? await healthKitService.requestReadAccess()
+            _ = try? await healthKitService.requestAccess()
         }
 
-        var automaticDailyCalories: Double?
-        var weightKG: Double?
+        var metrics: HealthKitService.UserMetrics?
         if settings.macroGoalSource == .automatic {
-            automaticDailyCalories = healthKitService.fallbackAutomaticDailyCalories(
-                targetLossPerWeek: settings.targetWeightDeltaPerWeek
-            )
-        }
-
-        if settings.healthKitReadEnabled, settings.macroGoalSource == .automatic {
-            if let metrics = try? await healthKitService.fetchLatestMetrics() {
-                automaticDailyCalories = Double(
-                    healthKitService.calculateDailyCalories(
-                        metrics: metrics,
-                        targetLossPerWeek: settings.targetWeightDeltaPerWeek
-                    )
-                )
-                weightKG = metrics.weightKG
+            if settings.healthKitReadEnabled {
+                metrics = try? await healthKitService.fetchLatestMetrics()
             }
         }
+        
+        let baselineTarget = NutritionTargetsService.resolveTargetNutrition(
+            settings: settings,
+            healthMetrics: metrics
+        )
 
         var consumedNutrition: Nutrition?
         var consumedFetchFailed = false
@@ -850,8 +1070,8 @@ struct MealPlanView: View {
             .init(
                 settings: settings,
                 range: selectedRange == .day ? .day : .week,
-                automaticDailyCalories: automaticDailyCalories,
-                weightKG: weightKG,
+                now: Date(),
+                baselineTarget: baselineTarget,
                 consumedNutrition: consumedNutrition,
                 consumedFetchFailed: consumedFetchFailed,
                 healthIntegrationEnabled: settings.healthKitReadEnabled

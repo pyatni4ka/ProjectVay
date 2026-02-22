@@ -6,15 +6,15 @@ struct ScannerView: View {
     enum ScannerMode: String, CaseIterable, Identifiable {
         case add
         case writeOff
+        case checkOff
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .add:
-                return "Добавление"
-            case .writeOff:
-                return "Списание"
+            case .add: return "Добавление"
+            case .writeOff: return "Списание"
+            case .checkOff: return "Отметка"
             }
         }
 
@@ -22,6 +22,7 @@ struct ScannerView: View {
             switch self {
             case .add: return "plus.circle"
             case .writeOff: return "minus.circle"
+            case .checkOff: return "checkmark.circle"
             }
         }
     }
@@ -29,6 +30,8 @@ struct ScannerView: View {
     let inventoryService: any InventoryServiceProtocol
     let barcodeLookupService: BarcodeLookupService
     let onInventoryChanged: () async -> Void
+    let allowedModes: [ScannerMode]
+    let onProductScanned: ((Product) async -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -50,15 +53,20 @@ struct ScannerView: View {
     @State private var showCreateProductSheet = false
     @State private var isQuickActionInProgress = false
     @State private var quickActionMessage: String?
+    @State private var isTorchOn = false
 
     init(
         inventoryService: any InventoryServiceProtocol,
         barcodeLookupService: BarcodeLookupService,
         initialMode: ScannerMode = .add,
-        onInventoryChanged: @escaping () async -> Void
+        allowedModes: [ScannerMode] = [.add, .writeOff],
+        onProductScanned: ((Product) async -> Void)? = nil,
+        onInventoryChanged: @escaping () async -> Void = {}
     ) {
         self.inventoryService = inventoryService
         self.barcodeLookupService = barcodeLookupService
+        self.allowedModes = allowedModes
+        self.onProductScanned = onProductScanned
         self.onInventoryChanged = onInventoryChanged
         _mode = State(initialValue: initialMode)
     }
@@ -137,9 +145,9 @@ struct ScannerView: View {
                             }
                         } label: {
                             Image(systemName: "xmark")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(VayFont.caption(12))
                                 .foregroundStyle(.white.opacity(0.9))
-                                .padding(6)
+                                .padding(VaySpacing.xs)
                                 .background(.white.opacity(0.15))
                                 .clipShape(Circle())
                         }
@@ -203,18 +211,30 @@ struct ScannerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    isTorchOn.toggle()
+                    toggleTorch(on: isTorchOn)
+                } label: {
+                    Image(systemName: isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill")
+                        .font(VayFont.body(18))
+                        .foregroundStyle(isTorchOn ? Color.yellow : .white.opacity(0.7))
+                }
+                .accessibilityLabel(isTorchOn ? "Выключить фонарик" : "Включить фонарик")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20))
+                        .font(VayFont.heading(20))
                         .foregroundStyle(.white.opacity(0.7))
                 }
             }
         }
         .sheet(isPresented: $showAddBatchSheet) {
             if let selectedProduct {
+                let classification = ProductClassifier.classify(rawCategory: selectedProduct.category)
                 NavigationStack {
                     EditBatchView(
                         productID: selectedProduct.id,
@@ -227,7 +247,8 @@ struct ScannerView: View {
                         },
                         initialExpiryDate: suggestedExpiry,
                         initialQuantity: parsedWeightGrams,
-                        initialUnit: parsedWeightGrams == nil ? selectedProduct.defaultUnit : .g
+                        initialUnit: parsedWeightGrams == nil ? selectedProduct.defaultUnit : .g,
+                        initialLocation: classification.location
                     )
                 }
             }
@@ -241,7 +262,8 @@ struct ScannerView: View {
                     initialCategory: "Продукты",
                     initialUnit: parsedWeightGrams == nil ? nil : .g,
                     initialQuantity: parsedWeightGrams ?? 1,
-                    initialExpiryDate: suggestedExpiry
+                    initialExpiryDate: suggestedExpiry,
+                    initialLocation: ProductClassifier.classify(rawCategory: "Продукты").location
                 ) { savedProduct in
                     Task {
                         if let internalCodeToBind {
@@ -270,7 +292,7 @@ struct ScannerView: View {
     private var fallbackView: some View {
         VStack(spacing: VaySpacing.md) {
             Image(systemName: "camera.metering.unknown")
-                .font(.system(size: 48, weight: .light))
+                .font(VayFont.hero(48))
                 .foregroundStyle(.white.opacity(0.6))
             Text("Live-сканер недоступен")
                 .font(VayFont.heading())
@@ -286,32 +308,36 @@ struct ScannerView: View {
     // MARK: - Mode Picker
 
     private var modePicker: some View {
-        HStack(spacing: 0) {
-            ForEach(ScannerMode.allCases) { m in
-                Button {
-                    withAnimation(VayAnimation.springSnappy) {
-                        mode = m
+        Group {
+            if allowedModes.count > 1 {
+                HStack(spacing: 0) {
+                    ForEach(allowedModes) { m in
+                        Button {
+                            withAnimation(VayAnimation.springSnappy) {
+                                mode = m
+                            }
+                            VayHaptic.selection()
+                        } label: {
+                            HStack(spacing: VaySpacing.xs) {
+                                Image(systemName: m.icon)
+                                    .font(VayFont.caption(12))
+                                Text(m.title)
+                                    .font(VayFont.label(13))
+                            }
+                            .foregroundStyle(mode == m ? .white : .white.opacity(0.5))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, VaySpacing.sm)
+                            .background(mode == m ? Color.vayPrimary : Color.clear)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    VayHaptic.selection()
-                } label: {
-                    HStack(spacing: VaySpacing.xs) {
-                        Image(systemName: m.icon)
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(m.title)
-                            .font(VayFont.label(13))
-                    }
-                    .foregroundStyle(mode == m ? .white : .white.opacity(0.5))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, VaySpacing.sm)
-                    .background(mode == m ? Color.vayPrimary : Color.clear)
-                    .clipShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .padding(VaySpacing.xs)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
             }
         }
-        .padding(VaySpacing.xs)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
     }
 
     // MARK: - Manual Input
@@ -321,7 +347,7 @@ struct ScannerView: View {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "keyboard")
                     .foregroundStyle(.white.opacity(0.5))
-                    .font(.system(size: 13))
+                    .font(VayFont.label(13))
                 TextField("EAN-13 / DataMatrix / код", text: $manualCode)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -337,7 +363,7 @@ struct ScannerView: View {
                 Task { await processScannedCode(manualCode) }
             } label: {
                 Image(systemName: "arrow.right.circle.fill")
-                    .font(.system(size: 28))
+                    .font(VayFont.title(28))
                     .foregroundStyle(Color.vayPrimary)
             }
             .disabled(isProcessing || manualCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -353,13 +379,14 @@ struct ScannerView: View {
             resolutionContent(
                 icon: "checkmark.circle.fill",
                 iconColor: .vaySuccess,
-                title: mode == .add ? "Найдено" : "Для списания",
+                title: mode == .add ? "Найдено" : (mode == .writeOff ? "Для списания" : "В списке"),
                 productName: product.name,
                 category: product.category,
                 expiry: suggestedExpiry,
                 product: product,
                 showAddActions: mode == .add,
-                showWriteOffActions: mode == .writeOff
+                showWriteOffActions: mode == .writeOff,
+                showCheckOffActions: mode == .checkOff
             )
 
         case .created(let product, let suggestedExpiry, _, let provider):
@@ -371,8 +398,9 @@ struct ScannerView: View {
                 category: "\(product.category) • \(providerTitle(provider))",
                 expiry: suggestedExpiry,
                 product: product,
-                showAddActions: true,
-                showWriteOffActions: false
+                showAddActions: mode == .add,
+                showWriteOffActions: false,
+                showCheckOffActions: mode == .checkOff
             )
 
         case .notFound(let barcode, let internalCode, let parsedWeightGrams, let suggestedExpiry):
@@ -394,13 +422,14 @@ struct ScannerView: View {
         expiry: Date?,
         product: Product,
         showAddActions: Bool,
-        showWriteOffActions: Bool
+        showWriteOffActions: Bool,
+        showCheckOffActions: Bool
     ) -> some View {
         VStack(alignment: .leading, spacing: VaySpacing.md) {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: icon)
                     .foregroundStyle(iconColor)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(VayFont.label(16))
                 Text(title)
                     .font(VayFont.label(13))
                     .foregroundStyle(.secondary)
@@ -470,13 +499,31 @@ struct ScannerView: View {
                     .disabled(isQuickActionInProgress)
                 }
 
+                if showCheckOffActions {
+                    Button {
+                        Task { await performCheckOff(product: product) }
+                    } label: {
+                        HStack(spacing: VaySpacing.xs) {
+                            Image(systemName: "checkmark")
+                            Text(isQuickActionInProgress ? "…" : "Отметить")
+                        }
+                        .font(VayFont.label(13))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, VaySpacing.md)
+                        .padding(.vertical, VaySpacing.sm)
+                        .background(Color.vaySuccess)
+                        .clipShape(Capsule())
+                    }
+                    .disabled(isQuickActionInProgress)
+                }
+
                 Spacer()
 
                 Button {
                     resetResolutionState()
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 14))
+                        .font(VayFont.label(14))
                         .foregroundStyle(.secondary)
                         .padding(VaySpacing.sm)
                         .background(Color.secondary.opacity(0.12))
@@ -499,13 +546,13 @@ struct ScannerView: View {
             HStack(spacing: VaySpacing.sm) {
                 Image(systemName: "questionmark.circle.fill")
                     .foregroundStyle(Color.vayWarning)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(VayFont.label(16))
                 Text("Не найдено")
                     .font(VayFont.label(13))
                     .foregroundStyle(.secondary)
             }
 
-            Text(mode == .add
+            Text((mode == .add || mode == .checkOff)
                  ? "Создайте карточку — распознавание будет работать офлайн"
                  : "Для списания товар должен быть в инвентаре")
                 .font(VayFont.body(14))
@@ -514,7 +561,7 @@ struct ScannerView: View {
             if let barcode {
                 HStack(spacing: VaySpacing.xs) {
                     Image(systemName: "barcode")
-                        .font(.system(size: 11))
+                        .font(VayFont.caption(11))
                     Text(barcode)
                         .font(VayFont.caption(12))
                 }
@@ -522,7 +569,7 @@ struct ScannerView: View {
             }
 
             HStack(spacing: VaySpacing.sm) {
-                if mode == .add {
+                if mode == .add || mode == .checkOff {
                     Button {
                         showCreateProductSheet = true
                     } label: {
@@ -557,7 +604,7 @@ struct ScannerView: View {
                     resetResolutionState()
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 14))
+                        .font(VayFont.label(14))
                         .foregroundStyle(.secondary)
                         .padding(VaySpacing.sm)
                         .background(Color.secondary.opacity(0.12))
@@ -587,7 +634,7 @@ struct ScannerView: View {
         isProcessing = true
         defer { isProcessing = false }
 
-        let resolved = await barcodeLookupService.resolve(rawCode: normalized, allowCreate: mode == .add)
+        let resolved = await barcodeLookupService.resolve(rawCode: normalized, allowCreate: mode == .add || mode == .checkOff)
         applyResolution(resolved)
         VayHaptic.impact(.medium)
     }
@@ -618,6 +665,10 @@ struct ScannerView: View {
             internalCodeToBind = nil
             parsedWeightGrams = weight
             barcodeForManualCreation = product.barcode
+            
+            if mode == .checkOff {
+                Task { await performCheckOff(product: product) }
+            }
 
         case .created(let product, let expiry, let weight, _):
             selectedProduct = product
@@ -626,7 +677,12 @@ struct ScannerView: View {
             parsedWeightGrams = weight
             barcodeForManualCreation = product.barcode
 
+            if mode == .checkOff {
+                Task { await performCheckOff(product: product) }
+            }
+
         case .notFound(let barcode, let internalCode, let weight, let expiry):
+            self.resolution = resolved
             selectedProduct = nil
             suggestedExpiry = expiry
             internalCodeToBind = internalCode
@@ -652,9 +708,10 @@ struct ScannerView: View {
             unit = product.defaultUnit
         }
 
+        let suggestedLocation = ProductClassifier.classify(rawCategory: product.category).location ?? .fridge
         let batch = Batch(
             productId: product.id,
-            location: .fridge,
+            location: suggestedLocation,
             quantity: quantity,
             unit: unit,
             expiryDate: suggestedExpiry,
@@ -743,6 +800,14 @@ struct ScannerView: View {
         quickActionMessage = nil
     }
 
+    private func toggleTorch(on: Bool) {
+        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+              device.hasTorch else { return }
+        try? device.lockForConfiguration()
+        device.torchMode = on ? .on : .off
+        device.unlockForConfiguration()
+    }
+
     private func providerTitle(_ provider: String) -> String {
         switch provider {
         case "local_barcode_db":
@@ -767,6 +832,27 @@ struct ScannerView: View {
             return "Автошаблон"
         default:
             return provider
+        }
+    }
+    
+    private func performCheckOff(product: Product) async {
+        guard let onProductScanned = onProductScanned else { return }
+        guard !isQuickActionInProgress else { return }
+        
+        isQuickActionInProgress = true
+        defer { isQuickActionInProgress = false }
+
+        await onProductScanned(product)
+        
+        withAnimation(VayAnimation.springSmooth) {
+            quickActionMessage = "Отмечено: \(product.name)"
+        }
+        VayHaptic.success()
+        
+        try? await Task.sleep(for: .seconds(2))
+        
+        if self.selectedProduct?.id == product.id {
+            resetResolutionState()
         }
     }
 }

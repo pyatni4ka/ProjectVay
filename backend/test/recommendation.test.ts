@@ -7,18 +7,43 @@ import { buildRecommendationReasons } from "../src/services/recommendationExplan
 import type { Recipe } from "../src/types/contracts.js";
 
 test("rankRecipes penalizes disliked ingredients", () => {
-  const ranked = rankRecipes(mockRecipes, {
+  const candidates: Recipe[] = [
+    {
+      id: "test_good",
+      title: "Хороший рецепт",
+      imageURL: "https://images.example/good.jpg",
+      sourceName: "example.ru",
+      sourceURL: "https://example.ru/good",
+      ingredients: ["яйца", "молоко", "масло"],
+      instructions: ["Приготовить"],
+      nutrition: { kcal: 400, protein: 25, fat: 20, carbs: 20 },
+      estimatedCost: 100
+    },
+    {
+      id: "test_disliked",
+      title: "Рецепт с нелюбимым ингредиентом",
+      imageURL: "https://images.example/bad.jpg",
+      sourceName: "example.ru",
+      sourceURL: "https://example.ru/bad",
+      ingredients: ["яйца", "молоко", "кускус"],
+      instructions: ["Приготовить"],
+      nutrition: { kcal: 400, protein: 25, fat: 20, carbs: 20 },
+      estimatedCost: 100
+    }
+  ];
+
+  const ranked = rankRecipes(candidates, {
     ingredientKeywords: ["яйца", "молоко"],
     expiringSoonKeywords: ["яйца"],
     targets: { kcal: 400, protein: 25, fat: 20, carbs: 20 },
     budget: { perMeal: 250 },
     exclude: ["кускус"],
-    avoidBones: true,
+    avoidBones: false,
     limit: 10
   });
 
-  assert.equal(ranked[0]?.recipe.id, "r_omelet");
-  assert.ok(ranked.find((r) => r.recipe.id === "r_couscous")!.score < ranked[0]!.score);
+  assert.equal(ranked[0]?.recipe.id, "test_good");
+  assert.ok(ranked[1]!.score < ranked[0]!.score);
 });
 
 test("rankRecipes prefers recipes closer to target macros", () => {

@@ -34,20 +34,80 @@ enum UnitType: String, Codable, CaseIterable, Identifiable {
 
 enum Store: String, Codable, CaseIterable, Identifiable {
     case pyaterochka
-    case yandexLavka
-    case chizhik
+    case perekrestok
+    case magnit
+    case lenta
     case auchan
+    case okay
+    case vkusvill
+    case metro
+    case dixy
+    case fixPrice = "fix_price"
+    case samokat
+    case yandexLavka = "yandex_lavka"
+    case ozonfresh = "ozon_fresh"
+    case chizhik
     case custom
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .pyaterochka: return "Пятёрочка"
-        case .yandexLavka: return "Яндекс Лавка"
-        case .chizhik: return "Чижик"
-        case .auchan: return "Ашан"
-        case .custom: return "Другой"
+        case .pyaterochka:  return "Пятёрочка"
+        case .perekrestok:  return "Перекрёсток"
+        case .magnit:       return "Магнит"
+        case .lenta:        return "Лента"
+        case .auchan:       return "Ашан"
+        case .okay:         return "О'Кей"
+        case .vkusvill:     return "ВкусВилл"
+        case .metro:        return "METRO"
+        case .dixy:         return "Дикси"
+        case .fixPrice:     return "Fix Price"
+        case .samokat:      return "Самокат"
+        case .yandexLavka:  return "Яндекс Лавка"
+        case .ozonfresh:    return "Ozon Fresh"
+        case .chizhik:      return "Чижик"
+        case .custom:       return "Другой"
+        }
+    }
+
+    /// SF Symbol or asset name for the store logo placeholder.
+    var iconSystemName: String {
+        switch self {
+        case .pyaterochka:  return "basket.fill"
+        case .perekrestok:  return "cart.fill"
+        case .magnit:       return "bag.fill"
+        case .lenta:        return "cart.badge.plus"
+        case .auchan:       return "storefront.fill"
+        case .okay:         return "cart.circle.fill"
+        case .vkusvill:     return "leaf.fill"
+        case .metro:        return "building.2.fill"
+        case .dixy:         return "basket"
+        case .fixPrice:     return "tag.fill"
+        case .samokat:      return "bicycle"
+        case .yandexLavka:  return "bolt.fill"
+        case .ozonfresh:    return "shippingbox.fill"
+        case .chizhik:      return "bird.fill"
+        case .custom:       return "ellipsis.circle.fill"
+        }
+    }
+
+    var assetName: String? {
+        switch self {
+        case .pyaterochka:  return "store_pyaterochka"
+        case .perekrestok:  return "store_perekrestok"
+        case .magnit:       return "store_magnit"
+        case .lenta:        return "store_lenta"
+        case .okay:         return "store_okey"
+        case .vkusvill:     return "store_vkusvill"
+        case .metro:        return "store_metro"
+        case .dixy:         return "store_dixy"
+        case .fixPrice:     return "store_fixprice"
+        case .samokat:      return "store_samokat"
+        case .yandexLavka:  return "store_yandexlavka"
+        case .auchan:       return "store_auchan"
+        case .ozonfresh:    return "store_ozonfresh"
+        default: return nil
         }
     }
 }
@@ -70,6 +130,7 @@ struct Product: Identifiable, Codable, Equatable {
     var imageURL: URL?
     var localImagePath: String?
     var defaultUnit: UnitType
+    var store: Store?
     var nutrition: Nutrition
     var disliked: Bool
     var mayContainBones: Bool
@@ -85,6 +146,7 @@ struct Product: Identifiable, Codable, Equatable {
         imageURL: URL? = nil,
         localImagePath: String? = nil,
         defaultUnit: UnitType = .pcs,
+        store: Store? = nil,
         nutrition: Nutrition = .empty,
         disliked: Bool = false,
         mayContainBones: Bool = false,
@@ -99,6 +161,7 @@ struct Product: Identifiable, Codable, Equatable {
         self.imageURL = imageURL
         self.localImagePath = localImagePath
         self.defaultUnit = defaultUnit
+        self.store = store
         self.nutrition = nutrition
         self.disliked = disliked
         self.mayContainBones = mayContainBones
@@ -325,6 +388,7 @@ struct AppSettings: Codable, Equatable {
         case economyAggressive = "economy_aggressive"
         case balanced
         case macroPrecision = "macro_precision"
+        case inventoryFirst = "inventory_first"
 
         var title: String {
             switch self {
@@ -334,6 +398,8 @@ struct AppSettings: Codable, Equatable {
                 return "Баланс"
             case .macroPrecision:
                 return "Макро"
+            case .inventoryFirst:
+                return "Мои запасы"
             }
         }
     }
@@ -449,12 +515,25 @@ struct AppSettings: Codable, Equatable {
     var quietStartMinute: Int
     var quietEndMinute: Int
     var expiryAlertsDays: [Int]
-    var budgetDay: Decimal
-    var budgetWeek: Decimal?
-    var budgetMonth: Decimal?
+    var budgetPrimaryValue: Decimal
     var budgetInputPeriod: BudgetInputPeriod = .week
     var stores: [Store]
+
+    var budgetDay: Decimal {
+        AppSettings.budgetBreakdown(input: budgetPrimaryValue, period: budgetInputPeriod).day
+    }
+    var budgetWeek: Decimal {
+        AppSettings.budgetBreakdown(input: budgetPrimaryValue, period: budgetInputPeriod).week
+    }
+    var budgetMonth: Decimal {
+        AppSettings.budgetBreakdown(input: budgetPrimaryValue, period: budgetInputPeriod).month
+    }
+
     var dislikedList: [String]
+    var preferredCuisines: [String]
+    var diets: [String]
+    var maxPrepTime: Int?
+    var difficultyTargets: [String]
     var avoidBones: Bool
     var mealSchedule: MealSchedule = .default
     var strictMacroTracking: Bool = true
@@ -481,12 +560,13 @@ struct AppSettings: Codable, Equatable {
     var aiRuOnlyStorage: Bool = true
     var aiDataConsentAcceptedAt: Date?
     var aiDataCollectionMode: AIDataCollectionMode = .maximal
-    var bodyMetricsRangeMode: BodyMetricsRangeMode = .lastMonths
+    var bodyMetricsRangeMode: BodyMetricsRangeMode = .year
     var bodyMetricsRangeMonths: Int = 12
     var bodyMetricsRangeYear: Int = Calendar.current.component(.year, from: Date())
     var dietProfile: DietProfile = .medium
     var dietGoalMode: DietGoalMode = .lose
     var smartOptimizerProfile: SmartOptimizerProfile = .balanced
+    var activityLevel: NutritionCalculator.ActivityLevel = .moderatelyActive
     var recipeServiceBaseURLOverride: String?
 
     static let defaultStores: [Store] = [.pyaterochka, .yandexLavka, .chizhik, .auchan]
@@ -495,12 +575,14 @@ struct AppSettings: Codable, Equatable {
         quietStartMinute: 60,
         quietEndMinute: 360,
         expiryAlertsDays: [5, 3, 1],
-        budgetDay: 800,
-        budgetWeek: 5_600,
-        budgetMonth: 24_333.33,
+        budgetPrimaryValue: 5_600,
         budgetInputPeriod: .week,
         stores: defaultStores,
         dislikedList: ["кускус"],
+        preferredCuisines: [],
+        diets: [],
+        maxPrepTime: nil,
+        difficultyTargets: [],
         avoidBones: true,
         mealSchedule: .default,
         strictMacroTracking: true,
@@ -518,12 +600,13 @@ struct AppSettings: Codable, Equatable {
         aiRuOnlyStorage: true,
         aiDataConsentAcceptedAt: nil,
         aiDataCollectionMode: .maximal,
-        bodyMetricsRangeMode: .lastMonths,
+        bodyMetricsRangeMode: .year,
         bodyMetricsRangeMonths: 12,
         bodyMetricsRangeYear: Calendar.current.component(.year, from: Date()),
         dietProfile: .medium,
         dietGoalMode: .lose,
         smartOptimizerProfile: .balanced,
+        activityLevel: .moderatelyActive,
         recipeServiceBaseURLOverride: nil
     )
 
@@ -540,17 +623,26 @@ struct AppSettings: Codable, Equatable {
                 }
             }
 
+        let normalizedCuisines = preferredCuisines
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { partialResult, item in
+                if !partialResult.contains(item) {
+                    partialResult.append(item)
+                }
+            }
+
+        let normalizedDiets = diets
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+
+        let normalizedDifficulty = difficultyTargets
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+
         let normalizedStores = stores.isEmpty ? Self.defaultStores : stores
-        let normalizedBudgetDay = max(0, budgetDay).rounded(scale: 2)
-        let normalizedBudgetWeek = budgetWeek.map { max(0, $0).rounded(scale: 2) }
-        let normalizedBudgetMonth = budgetMonth.map { max(0, $0).rounded(scale: 2) }
+        let normalizedBudgetPrimaryValue = max(0, budgetPrimaryValue).rounded(scale: 2)
         let currentYear = Calendar.current.component(.year, from: Date())
-        let resolvedBudget = Self.resolveBudget(
-            budgetDay: normalizedBudgetDay,
-            budgetWeek: normalizedBudgetWeek,
-            budgetMonth: normalizedBudgetMonth,
-            period: budgetInputPeriod
-        )
 
         let resolvedMotionLevel: MotionLevel
         if motionLevel == .full, !enableAnimations {
@@ -563,12 +655,14 @@ struct AppSettings: Codable, Equatable {
             quietStartMinute: Self.clampMinute(quietStartMinute),
             quietEndMinute: Self.clampMinute(quietEndMinute),
             expiryAlertsDays: normalizedDays.isEmpty ? [5, 3, 1] : normalizedDays,
-            budgetDay: resolvedBudget.day,
-            budgetWeek: resolvedBudget.week,
-            budgetMonth: resolvedBudget.month,
+            budgetPrimaryValue: normalizedBudgetPrimaryValue,
             budgetInputPeriod: budgetInputPeriod,
             stores: normalizedStores,
             dislikedList: normalizedDisliked,
+            preferredCuisines: normalizedCuisines,
+            diets: normalizedDiets,
+            maxPrepTime: maxPrepTime.map { max($0, 5) },
+            difficultyTargets: normalizedDifficulty,
             avoidBones: avoidBones,
             mealSchedule: mealSchedule.normalized(),
             strictMacroTracking: strictMacroTracking,
@@ -598,6 +692,7 @@ struct AppSettings: Codable, Equatable {
         result.dietProfile = dietProfile
         result.dietGoalMode = dietGoalMode
         result.smartOptimizerProfile = smartOptimizerProfile
+        result.activityLevel = activityLevel
         result.recipeServiceBaseURLOverride = normalizedRecipeServiceURLOverride(recipeServiceBaseURLOverride)
         return result
     }
@@ -614,7 +709,7 @@ struct AppSettings: Codable, Equatable {
         input value: Decimal,
         period: BudgetInputPeriod
     ) -> (day: Decimal, week: Decimal, month: Decimal) {
-        let normalizedValue = max(0, value).rounded(scale: 2)
+        let normalizedValue = max(0, value)
 
         switch period {
         case .day:
@@ -636,76 +731,19 @@ struct AppSettings: Codable, Equatable {
     }
 
     static func weeklyBudget(fromMonthly monthlyBudget: Decimal) -> Decimal {
-        ((max(0, monthlyBudget).rounded(scale: 2) * 84) / 365).rounded(scale: 2)
+        ((max(0, monthlyBudget) * 84) / 365)
     }
 
     static func monthlyBudget(fromWeekly weeklyBudget: Decimal) -> Decimal {
-        ((max(0, weeklyBudget).rounded(scale: 2) * 365) / 84).rounded(scale: 2)
+        ((max(0, weeklyBudget) * 365) / 84)
     }
 
     static func dailyBudget(fromWeekly weeklyBudget: Decimal) -> Decimal {
-        (max(0, weeklyBudget).rounded(scale: 2) / 7).rounded(scale: 2)
+        (max(0, weeklyBudget) / 7)
     }
 
     static func dailyBudget(fromMonthly monthlyBudget: Decimal) -> Decimal {
-        ((max(0, monthlyBudget).rounded(scale: 2) * 12) / 365).rounded(scale: 2)
-    }
-
-    private static func resolveBudget(
-        budgetDay: Decimal,
-        budgetWeek: Decimal?,
-        budgetMonth: Decimal?,
-        period: BudgetInputPeriod
-    ) -> (day: Decimal, week: Decimal?, month: Decimal?) {
-        switch period {
-        case .day:
-            if budgetDay > 0 {
-                let breakdown = budgetBreakdown(input: budgetDay, period: .day)
-                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-            }
-
-            if let budgetWeek {
-                let breakdown = budgetBreakdown(input: budgetWeek, period: .week)
-                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-            }
-
-            if let budgetMonth {
-                let breakdown = budgetBreakdown(input: budgetMonth, period: .month)
-                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-            }
-
-            let breakdown = budgetBreakdown(input: max(0, budgetDay), period: .day)
-            return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-        case .week:
-            if let budgetWeek {
-                let breakdown = budgetBreakdown(input: budgetWeek, period: .week)
-                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-            }
-
-            if let budgetMonth {
-                let breakdown = budgetBreakdown(input: budgetMonth, period: .month)
-                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-            }
-
-            let legacyWeek = (max(0, budgetDay) * 7).rounded(scale: 2)
-            let breakdown = budgetBreakdown(input: legacyWeek, period: .week)
-            return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-        case .month:
-            if let budgetMonth {
-                let breakdown = budgetBreakdown(input: budgetMonth, period: .month)
-                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-            }
-
-            if let budgetWeek {
-                let breakdown = budgetBreakdown(input: budgetWeek, period: .week)
-                return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-            }
-
-            let legacyWeek = (max(0, budgetDay) * 7).rounded(scale: 2)
-            let legacyMonth = monthlyBudget(fromWeekly: legacyWeek)
-            let breakdown = budgetBreakdown(input: legacyMonth, period: .month)
-            return (day: breakdown.day, week: breakdown.week, month: breakdown.month)
-        }
+        ((max(0, monthlyBudget) * 12) / 365)
     }
 
     private func normalizedMacroValue(_ value: Double?) -> Double? {
@@ -737,12 +775,17 @@ extension AppSettings {
         case quietStartMinute
         case quietEndMinute
         case expiryAlertsDays
+        case budgetPrimaryValue
         case budgetDay
         case budgetWeek
         case budgetMonth
         case budgetInputPeriod
         case stores
         case dislikedList
+        case preferredCuisines
+        case diets
+        case maxPrepTime
+        case difficultyTargets
         case avoidBones
         case mealSchedule
         case strictMacroTracking
@@ -771,6 +814,7 @@ extension AppSettings {
         case dietProfile
         case dietGoalMode
         case smartOptimizerProfile
+        case activityLevel
         case recipeServiceBaseURLOverride
     }
 
@@ -779,19 +823,38 @@ extension AppSettings {
         quietStartMinute = try container.decode(Int.self, forKey: .quietStartMinute)
         quietEndMinute = try container.decode(Int.self, forKey: .quietEndMinute)
         expiryAlertsDays = try container.decode([Int].self, forKey: .expiryAlertsDays)
-        budgetDay = try container.decode(Decimal.self, forKey: .budgetDay)
-        budgetWeek = try container.decodeIfPresent(Decimal.self, forKey: .budgetWeek)
-        budgetMonth = try container.decodeIfPresent(Decimal.self, forKey: .budgetMonth)
-        if
-            let budgetInputPeriodRaw = try container.decodeIfPresent(String.self, forKey: .budgetInputPeriod),
-            let decodedPeriod = BudgetInputPeriod(rawValue: budgetInputPeriodRaw)
-        {
+
+        if let budgetInputPeriodRaw = try container.decodeIfPresent(String.self, forKey: .budgetInputPeriod),
+           let decodedPeriod = BudgetInputPeriod(rawValue: budgetInputPeriodRaw) {
             budgetInputPeriod = decodedPeriod
         } else {
             budgetInputPeriod = .week
         }
+
+        if let primary = try container.decodeIfPresent(Decimal.self, forKey: .budgetPrimaryValue) {
+            budgetPrimaryValue = primary
+        } else {
+            // Migration from old fields
+            let oldDay = try container.decodeIfPresent(Decimal.self, forKey: .budgetDay) ?? 0
+            let oldWeek = try container.decodeIfPresent(Decimal.self, forKey: .budgetWeek)
+            let oldMonth = try container.decodeIfPresent(Decimal.self, forKey: .budgetMonth)
+
+            switch budgetInputPeriod {
+            case .day:
+                budgetPrimaryValue = oldDay
+            case .week:
+                budgetPrimaryValue = oldWeek ?? (oldDay * 7)
+            case .month:
+                budgetPrimaryValue = oldMonth ?? Self.monthlyBudget(fromWeekly: oldWeek ?? (oldDay * 7))
+            }
+        }
+
         stores = try container.decode([Store].self, forKey: .stores)
         dislikedList = try container.decode([String].self, forKey: .dislikedList)
+        preferredCuisines = try container.decodeIfPresent([String].self, forKey: .preferredCuisines) ?? []
+        diets = try container.decodeIfPresent([String].self, forKey: .diets) ?? []
+        maxPrepTime = try container.decodeIfPresent(Int.self, forKey: .maxPrepTime)
+        difficultyTargets = try container.decodeIfPresent([String].self, forKey: .difficultyTargets) ?? []
         avoidBones = try container.decode(Bool.self, forKey: .avoidBones)
         mealSchedule = try container.decodeIfPresent(MealSchedule.self, forKey: .mealSchedule) ?? .default
         strictMacroTracking = try container.decodeIfPresent(Bool.self, forKey: .strictMacroTracking) ?? true
@@ -827,13 +890,19 @@ extension AppSettings {
         {
             bodyMetricsRangeMode = decodedMode
         } else {
-            bodyMetricsRangeMode = .lastMonths
+            bodyMetricsRangeMode = .year
         }
         bodyMetricsRangeMonths = try container.decodeIfPresent(Int.self, forKey: .bodyMetricsRangeMonths) ?? 12
         bodyMetricsRangeYear = try container.decodeIfPresent(Int.self, forKey: .bodyMetricsRangeYear) ?? Calendar.current.component(.year, from: Date())
         dietProfile = try container.decodeIfPresent(DietProfile.self, forKey: .dietProfile) ?? .medium
         dietGoalMode = try container.decodeIfPresent(DietGoalMode.self, forKey: .dietGoalMode) ?? .lose
         smartOptimizerProfile = try container.decodeIfPresent(SmartOptimizerProfile.self, forKey: .smartOptimizerProfile) ?? .balanced
+        if let activityRaw = try container.decodeIfPresent(String.self, forKey: .activityLevel),
+           let parsed = NutritionCalculator.ActivityLevel(rawValue: activityRaw) {
+            activityLevel = parsed
+        } else {
+            activityLevel = .moderatelyActive
+        }
         recipeServiceBaseURLOverride = try container.decodeIfPresent(String.self, forKey: .recipeServiceBaseURLOverride)
     }
 
@@ -842,9 +911,10 @@ extension AppSettings {
         try container.encode(quietStartMinute, forKey: .quietStartMinute)
         try container.encode(quietEndMinute, forKey: .quietEndMinute)
         try container.encode(expiryAlertsDays, forKey: .expiryAlertsDays)
+        try container.encode(budgetPrimaryValue, forKey: .budgetPrimaryValue)
         try container.encode(budgetDay, forKey: .budgetDay)
-        try container.encodeIfPresent(budgetWeek, forKey: .budgetWeek)
-        try container.encodeIfPresent(budgetMonth, forKey: .budgetMonth)
+        try container.encode(budgetWeek, forKey: .budgetWeek)
+        try container.encode(budgetMonth, forKey: .budgetMonth)
         try container.encode(budgetInputPeriod.rawValue, forKey: .budgetInputPeriod)
         try container.encode(stores, forKey: .stores)
         try container.encode(dislikedList, forKey: .dislikedList)
@@ -876,6 +946,7 @@ extension AppSettings {
         try container.encode(dietProfile, forKey: .dietProfile)
         try container.encode(dietGoalMode, forKey: .dietGoalMode)
         try container.encode(smartOptimizerProfile, forKey: .smartOptimizerProfile)
+        try container.encode(activityLevel.rawValue, forKey: .activityLevel)
         try container.encodeIfPresent(recipeServiceBaseURLOverride, forKey: .recipeServiceBaseURLOverride)
     }
 }
@@ -964,7 +1035,17 @@ extension Decimal {
         return NSDecimalNumber(decimal: value).int64Value
     }
 
+    var asHighPrecisionMinorUnits: Int64 {
+        // Scale 4 (e.g. 100.0123 -> 1000123)
+        let value = (self.rounded(scale: 4) * 10000).rounded(scale: 0)
+        return NSDecimalNumber(decimal: value).int64Value
+    }
+
     static func fromMinorUnits(_ value: Int64) -> Decimal {
         Decimal(value) / 100
+    }
+
+    static func fromHighPrecisionMinorUnits(_ value: Int64) -> Decimal {
+        Decimal(value) / 10000
     }
 }

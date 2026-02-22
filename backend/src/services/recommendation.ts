@@ -10,6 +10,23 @@ import type {
 } from "../types/contracts.js";
 import { nutritionFit, overlapScore } from "../utils/normalize.js";
 
+/**
+ * Улучшенный overlap: ключевое слово ищется как подстрока внутри ингредиентов.
+ * Позволяет "яйца" совпасть с "яйца 3 шт", "молоко" с "молоко 250 мл".
+ */
+function substringOverlapScore(ingredients: string[], keywords: string[]): number {
+  if (!ingredients.length || !keywords.length) return 0;
+  const lowerKeywords = keywords.map(k => k.trim().toLowerCase());
+  let matches = 0;
+  for (const ingredient of ingredients) {
+    const lower = ingredient.toLowerCase();
+    if (lowerKeywords.some(kw => lower.includes(kw))) {
+      matches++;
+    }
+  }
+  return matches / ingredients.length;
+}
+
 export type RankedRecipe = {
   recipe: Recipe;
   score: number;
@@ -40,12 +57,13 @@ export function rankRecipes(candidates: Recipe[], payload: RecommendPayload): Ra
       const matchedFilters: string[] = [];
       let score = 0;
       
-      // Base scores (same as before)
-      const expiry = overlapScore(recipe.ingredients, payload.expiringSoonKeywords);
-      const inStock = overlapScore(recipe.ingredients, payload.ingredientKeywords);
+      // Base scores — substring matching для лучшего совпадения с запасами
+      const expiry = substringOverlapScore(recipe.ingredients, payload.expiringSoonKeywords);
+      const inStock = substringOverlapScore(recipe.ingredients, payload.ingredientKeywords);
       const nutrition = calculateNutritionScore(recipe.nutrition, payload.targets);
-      
-      score += 0.22 * expiry + 0.22 * inStock + 0.34 * nutrition;
+
+      // Усиленные веса: скоропортящиеся продукты получают бонус
+      score += 0.28 * expiry + 0.20 * inStock + 0.34 * nutrition;
       if (expiry > 0) matchedFilters.push("expiring");
       if (inStock > 0) matchedFilters.push("in_stock");
       
@@ -129,8 +147,12 @@ export function rankRecipes(candidates: Recipe[], payload: RecommendPayload): Ra
       const preference = payload.cuisine?.some((c) => recipe.tags?.includes(c)) ? 0.05 : 0;
       score += preference;
       
-      // Penalties
-      const hasDisliked = recipe.ingredients.some((i) => excludes.has(i.toLowerCase()));
+      // Penalties — substring matching для excluded ингредиентов
+      const excludeArr = Array.from(excludes);
+      const hasDisliked = recipe.ingredients.some((i) => {
+        const lower = i.toLowerCase();
+        return excludeArr.some(e => lower.includes(e));
+      });
       const bonesFlag = payload.avoidBones && recipe.tags?.includes("с костями");
       const penalty = (hasDisliked ? 0.8 : 0) + (bonesFlag ? 0.4 : 0);
       score -= penalty;
@@ -357,7 +379,7 @@ function calculateAvailabilityFit(ingredients: string[], inStockKeywords: string
   if (ingredients.length === 0 || inStockKeywords.length === 0) {
     return 0.45;
   }
-  return overlapScore(ingredients, inStockKeywords);
+  return substringOverlapScore(ingredients, inStockKeywords);
 }
 
 function calculatePrepTimeFit(recipe: Recipe, maxPrepTime?: number): number {

@@ -37,3 +37,6 @@ gha-creds-*.json
 __pycache__/
 *.pyc
 
+
+# OwnYourCode - personal career tracking
+ownyourcode/career/

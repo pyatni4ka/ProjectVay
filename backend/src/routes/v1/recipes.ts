@@ -522,13 +522,13 @@ router.post("/meal-plan/week", async (req, res) => {
     beveragesKcal: toOptionalNumber(body.beveragesKcal),
     budget: budget
       ? {
-          perDay: toOptionalNumber(budget.perDay),
-          perMeal: toOptionalNumber(budget.perMeal),
-          perWeek: toOptionalNumber(budget.perWeek),
-          perMonth: toOptionalNumber(budget.perMonth),
-          strictness: typeof budget.strictness === "string" ? budget.strictness as "strict" | "soft" : "soft",
-          softLimitPct: toOptionalNumber(budget.softLimitPct) ?? 5,
-        }
+        perDay: toOptionalNumber(budget.perDay),
+        perMeal: toOptionalNumber(budget.perMeal),
+        perWeek: toOptionalNumber(budget.perWeek),
+        perMonth: toOptionalNumber(budget.perMonth),
+        strictness: typeof budget.strictness === "string" ? budget.strictness as "strict" | "soft" : "soft",
+        softLimitPct: toOptionalNumber(budget.softLimitPct) ?? 5,
+      }
       : undefined,
     exclude: Array.isArray(body.exclude) ? body.exclude.filter((e: unknown) => typeof e === "string") : [],
     avoidBones: Boolean(body.avoidBones),
@@ -538,11 +538,11 @@ router.post("/meal-plan/week", async (req, res) => {
     inventorySnapshot: Array.isArray(body.inventorySnapshot) ? body.inventorySnapshot.filter((s: unknown) => typeof s === "string") : [],
     constraints: constraints
       ? {
-          diets: Array.isArray(constraints.diets) ? constraints.diets : undefined,
-          allergies: Array.isArray(constraints.allergies) ? constraints.allergies : undefined,
-          dislikes: Array.isArray(constraints.dislikes) ? constraints.dislikes : undefined,
-          favorites: Array.isArray(constraints.favorites) ? constraints.favorites : undefined,
-        }
+        diets: Array.isArray(constraints.diets) ? constraints.diets : undefined,
+        allergies: Array.isArray(constraints.allergies) ? constraints.allergies : undefined,
+        dislikes: Array.isArray(constraints.dislikes) ? constraints.dislikes : undefined,
+        favorites: Array.isArray(constraints.favorites) ? constraints.favorites : undefined,
+      }
       : undefined,
     objective: typeof body.objective === "string" ? body.objective as "cost_macro" | "balanced" : "cost_macro",
     optimizerProfile: typeof body.optimizerProfile === "string" ? body.optimizerProfile as "economy_aggressive" | "balanced" | "macro_precision" : "balanced",
@@ -718,6 +718,23 @@ router.get("/barcode/lookup", async (req, res) => {
   return res.json(result);
 });
 
+router.post("/recipes/substitute", (req, res) => {
+  const body = req.body;
+  if (!isRecord(body) || !Array.isArray(body.ingredients)) {
+    return res.status(400).json({ error: "invalid_substitute_request" });
+  }
+  
+  const ingredients = toStringArray(body.ingredients);
+  if (ingredients.length === 0) {
+    return res.status(400).json({ error: "ingredients array is empty or invalid" });
+  }
+  
+  const limit = toOptionalNumber(body.limit) ?? 8;
+  const substitutions = suggestIngredientSubstitutions(ingredients, limit);
+  
+  return res.json({ substitutions });
+});
+
 export default router;
 
 function requestRateLimitKey(req: { ip?: string; headers: Record<string, unknown> }): string {
@@ -875,9 +892,6 @@ function normalizeMealPlanPayload(body: unknown): MealPlanRequest | null {
 
   const ingredientKeywords = toStringArray(body.ingredientKeywords);
   const expiringSoonKeywords = toStringArray(body.expiringSoonKeywords);
-  if (ingredientKeywords.length === 0 && expiringSoonKeywords.length === 0) {
-    return null;
-  }
 
   const targets = isRecord(body.targets) ? body.targets : {};
 

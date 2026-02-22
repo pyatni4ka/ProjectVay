@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct InventoryAIApp: App {
     private let dependencies: AppDependencies
-    @StateObject private var coordinator: AppCoordinator
+    @State private var coordinator: AppCoordinator
     
     @AppStorage("preferredColorScheme") private var storedColorScheme: Int = 0
     @AppStorage("motionLevel") private var motionLevelRaw: String = AppSettings.MotionLevel.full.rawValue
@@ -13,8 +13,8 @@ struct InventoryAIApp: App {
         do {
             let resolvedDependencies = try AppDependencies.makeLive()
             dependencies = resolvedDependencies
-            _coordinator = StateObject(
-                wrappedValue: AppCoordinator(settingsService: resolvedDependencies.settingsService)
+            _coordinator = State(
+                initialValue: AppCoordinator(settingsService: resolvedDependencies.settingsService)
             )
         } catch {
             fatalError("Не удалось инициализировать базу данных: \(error)")
@@ -31,7 +31,8 @@ struct InventoryAIApp: App {
                             settingsService: dependencies.settingsService,
                             healthKitService: dependencies.healthKitService,
                             barcodeLookupService: dependencies.barcodeLookupService,
-                            recipeServiceClient: dependencies.recipeServiceClient
+                            recipeServiceClient: dependencies.recipeServiceClient,
+                            shoppingListService: dependencies.shoppingListService
                         )
                     } else {
                         NavigationStack {
@@ -48,7 +49,7 @@ struct InventoryAIApp: App {
                     SwiftUI.ProgressView("Подготовка данных...")
                 }
             }
-            .environmentObject(coordinator)
+            .environment(coordinator)
             .preferredColorScheme(colorScheme)
             .animation(isAnimationsEnabled ? .default : .none, value: isAnimationsEnabled)
             .transaction { transaction in

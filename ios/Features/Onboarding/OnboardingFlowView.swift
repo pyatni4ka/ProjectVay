@@ -11,7 +11,7 @@ struct OnboardingFlowView: View {
     @State private var dinnerDate = DateComponents.from(minutes: AppSettings.default.mealSchedule.dinnerMinute).asDate
     @State private var expiryDaysText = "5,3,1"
     @State private var budgetInputPeriod: AppSettings.BudgetInputPeriod = .week
-    @State private var budgetPrimaryText = AppSettings.default.budgetWeek?.formattedSimple ?? "5600"
+    @State private var budgetPrimaryText = AppSettings.default.budgetWeek.formattedSimple
     @State private var dislikedText = "кускус"
     @State private var avoidBones = true
     @State private var strictMacroTracking = true
@@ -166,7 +166,7 @@ struct OnboardingFlowView: View {
                     Button { toggleStore(store) } label: {
                         HStack {
                             Image(systemName: "storefront.fill")
-                                .font(.system(size: 13, weight: .semibold))
+                                .font(VayFont.label(13))
                                 .foregroundStyle(.white)
                                 .frame(width: 28, height: 28)
                                 .background(selectedStores.contains(store) ? Color.vayPrimary : .gray)
@@ -229,7 +229,7 @@ struct OnboardingFlowView: View {
     private func row<C: View>(_ icon: String, _ color: Color, @ViewBuilder content: () -> C) -> some View {
         HStack(spacing: VaySpacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(VayFont.label(13))
                 .foregroundStyle(.white)
                 .frame(width: 28, height: 28)
                 .background(color)
@@ -240,7 +240,7 @@ struct OnboardingFlowView: View {
 
     private func secHead(_ icon: String, _ title: String) -> some View {
         HStack(spacing: VaySpacing.sm) {
-            Image(systemName: icon).font(.system(size: 11))
+            Image(systemName: icon).font(VayFont.caption(11))
             Text(title)
         }
         .font(VayFont.caption(12))
@@ -350,12 +350,15 @@ struct OnboardingFlowView: View {
             quietStartMinute: minuteOfDay(quietStartDate),
             quietEndMinute: minuteOfDay(quietEndDate),
             expiryAlertsDays: days,
-            budgetDay: budgetBreakdown.day,
-            budgetWeek: budgetBreakdown.week,
-            budgetMonth: budgetBreakdown.month,
+            budgetPrimaryValue: budgetInputPeriod == .day ? budgetBreakdown.day : (budgetInputPeriod == .week ? budgetBreakdown.week : budgetBreakdown.month),
             budgetInputPeriod: budgetInputPeriod,
             stores: selectedStores.isEmpty ? AppSettings.default.stores : Array(selectedStores),
-            dislikedList: disliked, avoidBones: avoidBones,
+            dislikedList: disliked,
+            preferredCuisines: AppSettings.default.preferredCuisines,
+            diets: AppSettings.default.diets,
+            maxPrepTime: AppSettings.default.maxPrepTime,
+            difficultyTargets: AppSettings.default.difficultyTargets,
+            avoidBones: avoidBones,
             mealSchedule: .init(
                 breakfastMinute: minuteOfDay(breakfastDate),
                 lunchMinute: minuteOfDay(lunchDate),
@@ -411,32 +414,11 @@ struct OnboardingFlowView: View {
     ) -> Decimal {
         switch period {
         case .day:
-            if settings.budgetDay > 0 {
-                return settings.budgetDay.rounded(scale: 2)
-            }
-            if let budgetWeek = settings.budgetWeek {
-                return AppSettings.dailyBudget(fromWeekly: budgetWeek)
-            }
-            if let budgetMonth = settings.budgetMonth {
-                return AppSettings.dailyBudget(fromMonthly: budgetMonth)
-            }
-            return 0
+            return settings.budgetDay
         case .week:
-            if let budgetWeek = settings.budgetWeek {
-                return budgetWeek.rounded(scale: 2)
-            }
-            if let budgetMonth = settings.budgetMonth {
-                return AppSettings.weeklyBudget(fromMonthly: budgetMonth)
-            }
-            return (max(0, settings.budgetDay) * 7).rounded(scale: 2)
+            return settings.budgetWeek
         case .month:
-            if let budgetMonth = settings.budgetMonth {
-                return budgetMonth.rounded(scale: 2)
-            }
-            if let budgetWeek = settings.budgetWeek {
-                return AppSettings.monthlyBudget(fromWeekly: budgetWeek)
-            }
-            return (max(0, settings.budgetDay) * 365 / 12).rounded(scale: 2)
+            return settings.budgetMonth
         }
     }
 

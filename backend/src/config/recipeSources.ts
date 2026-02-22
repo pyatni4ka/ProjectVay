@@ -4,9 +4,17 @@ const DEFAULT_RECIPE_SOURCES = [
   "povar.ru",
   "iamcook.ru",
   "say7.info",
+  "1000.menu",
+  "edimdoma.ru",
+  "gastronom.ru",
+  "russianfood.com",
   "allrecipes.com",
   "bbcgoodfood.com",
-  "seriouseats.com"
+  "seriouseats.com",
+  "tasty.co",
+  "epicurious.com",
+  "foodnetwork.com",
+  "delish.com"
 ];
 
 export function recipeSourceWhitelistFromEnv(

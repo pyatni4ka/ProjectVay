@@ -1,7 +1,9 @@
 import SwiftUI
+import Lottie
 
 struct EmptyStateView: View {
-    let icon: String
+    let icon: String // Fallback if no Lottie
+    let lottieName: String?
     let title: String
     let subtitle: String
     let actionTitle: String?
@@ -12,12 +14,14 @@ struct EmptyStateView: View {
 
     init(
         icon: String,
+        lottieName: String? = nil,
         title: String,
         subtitle: String,
         actionTitle: String? = nil,
         action: (() -> Void)? = nil
     ) {
         self.icon = icon
+        self.lottieName = lottieName
         self.title = title
         self.subtitle = subtitle
         self.actionTitle = actionTitle
@@ -26,11 +30,18 @@ struct EmptyStateView: View {
 
     var body: some View {
         VStack(spacing: VaySpacing.xl) {
-            Image(systemName: icon)
-                .font(.system(size: 46, weight: .light))
-                .foregroundStyle(Color.vayPrimary.opacity(0.75))
-                .symbolEffect(.pulse.byLayer, options: motion.reduceMotion ? .nonRepeating : .repeating)
-                .padding(.top, VaySpacing.md)
+            if let lottieName {
+                LottieView(animation: .named(lottieName))
+                    .playing(loopMode: .loop)
+                    .frame(width: 120, height: 120)
+                    .padding(.top, VaySpacing.md)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 46, weight: .light))
+                    .foregroundStyle(Color.vayPrimary.opacity(0.75))
+                    .symbolEffect(.pulse.byLayer, options: motion.reduceMotion ? .nonRepeating : .repeating)
+                    .padding(.top, VaySpacing.md)
+            }
 
             VStack(spacing: VaySpacing.sm) {
                 Text(title)

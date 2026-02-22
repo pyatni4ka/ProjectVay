@@ -13,8 +13,7 @@ final class AdaptiveNutritionUseCaseTests: XCTestCase {
                 settings: settings,
                 range: .day,
                 now: date(hour: 10, minute: 0),
-                automaticDailyCalories: 2400,
-                weightKG: 70,
+                baselineTarget: Nutrition(kcal: 2400, protein: 120, fat: 80, carbs: 300),
                 consumedNutrition: Nutrition(kcal: 500, protein: 40, fat: 15, carbs: 35),
                 consumedFetchFailed: false
             )
@@ -37,8 +36,7 @@ final class AdaptiveNutritionUseCaseTests: XCTestCase {
                 settings: settings,
                 range: .day,
                 now: date(hour: 8, minute: 0),
-                automaticDailyCalories: nil,
-                weightKG: nil,
+                baselineTarget: Nutrition(kcal: 2100, protein: 100, fat: 70, carbs: 260),
                 consumedNutrition: nil,
                 consumedFetchFailed: true
             )
@@ -54,8 +52,8 @@ final class AdaptiveNutritionUseCaseTests: XCTestCase {
             quietStartMinute: 60,
             quietEndMinute: 360,
             expiryAlertsDays: [5, 3, 1],
-            budgetDay: 800,
-            budgetWeek: nil,
+            budgetPrimaryValue: 5600,
+            budgetInputPeriod: .week,
             stores: AppSettings.defaultStores,
             dislikedList: [],
             avoidBones: false,
@@ -74,8 +72,7 @@ final class AdaptiveNutritionUseCaseTests: XCTestCase {
                 settings: settings,
                 range: .week,
                 now: date(hour: 20, minute: 30),
-                automaticDailyCalories: 2600,
-                weightKG: 90,
+                baselineTarget: Nutrition(kcal: 1800, protein: 130, fat: 60, carbs: 140),
                 consumedNutrition: Nutrition(kcal: 200, protein: 10, fat: 5, carbs: 10),
                 consumedFetchFailed: false
             )
@@ -102,8 +99,7 @@ final class AdaptiveNutritionUseCaseTests: XCTestCase {
                 settings: settings,
                 range: .day,
                 now: date(hour: 7, minute: 30),
-                automaticDailyCalories: nil,
-                weightKG: nil,
+                baselineTarget: Nutrition(kcal: 2100, protein: 120, fat: 70, carbs: 220),
                 consumedNutrition: Nutrition(kcal: 600, protein: 30, fat: 20, carbs: 60),
                 consumedFetchFailed: false
             )
@@ -129,8 +125,7 @@ final class AdaptiveNutritionUseCaseTests: XCTestCase {
                 settings: settings,
                 range: .day,
                 now: date(hour: 12, minute: 0),
-                automaticDailyCalories: 2400,
-                weightKG: 82,
+                baselineTarget: Nutrition(kcal: 1750, protein: 120, fat: 55, carbs: 150),
                 consumedNutrition: Nutrition(kcal: 300, protein: 20, fat: 10, carbs: 25),
                 consumedFetchFailed: false
             )

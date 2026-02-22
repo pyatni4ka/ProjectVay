@@ -9,6 +9,7 @@ struct ReminderCandidate: Equatable {
 protocol NotificationScheduling: Sendable {
     func scheduleExpiryNotifications(for batch: Batch, product: Product, settings: AppSettings) async throws
     func cancelExpiryNotifications(batchId: UUID) async throws
+    func cancelAllExpiryNotifications() async throws
     func rescheduleExpiryNotifications(for batch: Batch, product: Product, settings: AppSettings) async throws
 }
 
@@ -65,6 +66,17 @@ final class NotificationScheduler: NotificationScheduling, @unchecked Sendable {
         let prefix = "expiry.\(batchId.uuidString)."
         let identifiers = await pendingRequestIdentifiers()
             .filter { $0.hasPrefix(prefix) }
+
+        guard !identifiers.isEmpty else { return }
+
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    func cancelAllExpiryNotifications() async throws {
+        guard let center else { return }
+        let identifiers = await pendingRequestIdentifiers()
+            .filter { $0.hasPrefix("expiry.") }
 
         guard !identifiers.isEmpty else { return }
 

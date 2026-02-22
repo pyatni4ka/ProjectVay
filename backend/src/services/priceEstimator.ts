@@ -59,7 +59,7 @@ export async function estimateIngredientsPrice(
 
     totalEstimatedRub += estimatedPriceRub;
     confidenceWeightedTotal += merged.confidence * estimatedPriceRub;
-    confidenceWeight += estimatedPriceRub
+    confidenceWeight += estimatedPriceRub;
   }
 
   const confidence =

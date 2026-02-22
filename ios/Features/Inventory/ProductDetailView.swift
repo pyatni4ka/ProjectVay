@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 struct ProductDetailView: View {
     let productID: UUID
@@ -372,6 +373,149 @@ struct ProductDetailView: View {
         .font(VayFont.caption(12))
         .foregroundStyle(.secondary)
         .textCase(nil)
+    }
+
+    // MARK: - Subviews
+
+    @ViewBuilder
+    private var pricesSection: some View {
+        Section {
+            if let latest = priceHistory.first {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Последняя цена")
+                            .font(VayFont.caption(12))
+                            .foregroundStyle(.secondary)
+                        Text("\(latest.price.formattedPriceRub) ₽")
+                            .font(VayFont.title(20))
+                            .foregroundStyle(Color.vayWarning)
+                    }
+                    Spacer()
+                }
+                
+                if priceHistory.count > 1 {
+                    Chart {
+                        ForEach(priceHistory.reversed(), id: \.id) { entry in
+                            LineMark(
+                                x: .value("Date", entry.date),
+                                y: .value("Price", entry.price)
+                            )
+                            .foregroundStyle(Color.vayWarning.gradient)
+                            .interpolationMethod(.catmullRom)
+                            
+                            AreaMark(
+                                x: .value("Date", entry.date),
+                                yStart: .value("Min Price", 0),
+                                yEnd: .value("Price", entry.price)
+                            )
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color.vayWarning.opacity(0.3), Color.clear],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .interpolationMethod(.catmullRom)
+                            
+                            PointMark(
+                                x: .value("Date", entry.date),
+                                y: .value("Price", entry.price)
+                            )
+                            .foregroundStyle(Color.vayWarning)
+                            .symbolSize(40)
+                        }
+                    }
+                    .chartXAxis(.hidden)
+                    .chartYAxis {
+                        AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 1, dash: [4]))
+                                .foregroundStyle(.tertiary)
+                            AxisValueLabel {
+                                if let p = value.as(Decimal.self) {
+                                    Text("\(p.formattedPriceRub)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 120)
+                    .padding(.vertical, VaySpacing.sm)
+                }
+            }
+
+            settingRow(icon: "storefront.fill", color: .vaySecondary) {
+                Menu {
+                    ForEach(Store.allCases) { store in
+                        Button {
+                            newPriceStore = store
+                        } label: {
+                            Label {
+                                Text(store.title)
+                            } icon: {
+                                if let assetName = store.assetName {
+                                    Image(assetName)
+                                } else {
+                                    Image(systemName: store.iconSystemName)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: VaySpacing.sm) {
+                        if let assetName = newPriceStore.assetName {
+                            Image(assetName)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 20, height: 20)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        } else {
+                            Image(systemName: newPriceStore.iconSystemName)
+                                .frame(width: 20)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(newPriceStore.title)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            settingRow(icon: "rublesign.circle.fill", color: .vayWarning) {
+                TextField("Новая цена, ₽", text: $newPriceText)
+                    .keyboardType(.decimalPad)
+            }
+
+            Button {
+                Task { await addPriceEntry() }
+            } label: {
+                HStack(spacing: VaySpacing.sm) {
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundStyle(Color.vayWarning)
+                    Text("Добавить цену")
+                        .font(VayFont.label(14))
+                        .foregroundStyle(Color.vayWarning)
+                }
+            }
+
+            ForEach(priceHistory) { entry in
+                HStack {
+                    Text(entry.store.title)
+                        .font(VayFont.body(14))
+                    Spacer()
+                    Text("\(entry.price.formattedPriceRub) ₽")
+                        .font(VayFont.label(14))
+                    Text(entry.date.formatted(date: .abbreviated, time: .omitted))
+                        .font(VayFont.caption(11))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        } header: {
+            sectionHeader(icon: "rublesign", title: "Цены")
+        }
     }
 
     // MARK: - Accessibility

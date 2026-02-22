@@ -7,7 +7,7 @@ import UIKit
 struct BodyMetricsView: View {
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
-    @EnvironmentObject private var appSettingsStore: AppSettingsStore
+    @Environment(AppSettingsStore.self) private var appSettingsStore
 
     @State private var settings: AppSettings = .default
     @State private var isHydratingSettings = false
@@ -33,10 +33,15 @@ struct BodyMetricsView: View {
     @State private var isEditingDesiredWeight = false
     @State private var selectedWeightDate: Date?
     @State private var selectedBodyFatDate: Date?
-    @State private var chartRangeMode: AppSettings.BodyMetricsRangeMode = .lastMonths
+    @State private var chartRangeMode: AppSettings.BodyMetricsRangeMode = .year
     @State private var chartRangeMonths = 12
     @State private var chartRangeYear = Calendar.current.component(.year, from: Date())
     @State private var isHydratingChartRange = false
+
+    // КБЖУ калькулятор — synced with settings for consistency
+    @State private var calcActivityLevel: NutritionCalculator.ActivityLevel = .moderatelyActive
+    @State private var calcGoal: NutritionCalculator.Goal = .lose
+    @State private var isSyncingCalcPickers = false
 
     var body: some View {
         ScrollView {
@@ -44,6 +49,7 @@ struct BodyMetricsView: View {
                 desiredWeightCard
                 healthOverviewCard
                 todayNutritionCard
+                nutritionPlanCard
                 chartRangeCard
                 chartCard(
                     title: "Вес (доступные данные)",
@@ -110,6 +116,14 @@ struct BodyMetricsView: View {
             selectedWeightDate = nil
             selectedBodyFatDate = nil
             Task { await saveChartRangeIfNeeded() }
+        }
+        .onChange(of: calcActivityLevel) { _, newValue in
+            guard !isSyncingCalcPickers, !isHydratingSettings else { return }
+            Task { await saveCalcPickerChanges(activityLevel: newValue, goal: calcGoal) }
+        }
+        .onChange(of: calcGoal) { _, newValue in
+            guard !isSyncingCalcPickers, !isHydratingSettings else { return }
+            Task { await saveCalcPickerChanges(activityLevel: calcActivityLevel, goal: newValue) }
         }
         .onDisappear {
             guard isEditingDesiredWeight else { return }
@@ -301,6 +315,111 @@ struct BodyMetricsView: View {
         .vayCard()
     }
 
+    // MARK: - Mifflin–St Jeor КБЖУ-калькулятор
+
+    private var nutritionPlanCard: some View {
+        let calcResult = computeNutritionPlan()
+        return VStack(alignment: .leading, spacing: VaySpacing.md) {
+            sectionHeader(icon: "flame.fill", title: "Рекомендация по КБЖУ")
+
+            if let result = calcResult {
+                VStack(spacing: VaySpacing.sm) {
+                    HStack {
+                        macroBox(label: "Ккал", value: result.kcal, unit: "ккал", color: .vayCalories)
+                        macroBox(label: "Белок", value: result.proteinGrams, unit: "г", color: .vayProtein)
+                        macroBox(label: "Жиры", value: result.fatGrams, unit: "г", color: .vayFat)
+                        macroBox(label: "Углев", value: result.carbsGrams, unit: "г", color: .vayCarbs)
+                    }
+
+                    Divider()
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("ОО (BMR): \(Int(result.bmr)) ккал")
+                                .font(VayFont.caption(11))
+                                .foregroundStyle(.secondary)
+                            Text("TDEE: \(Int(result.tdee)) ккал")
+                                .font(VayFont.caption(11))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        let deficit = result.deficitKcal
+                        Text(deficit < 0 ? "Дефицит: \(Int(abs(deficit))) ккал" : deficit > 0 ? "Профицит: \(Int(deficit)) ккал" : "Поддержание")
+                            .font(VayFont.caption(11))
+                            .foregroundStyle(deficit < 0 ? Color.vayWarning : deficit > 0 ? Color.vaySuccess : .secondary)
+                    }
+                }
+
+                Picker("Активность", selection: $calcActivityLevel) {
+                    ForEach(NutritionCalculator.ActivityLevel.allCases) { level in
+                        Text(level.label).tag(level)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(Color.vayPrimary)
+                .font(VayFont.body(14))
+
+                Picker("Цель", selection: $calcGoal) {
+                    ForEach(NutritionCalculator.Goal.allCases) { goal in
+                        Text(goal.label).tag(goal)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text(result.explanation.disclaimer)
+                    .font(VayFont.caption(10))
+                    .foregroundStyle(.tertiary)
+                    .italic()
+            } else {
+                Text("Для расчёта КБЖУ необходимы данные Apple Health: рост, вес, возраст и пол.")
+                    .font(VayFont.body(14))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .vayCard()
+    }
+
+    private func computeNutritionPlan() -> NutritionTargetsService.Targets? {
+        guard let weight = metrics.weightKG,
+              let height = metrics.heightCM,
+              let age = metrics.age else { return nil }
+        let isMale = metrics.sex?.lowercased().contains("male") ?? true
+
+        var tempSettings = settings
+        tempSettings.activityLevel = calcActivityLevel
+        switch calcGoal {
+        case .lose: tempSettings.dietGoalMode = .lose
+        case .maintain: tempSettings.dietGoalMode = .maintain
+        case .gain: tempSettings.dietGoalMode = .gain
+        }
+
+        let bodyMetrics = NutritionTargetsService.BodyMetrics(
+            weightKg: weight,
+            heightCm: height,
+            ageYears: age,
+            isMale: isMale
+        )
+        return NutritionTargetsService.computeTargets(settings: tempSettings, metrics: bodyMetrics)
+    }
+
+    private func macroBox(label: String, value: Double, unit: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(label)
+                .font(VayFont.caption(10))
+                .foregroundStyle(.secondary)
+            Text("\(Int(value))")
+                .font(VayFont.label(16))
+                .foregroundStyle(color)
+            Text(unit)
+                .font(VayFont.caption(9))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, VaySpacing.sm)
+        .background(color.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: VayRadius.sm, style: .continuous))
+    }
+
     private var chartRangeCard: some View {
         VStack(alignment: .leading, spacing: VaySpacing.md) {
             sectionHeader(icon: "calendar", title: "Период графиков")
@@ -417,7 +536,7 @@ struct BodyMetricsView: View {
                     )
                     .foregroundStyle(lineColor)
                     .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.catmullRom)
+                    .interpolationMethod(.monotone)
 
                     AreaMark(
                         x: .value("Дата", point.date),
@@ -430,7 +549,7 @@ struct BodyMetricsView: View {
                             endPoint: .bottom
                         )
                     )
-                    .interpolationMethod(.catmullRom)
+                    .interpolationMethod(.monotone)
 
                     if point.hasOutlier {
                         PointMark(
@@ -550,7 +669,7 @@ struct BodyMetricsView: View {
     private func sectionHeader(icon: String, title: String) -> some View {
         HStack(spacing: VaySpacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
+                .font(VayFont.label(14))
                 .foregroundStyle(Color.vayPrimary)
             Text(title)
                 .font(VayFont.heading(16))
@@ -570,11 +689,46 @@ struct BodyMetricsView: View {
             let loaded = try await settingsService.loadSettings()
             settings = loaded.normalized()
             applyChartRangeFromSettings(settings)
+            syncCalcPickersFromSettings(settings)
             desiredWeightText = formatDesiredWeight(settings.weightGoalKg)
             isEditingDesiredWeight = false
             appSettingsStore.update(settings)
         } catch {
             healthStatusMessage = "Не удалось загрузить настройки: \(error.localizedDescription)"
+        }
+    }
+
+    private func syncCalcPickersFromSettings(_ settings: AppSettings) {
+        isSyncingCalcPickers = true
+        defer { isSyncingCalcPickers = false }
+
+        calcActivityLevel = settings.activityLevel
+
+        switch settings.dietGoalMode {
+        case .lose: calcGoal = .lose
+        case .maintain: calcGoal = .maintain
+        case .gain: calcGoal = .gain
+        }
+    }
+
+    private func saveCalcPickerChanges(
+        activityLevel: NutritionCalculator.ActivityLevel,
+        goal: NutritionCalculator.Goal
+    ) async {
+        var updated = settings
+        updated.activityLevel = activityLevel
+        switch goal {
+        case .lose: updated.dietGoalMode = .lose
+        case .maintain: updated.dietGoalMode = .maintain
+        case .gain: updated.dietGoalMode = .gain
+        }
+
+        do {
+            settings = try await settingsService.saveSettings(updated)
+            appSettingsStore.update(settings)
+            await recalculateAutoGoalNutrition(for: settings)
+        } catch {
+            healthStatusMessage = "Не удалось сохранить настройки: \(error.localizedDescription)"
         }
     }
 
@@ -680,7 +834,7 @@ struct BodyMetricsView: View {
         defer { isRequestingHealthAccess = false }
 
         do {
-            let granted = try await healthKitService.requestReadAccess()
+            let granted = try await healthKitService.requestAccess()
             if granted {
                 var updated = settings
                 updated.healthKitReadEnabled = true
@@ -740,6 +894,7 @@ struct BodyMetricsView: View {
         let previous = settings
         settings = normalized
         applyChartRangeFromSettings(normalized)
+        syncCalcPickersFromSettings(normalized)
         if !isEditingDesiredWeight {
             desiredWeightText = formatDesiredWeight(normalized.weightGoalKg)
         }
@@ -879,7 +1034,8 @@ struct BodyMetricsView: View {
     ) -> some View {
         if let scale {
             chart
-                .chartYScale(domain: scale.domain)
+                .chartYScale(domain: scale.domain, range: .plotDimension(padding: 15))
+                .chartXScale(range: .plotDimension(padding: 15))
                 .chartYAxis {
                     AxisMarks(position: .leading, values: .stride(by: scale.step)) { value in
                         AxisValueLabel {
@@ -892,6 +1048,8 @@ struct BodyMetricsView: View {
                 }
         } else {
             chart
+                .chartYScale(range: .plotDimension(padding: 15))
+                .chartXScale(range: .plotDimension(padding: 15))
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
                         AxisValueLabel {
@@ -963,41 +1121,27 @@ struct BodyMetricsView: View {
     }
 
     private func recalculateAutoGoalNutrition(for settings: AppSettings) async {
-        var automaticDailyCalories: Double?
-        var weightKG: Double?
-
-        if settings.macroGoalSource == .automatic {
-            automaticDailyCalories = healthKitService.fallbackAutomaticDailyCalories(
-                targetLossPerWeek: settings.targetWeightDeltaPerWeek
-            )
-        }
-
+        let healthMetrics: HealthKitService.UserMetrics?
         if settings.macroGoalSource == .automatic, settings.healthKitReadEnabled {
             if metrics.weightKG != nil, metrics.heightCM != nil, metrics.age != nil {
-                automaticDailyCalories = Double(
-                    healthKitService.calculateDailyCalories(
-                        metrics: metrics,
-                        targetLossPerWeek: settings.targetWeightDeltaPerWeek
-                    )
-                )
-                weightKG = metrics.weightKG
-            } else if let loadedMetrics = try? await healthKitService.fetchLatestMetrics() {
-                automaticDailyCalories = Double(
-                    healthKitService.calculateDailyCalories(
-                        metrics: loadedMetrics,
-                        targetLossPerWeek: settings.targetWeightDeltaPerWeek
-                    )
-                )
-                weightKG = loadedMetrics.weightKG
+                healthMetrics = metrics
+            } else {
+                healthMetrics = try? await healthKitService.fetchLatestMetrics()
             }
+        } else {
+            healthMetrics = nil
         }
+        
+        let baselineTarget = NutritionTargetsService.resolveTargetNutrition(
+            settings: settings, 
+            healthMetrics: healthMetrics
+        )
 
         let output = AdaptiveNutritionUseCase().execute(
             .init(
                 settings: settings,
                 range: .day,
-                automaticDailyCalories: automaticDailyCalories,
-                weightKG: weightKG,
+                baselineTarget: baselineTarget,
                 consumedNutrition: nil,
                 consumedFetchFailed: false,
                 healthIntegrationEnabled: settings.healthKitReadEnabled

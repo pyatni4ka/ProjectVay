@@ -9,6 +9,7 @@ struct AppDependencies {
     let scannerService: ScannerService
     let barcodeLookupService: BarcodeLookupService
     let recipeServiceClient: RecipeServiceClient?
+    let shoppingListService: ShoppingListService
     private static var didConfigureImagePipeline = false
 
     static func makeLive() throws -> AppDependencies {
@@ -26,6 +27,9 @@ struct AppDependencies {
             notificationScheduler: notificationScheduler
         )
 
+        let shoppingListRepository = ShoppingListRepository(dbQueue: dbQueue)
+        let shoppingListService = ShoppingListService(repository: shoppingListRepository)
+
         let settingsService = SettingsService(
             repository: settingsRepository,
             inventoryRepository: inventoryRepository,
@@ -36,13 +40,18 @@ struct AppDependencies {
         let scannerService = ScannerService()
 
         var providers: [any BarcodeLookupProvider] = []
-        if
-            config.enableLocalBarcodeDB,
-            let localBarcodeDBPath = config.localBarcodeDBPath,
-            FileManager.default.fileExists(atPath: localBarcodeDBPath),
-            let localProvider = try? LocalBarcodeDatabaseProvider(databasePath: localBarcodeDBPath)
-        {
-            providers.append(localProvider)
+        if config.enableLocalBarcodeDB {
+            var resolvedPath: String?
+            
+            if let configPath = config.localBarcodeDBPath, FileManager.default.fileExists(atPath: configPath) {
+                resolvedPath = configPath
+            } else if let bundleURL = Bundle.main.url(forResource: "local_barcode_db", withExtension: "sqlite") {
+                resolvedPath = bundleURL.path
+            }
+            
+            if let finalPath = resolvedPath, let localProvider = try? LocalBarcodeDatabaseProvider(databasePath: finalPath) {
+                providers.append(localProvider)
+            }
         }
 
         // Free public sources are primary defaults.
@@ -64,11 +73,20 @@ struct AppDependencies {
         if config.enableGoUPC {
             providers.append(GoUPCBarcodeProvider())
         }
+        if config.enableEdamam, let appId = config.edamamAppId, let appKey = config.edamamAppKey {
+            providers.append(EdamamBarcodeProvider(appId: appId, appKey: appKey))
+        }
+
+        var imageSearchProvider: GoogleImageSearchProvider?
+        if config.enableGoogleImageSearch, let apiKey = config.googleSearchApiKey, let searchEngineId = config.googleSearchEngineId {
+            imageSearchProvider = GoogleImageSearchProvider(apiKey: apiKey, searchEngineId: searchEngineId)
+        }
 
         let barcodeLookupService = BarcodeLookupService(
             inventoryService: inventoryService,
             scannerService: scannerService,
             providers: providers,
+            imageSearchProvider: imageSearchProvider,
             policy: config.lookupPolicy
         )
 
@@ -87,7 +105,8 @@ struct AppDependencies {
             healthKitService: healthKitService,
             scannerService: scannerService,
             barcodeLookupService: barcodeLookupService,
-            recipeServiceClient: recipeServiceClient
+            recipeServiceClient: recipeServiceClient,
+            shoppingListService: shoppingListService
         )
     }
 

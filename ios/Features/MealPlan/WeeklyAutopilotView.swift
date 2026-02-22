@@ -7,9 +7,11 @@ struct WeeklyAutopilotView: View {
     let settingsService: any SettingsServiceProtocol
     let healthKitService: HealthKitService
     let recipeServiceClient: RecipeServiceClient?
+    let shoppingListService: ShoppingListServiceProtocol
+    let barcodeLookupService: BarcodeLookupService
     var onOpenScanner: () -> Void = {}
 
-    @EnvironmentObject private var appSettingsStore: AppSettingsStore
+    @Environment(AppSettingsStore.self) private var appSettingsStore
 
     @State private var autopilotPlan: WeeklyAutopilotResponse?
     @State private var isLoading = false
@@ -72,14 +74,14 @@ struct WeeklyAutopilotView: View {
                         showShoppingList.toggle()
                     } label: {
                         Image(systemName: "cart")
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(VayFont.label(17))
                             .foregroundStyle(Color.vayPrimary)
                     }
                 }
 
                 Button(action: { Task { await generatePlan() } }) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(VayFont.label(17))
                         .foregroundStyle(Color.vayPrimary)
                 }
                 .disabled(isLoading)
@@ -110,8 +112,12 @@ struct WeeklyAutopilotView: View {
             )
         }
         .sheet(isPresented: $showShoppingList) {
-            if let plan = autopilotPlan {
-                ShoppingListView(plan: plan)
+            if let _ = autopilotPlan {
+                ShoppingListView(
+                    shoppingListService: shoppingListService,
+                    barcodeLookupService: barcodeLookupService,
+                    inventoryService: inventoryService
+                )
             }
         }
         .task {
@@ -244,7 +250,7 @@ struct WeeklyAutopilotView: View {
             HStack(alignment: .top, spacing: VaySpacing.sm) {
                 // Meal type icon
                 Image(systemName: mealIcon(entry.mealType))
-                    .font(.system(size: 16))
+                    .font(VayFont.body(16))
                     .foregroundStyle(Color.vayPrimary)
                     .frame(width: 24)
 
@@ -290,7 +296,7 @@ struct WeeklyAutopilotView: View {
                     Task { await loadReplaceCandidates(entry: entry, day: day, plan: plan) }
                 } label: {
                     Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 14))
+                        .font(VayFont.label(14))
                         .foregroundStyle(Color.vayPrimary)
                 }
                 .buttonStyle(.plain)
@@ -310,7 +316,7 @@ struct WeeklyAutopilotView: View {
                         .font(VayFont.caption(11))
                         .foregroundStyle(Color.vayPrimary)
                     Image(systemName: expandedWhyIds.contains(entryId) ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9))
+                        .font(VayFont.caption(9))
                         .foregroundStyle(Color.vayPrimary)
                 }
             }
@@ -382,7 +388,7 @@ struct WeeklyAutopilotView: View {
                     Spacer()
                     Image(systemName: "chevron.right")
                         .foregroundStyle(.secondary)
-                        .font(.system(size: 12))
+                        .font(VayFont.caption(12))
                 }
             }
             .buttonStyle(.plain)
@@ -404,7 +410,7 @@ struct WeeklyAutopilotView: View {
     private func shoppingItemRow(_ item: WeeklyAutopilotResponse.ShoppingItemQuantity) -> some View {
         HStack {
             Image(systemName: "circle")
-                .font(.system(size: 10))
+                .font(VayFont.caption(10))
                 .foregroundStyle(.secondary)
             Text(item.ingredient.capitalized)
                 .font(VayFont.body(13))
@@ -561,36 +567,27 @@ struct WeeklyAutopilotView: View {
     private func computeBaselineNutrition(settings: AppSettings) async -> Nutrition {
         if settings.healthKitReadEnabled, !hasRequestedHealthAccess {
             hasRequestedHealthAccess = true
-            _ = try? await healthKitService.requestReadAccess()
+            _ = try? await healthKitService.requestAccess()
         }
 
-        var automaticDailyCalories: Double?
-        var weightKG: Double?
-
+        var metrics: HealthKitService.UserMetrics?
         if settings.macroGoalSource == .automatic {
-            automaticDailyCalories = healthKitService.fallbackAutomaticDailyCalories(
-                targetLossPerWeek: settings.targetWeightDeltaPerWeek
-            )
-        }
-
-        if settings.healthKitReadEnabled, settings.macroGoalSource == .automatic {
-            if let metrics = try? await healthKitService.fetchLatestMetrics() {
-                automaticDailyCalories = Double(
-                    healthKitService.calculateDailyCalories(
-                        metrics: metrics,
-                        targetLossPerWeek: settings.targetWeightDeltaPerWeek
-                    )
-                )
-                weightKG = metrics.weightKG
+            if settings.healthKitReadEnabled {
+                metrics = try? await healthKitService.fetchLatestMetrics()
             }
         }
+
+        let baselineTarget = NutritionTargetsService.resolveTargetNutrition(
+            settings: settings,
+            healthMetrics: metrics
+        )
 
         let baseOutput = AdaptiveNutritionUseCase().execute(
             .init(
                 settings: settings,
                 range: .week,
-                automaticDailyCalories: automaticDailyCalories,
-                weightKG: weightKG,
+                now: Date(),
+                baselineTarget: baselineTarget,
                 consumedNutrition: nil,
                 consumedFetchFailed: false,
                 healthIntegrationEnabled: settings.healthKitReadEnabled

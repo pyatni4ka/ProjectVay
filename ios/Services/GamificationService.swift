@@ -1,11 +1,12 @@
 import Foundation
 import Combine
+import Observation
 #if canImport(UIKit)
 import UIKit
 #endif
 
 @MainActor
-final class GamificationService: ObservableObject {
+@Observable final class GamificationService {
     static let shared = GamificationService()
 
     struct XPToast: Identifiable, Equatable {
@@ -14,11 +15,12 @@ final class GamificationService: ObservableObject {
         let icon: String
     }
 
-    @Published private(set) var achievements: [Achievement] = []
-    @Published private(set) var userStats: UserStats = .initial
-    @Published private(set) var dailyQuests: [GamificationQuest] = []
-    @Published private(set) var weeklyQuests: [GamificationQuest] = []
-    @Published private(set) var lastXPToast: XPToast?
+    private(set) var achievements: [Achievement] = []
+    private(set) var userStats: UserStats = .initial
+    private(set) var dailyQuests: [GamificationQuest] = []
+    private(set) var weeklyQuests: [GamificationQuest] = []
+    private(set) var lastXPToast: XPToast?
+    var pendingLevelUp: Int? // Track state if a level-up splash needs to be shown
 
     private let userDefaults = UserDefaults.standard
     private let achievementsKey = "vay_achievements"
@@ -143,6 +145,10 @@ final class GamificationService: ObservableObject {
         lastXPToast = nil
     }
 
+    func clearLevelUp() {
+        pendingLevelUp = nil
+    }
+
     func resetProgress() {
         achievements = Achievement.defaultAchievements()
         userStats = .initial
@@ -264,7 +270,8 @@ final class GamificationService: ObservableObject {
 
         if userStats.level > previousLevel {
             triggerHapticFeedback()
-            lastXPToast = XPToast(text: "Уровень \(userStats.level)!", icon: "sparkles")
+            // We use the full screen level up splash instead of the toast
+            pendingLevelUp = userStats.level
         } else {
             lastXPToast = XPToast(text: toastText, icon: icon)
         }

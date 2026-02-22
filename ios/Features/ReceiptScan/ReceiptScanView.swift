@@ -11,7 +11,7 @@ struct ReceiptScanView: View {
     @State private var showError = false
     
     let inventoryService: any InventoryServiceProtocol
-    let onItemsAdded: () -> Void
+    let onItemsAdded: ([ScannedReceiptItem]) -> Void
 
     var body: some View {
         NavigationStack {
@@ -81,7 +81,7 @@ struct ReceiptScanView: View {
             Spacer()
             
             Image(systemName: "doc.text.viewfinder")
-                .font(.system(size: 64))
+                .font(VayFont.hero(64))
                 .foregroundStyle(Color.vayPrimary)
             
             VStack(spacing: VaySpacing.sm) {
@@ -207,7 +207,7 @@ struct ReceiptScanView: View {
                 GamificationService.shared.trackProductAdded(count: addedCount)
             }
         }
-        onItemsAdded()
+        onItemsAdded(scannedItems)
         dismiss()
     }
 }

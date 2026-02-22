@@ -79,7 +79,7 @@ enum AppMigrations {
                 table.column("onboarding_completed", .boolean).notNull().defaults(to: false)
             }
 
-            try db.execute(sql: "INSERT INTO app_settings (id, quiet_start_minute, quiet_end_minute, expiry_alerts_days_json, budget_day_minor, budget_week_minor, stores_json, disliked_list_json, avoid_bones, onboarding_completed) VALUES (1, 60, 360, '[5,3,1]', 80000, NULL, '[\"pyaterochka\",\"yandexLavka\",\"chizhik\",\"auchan\"]', '[\"кускус\"]', 1, 0)")
+            try db.execute(sql: "INSERT INTO app_settings (id, quiet_start_minute, quiet_end_minute, expiry_alerts_days_json, budget_day_minor, budget_week_minor, stores_json, disliked_list_json, avoid_bones, onboarding_completed) VALUES (1, 60, 360, '[5,3,1]', 80000, NULL, '[\"pyaterochka\",\"yandex_lavka\",\"chizhik\",\"auchan\"]', '[\"кускус\"]', 1, 0)")
         }
 
         migrator.registerMigration("v2_internal_code_mappings") { db in
@@ -187,7 +187,7 @@ enum AppMigrations {
 
         migrator.registerMigration("v12_body_metrics_range") { db in
             try db.alter(table: "app_settings") { table in
-                table.add(column: "body_metrics_range_mode", .text).notNull().defaults(to: "lastMonths")
+                table.add(column: "body_metrics_range_mode", .text).notNull().defaults(to: "year")
                 table.add(column: "body_metrics_range_months", .integer).notNull().defaults(to: 12)
                 table.add(column: "body_metrics_range_year", .integer)
             }
@@ -202,6 +202,72 @@ enum AppMigrations {
                 table.add(column: "ai_ru_only_storage", .boolean).notNull().defaults(to: true)
                 table.add(column: "ai_data_consent_accepted_at", .datetime)
                 table.add(column: "ai_data_collection_mode", .text).notNull().defaults(to: "maximal")
+            }
+        }
+
+        migrator.registerMigration("v14_budget_primary_value") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "budget_primary_value_minor", .integer)
+            }
+
+            try db.execute(sql: """
+                UPDATE app_settings
+                SET budget_primary_value_minor = CASE
+                    WHEN budget_input_period = 'day' THEN budget_day_minor
+                    WHEN budget_input_period = 'week' THEN COALESCE(budget_week_minor, budget_day_minor * 7)
+                    WHEN budget_input_period = 'month' THEN COALESCE(budget_month_minor, budget_day_minor * 52 / 12 * 7)
+                    ELSE COALESCE(budget_week_minor, budget_day_minor * 7)
+                END
+                """)
+        }
+
+        migrator.registerMigration("v15_high_precision_budget") { db in
+            try db.execute(sql: "UPDATE app_settings SET budget_primary_value_minor = budget_primary_value_minor * 100")
+        }
+
+        migrator.registerMigration("v16_activity_level") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "activity_level", .text).notNull().defaults(to: "moderatelyActive")
+            }
+        }
+
+        migrator.registerMigration("v17_product_store") { db in
+            try db.alter(table: "products") { table in
+                table.add(column: "store", .text)
+            }
+        }
+
+        migrator.registerMigration("v18_chart_default_year") { db in
+            try db.execute(sql: """
+                UPDATE app_settings
+                SET body_metrics_range_mode = 'year'
+                WHERE body_metrics_range_mode = 'lastMonths' AND body_metrics_range_months = 12
+                """)
+        }
+
+        migrator.registerMigration("v19_dietary_lifestyle_preferences") { db in
+            try db.alter(table: "app_settings") { table in
+                table.add(column: "preferred_cuisines_json", .text).notNull().defaults(to: "[]")
+                table.add(column: "diets_json", .text).notNull().defaults(to: "[]")
+                table.add(column: "max_prep_time", .integer)
+                table.add(column: "difficulty_targets_json", .text).notNull().defaults(to: "[]")
+            }
+        }
+
+        migrator.registerMigration("v20_shopping_list") { db in
+            try db.create(table: "shopping_list_items") { table in
+                table.column("id", .text).primaryKey()
+                table.column("name", .text).notNull()
+                table.column("quantity", .double).notNull()
+                table.column("unit", .text).notNull()
+                table.column("is_completed", .boolean).notNull().defaults(to: false)
+                table.column("created_at", .datetime).notNull()
+            }
+        }
+
+        migrator.registerMigration("v21_shopping_list_category") { db in
+            try db.alter(table: "shopping_list_items") { table in
+                table.add(column: "category", .text).notNull().defaults(to: "Продукты")
             }
         }
 

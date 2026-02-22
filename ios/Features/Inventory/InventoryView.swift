@@ -1,4 +1,6 @@
 import SwiftUI
+import Nuke
+import NukeUI
 
 struct InventoryView: View {
     let inventoryService: any InventoryServiceProtocol
@@ -77,46 +79,7 @@ struct InventoryView: View {
             } else {
                 Section {
                     ForEach(filteredProducts) { product in
-                        let productBatches = batches.filter { $0.productId == product.id }
-                        let nearestExpiry = productBatches.compactMap(\.expiryDate).min()
-                        let totalQty = productBatches.reduce(0.0) { $0 + $1.quantity }
-                        let mainUnit = productBatches.first?.unit ?? .pcs
-
-                        NavigationLink {
-                            ProductDetailView(
-                                productID: product.id,
-                                inventoryService: inventoryService
-                            )
-                        } label: {
-                            productCard(product)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                productToDelete = product
-                                showDeleteConfirm = true
-                            } label: {
-                                Label("Удалить", systemImage: "trash")
-                            }
-
-                            Button {
-                                Task { await writeOffProduct(product) }
-                            } label: {
-                                Label("Списать", systemImage: "minus.circle")
-                            }
-                            .tint(.vayWarning)
-                        }
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            Button {
-                                Task { await consumeProduct(product) }
-                            } label: {
-                                Label("Съедено", systemImage: "checkmark.circle")
-                            }
-                            .tint(.vaySuccess)
-                        }
-                        .vayAccessibilityLabel(
-                            accessibilityLabel(for: product, qty: totalQty, unit: mainUnit, expiry: nearestExpiry),
-                            hint: "Нажмите для просмотра деталей. Смахните для действий."
-                        )
+                        productListRow(for: product)
                     }
                 }
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
@@ -155,7 +118,7 @@ struct InventoryView: View {
                     }
                 } label: {
                     Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 22))
+                        .font(VayFont.heading(22))
                         .foregroundStyle(Color.vayPrimary)
                 }
                 .vayAccessibilityLabel("Действия с запасами", hint: "Сканировать штрихкод, чек или добавить вручную")
@@ -171,6 +134,7 @@ struct InventoryView: View {
                     initialUnit: nil,
                     initialQuantity: nil,
                     initialExpiryDate: nil,
+                    initialLocation: ProductClassifier.classify(rawCategory: "Продукты").location,
                     onSaved: { _ in
                         Task { await loadData() }
                     }
@@ -220,15 +184,17 @@ struct InventoryView: View {
         Group {
             if searchText.isEmpty, products.isEmpty {
                 EmptyStateView(
-                    icon: "barcode.viewfinder",
-                    title: "Инвентарь пуст",
-                    subtitle: "Сканируйте первый товар, чтобы начать отслеживание запасов.",
+                    icon: "tray",
+                    lottieName: "empty_box",
+                    title: "Холодильник пуст",
+                    subtitle: "Добавьте первый продукт вручную или отсканируйте штрихкод",
                     actionTitle: "Сканировать первый товар",
                     action: onOpenScanner
                 )
             } else if !searchText.isEmpty {
                 EmptyStateView(
                     icon: "magnifyingglass",
+                    lottieName: "empty_box",
                     title: "Ничего не найдено",
                     subtitle: "По запросу «\(searchText)» совпадений нет. Попробуйте другое название или сбросьте поиск.",
                     actionTitle: "Сбросить поиск",
@@ -282,7 +248,7 @@ struct InventoryView: View {
         Button(action: action) {
             HStack(spacing: VaySpacing.xs) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(VayFont.caption(12))
                 Text(title)
                     .font(VayFont.label(13))
             }
@@ -334,33 +300,119 @@ struct InventoryView: View {
 
 
 
-    private func productCard(_ product: Product) -> some View {
+    @ViewBuilder
+    private func productListRow(for product: Product) -> some View {
         let productBatches = batches.filter { $0.productId == product.id }
         let nearestExpiry = productBatches.compactMap(\.expiryDate).min()
         let totalQty = productBatches.reduce(0.0) { $0 + $1.quantity }
         let mainUnit = productBatches.first?.unit ?? .pcs
+
+        NavigationLink {
+            ProductDetailView(
+                productID: product.id,
+                inventoryService: inventoryService
+            )
+        } label: {
+            productCard(
+                product,
+                productBatches: productBatches,
+                nearestExpiry: nearestExpiry,
+                totalQty: totalQty,
+                mainUnit: mainUnit
+            )
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                productToDelete = product
+                showDeleteConfirm = true
+            } label: {
+                Label("Удалить", systemImage: "trash")
+            }
+
+            Button {
+                Task { await writeOffProduct(product) }
+            } label: {
+                Label("Списать", systemImage: "minus.circle")
+            }
+            .tint(.vayWarning)
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button {
+                Task { await consumeProduct(product) }
+            } label: {
+                Label("Съедено", systemImage: "checkmark.circle")
+            }
+            .tint(.vaySuccess)
+        }
+        .vayAccessibilityLabel(
+            accessibilityLabel(for: product, qty: totalQty, unit: mainUnit, expiry: nearestExpiry),
+            hint: "Нажмите для просмотра деталей. Смахните для действий."
+        )
+    }
+
+    private func productCard(
+        _ product: Product,
+        productBatches: [Batch],
+        nearestExpiry: Date?,
+        totalQty: Double,
+        mainUnit: UnitType
+    ) -> some View {
         let locations = Set(productBatches.map(\.location))
+        let formatted = ProductNameFormatter.formatted(product.name, brand: product.brand)
 
         return HStack(spacing: VaySpacing.md) {
-            VStack {
-                Image(systemName: iconForCategory(product.category))
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Color.vayPrimary)
-            }
-            .frame(width: 44, height: 44)
-            .background(Color.vayPrimary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: VayRadius.md, style: .continuous))
+            productThumbnail(product)
 
             VStack(alignment: .leading, spacing: VaySpacing.xs) {
-                HStack {
-                    Text(product.name)
-                        .font(VayFont.label(15))
-                        .lineLimit(1)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(formatted.displayName)
+                            .font(VayFont.label(15))
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        HStack(spacing: VaySpacing.xs) {
+                            if let brand = formatted.brand, !brand.isEmpty {
+                                Text(brand.uppercased())
+                                    .font(VayFont.caption(9).weight(.bold))
+                                    .tracking(0.5)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                    .background(Color.vaySecondary)
+                                    .foregroundStyle(Color.vayPrimary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                            if let badge = formatted.volumeBadge {
+                                Text(badge)
+                                    .font(VayFont.caption(10))
+                                    .foregroundStyle(Color.vayPrimary)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(Color.vayPrimary.opacity(0.1))
+                                    .clipShape(Capsule())
+                            }
+                            // Store Badge
+                            if let store = product.store {
+                                HStack(spacing: 2) {
+                                    Image(systemName: store.iconSystemName)
+                                    Text(store.title)
+                                }
+                                .font(VayFont.caption(10))
+                                .foregroundStyle(Color.vayPrimary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.vaySecondary.opacity(0.15))
+                                .clipShape(Capsule())
+                            }
+                        }
+                    }
 
                     if product.disliked {
                         Image(systemName: "hand.thumbsdown.fill")
-                            .font(.system(size: 10))
+                            .font(VayFont.caption(10))
                             .foregroundStyle(Color.vayWarning)
+                            .padding(.top, 2)
                     }
                 }
 
@@ -368,7 +420,7 @@ struct InventoryView: View {
                     HStack(spacing: 2) {
                         ForEach(Array(locations), id: \.self) { loc in
                             Image(systemName: loc.icon)
-                                .font(.system(size: 10))
+                                .font(VayFont.caption(10))
                                 .foregroundStyle(loc.color)
                         }
                     }
@@ -376,19 +428,6 @@ struct InventoryView: View {
                     Text(product.category)
                         .font(VayFont.caption(11))
                         .foregroundStyle(.tertiary)
-
-                    if product.nutrition.kcal != nil ||
-                        product.nutrition.protein != nil ||
-                        product.nutrition.fat != nil ||
-                        product.nutrition.carbs != nil {
-                        let nutrition = product.nutrition
-                        InlineMacros(
-                            kcal: nutrition.kcal,
-                            protein: nutrition.protein,
-                            fat: nutrition.fat,
-                            carbs: nutrition.carbs
-                        )
-                    }
                 }
             }
 
@@ -400,24 +439,63 @@ struct InventoryView: View {
                     .foregroundStyle(.primary)
 
                 if let expiry = nearestExpiry {
-                    Text(expiry.expiryLabel)
-                        .font(VayFont.caption(10))
-                        .foregroundStyle(expiry.expiryColor)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(expiry.expiryColor.opacity(0.1))
-                        .clipShape(Capsule())
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(expiry.formatted(date: .numeric, time: .omitted))
+                            .font(VayFont.caption(10))
+                            .foregroundStyle(.secondary)
+
+                        Text(expiry.expiryLabel)
+                            .font(VayFont.caption(10))
+                            .bold()
+                            .foregroundStyle(expiry.expiryColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(expiry.expiryColor.opacity(0.1))
+                            .clipShape(Capsule())
+                    }
                 }
             }
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
+                .font(VayFont.caption(12))
                 .foregroundStyle(.quaternary)
         }
         .padding(VaySpacing.md)
         .background(Color.vayCardBackground)
         .clipShape(RoundedRectangle(cornerRadius: VayRadius.lg, style: .continuous))
         .vayShadow(.subtle)
+    }
+
+    @ViewBuilder
+    private func productThumbnail(_ product: Product) -> some View {
+        if let imageURL = product.imageURL {
+            LazyImage(url: imageURL) { state in
+                if let image = state.image {
+                    image
+                        .resizable()
+                        .scaledToFill()
+                } else if state.isLoading {
+                    Rectangle()
+                        .fill(Color.vayPrimary.opacity(0.06))
+                        .overlay(ProgressView().scaleEffect(0.6))
+                } else {
+                    categoryIcon(product.category)
+                }
+            }
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: VayRadius.sm, style: .continuous))
+        } else {
+            categoryIcon(product.category)
+                .frame(width: 48, height: 48)
+                .background(Color.vayPrimary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: VayRadius.sm, style: .continuous))
+        }
+    }
+
+    private func categoryIcon(_ category: String) -> some View {
+        Image(systemName: iconForCategory(category))
+            .font(VayFont.body(18))
+            .foregroundStyle(Color.vayPrimary)
     }
 
     private var filteredProducts: [Product] {

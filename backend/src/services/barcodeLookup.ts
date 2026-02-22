@@ -67,42 +67,54 @@ export async function lookupBarcode(options: BarcodeLookupOptions): Promise<Barc
 
   const eanDBApiKey = sanitizeText(options.eanDBApiKey);
   if (eanDBApiKey) {
-    const eanDBURL = sanitizeURL(options.eanDBApiURL) ?? DEFAULT_EAN_DB_API_URL;
-    const eanDBProduct = await lookupEANDB({
-      code,
-      apiKey: eanDBApiKey,
-      apiURL: eanDBURL,
-      fetchImpl,
-      timeoutMs
-    });
-    if (eanDBProduct) {
-      return {
-        found: true,
-        provider: "ean_db",
-        product: eanDBProduct
-      };
+    try {
+      const eanDBURL = sanitizeURL(options.eanDBApiURL) ?? DEFAULT_EAN_DB_API_URL;
+      const eanDBProduct = await lookupEANDB({
+        code,
+        apiKey: eanDBApiKey,
+        apiURL: eanDBURL,
+        fetchImpl,
+        timeoutMs
+      });
+      if (eanDBProduct) {
+        return {
+          found: true,
+          provider: "ean_db",
+          product: eanDBProduct
+        };
+      }
+    } catch (e) {
+      console.warn("[barcodeLookup] EAN-DB lookup failed exceptionally:", e);
     }
   }
 
   if (options.enableOpenFoodFacts !== false) {
-    const offProduct = await lookupOpenFoodFacts({ code, fetchImpl, timeoutMs });
-    if (offProduct) {
-      return {
-        found: true,
-        provider: "open_food_facts",
-        product: offProduct
-      };
+    try {
+      const offProduct = await lookupOpenFoodFacts({ code, fetchImpl, timeoutMs });
+      if (offProduct) {
+        return {
+          found: true,
+          provider: "open_food_facts",
+          product: offProduct
+        };
+      }
+    } catch (e) {
+      console.warn("[barcodeLookup] OpenFoodFacts lookup failed exceptionally:", e);
     }
   }
 
   if (options.enableBarcodeListRu !== false) {
-    const barcodeListRuProduct = await lookupBarcodeListRu({ code, fetchImpl, timeoutMs });
-    if (barcodeListRuProduct) {
-      return {
-        found: true,
-        provider: "barcode_list_ru",
-        product: barcodeListRuProduct
-      };
+    try {
+      const barcodeListRuProduct = await lookupBarcodeListRu({ code, fetchImpl, timeoutMs });
+      if (barcodeListRuProduct) {
+        return {
+          found: true,
+          provider: "barcode_list_ru",
+          product: barcodeListRuProduct
+        };
+      }
+    } catch (e) {
+      console.warn("[barcodeLookup] barcode-list.ru lookup failed exceptionally:", e);
     }
   }
 
